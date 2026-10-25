@@ -1,0 +1,38 @@
+name: Bug Report
+description: Report a CSS serialization, validation, or microsyntax bug in Stixis
+title: ""
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue in Stixis! If you are filing from a consumer project (such as Cleome) or an AI coding agent, please isolate the reproduction to `stixis` APIs or CLI commands and verify all assertions against actual runtime output before submitting.
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What Happens?
+      description: Describe the actual behavior, including affected `stixis` functions/classes (`src/stixis/...`) and observed output or exception.
+      placeholder: |
+        When calling `...`, Stixis raises / returns `...`.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to Reproduce?
+      description: Provide a self-contained Python 3.14+ snippet or `stixis check` CLI command that reproduces the issue using only `stixis` (no consumer-project imports). Every `assert` or comment should reflect verified runtime output.
+      render: python
+      placeholder: |
+        from stixis import ...
+
+        # Verified runtime output:
+        assert ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What Should Happen?
+      description: Describe the expected CSS output or validation behavior, referencing the relevant W3C CSS specification or WPT test if applicable.
+    validations:
+      required: true

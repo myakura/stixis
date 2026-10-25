@@ -41,6 +41,7 @@ from stixis import (
     parse_urange_codepoints,
     serialize_declarations,
     serialize_value,
+    using_options,
 )
 ```
 
@@ -48,7 +49,9 @@ from stixis import (
 * `FontFace(descriptors=None, *, comment=None, options=None, **kw_descriptors) -> AtRule`: Typed `@font-face` constructor backed by `FontFaceDescriptors` (`TypedDict`). Accepts `snake_case` keyword arguments (`font_family`, `font_style`, `font_weight`, `font_width`, `font_display`, `src`, `unicode_range`, `size_adjust`, `ascent_override`, `descent_override`, `line_gap_override`, `font_feature_settings`, `font_variation_settings`).
 * `StyleRule(selector, declarations=..., *, rules=(), comment=None, options=None)`
 * `AtRule(name, prelude=None, *, descriptors=None, rules=(), comment=None, statement=False, options=None)`
+* `CommentNode(text, *, leading_newline: bool = False, options: SerializationOptions | None = None)`: Standalone CSS comment node. Preserves a leading blank line in non-minified output when `leading_newline=True` or when `text` starts with `\n`.
 * `StyleSheet(rules, *, header_comment=None, options=None)`
+* `using_options(options: SerializationOptions)` (or `options.activate()`): Context manager that supplies default `SerializationOptions` to all AST nodes and `serialize_value` / `canonicalize` calls inside the `with` block without repeating `options=` on every node.
 * `serialize_value(target: str, value: Any, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Validate and serialize a Python value or PEP 750 `Template`.
 * `canonicalize(target: str, css_text: str, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Tokenize, validate, and normalize raw CSS value text.
 
@@ -71,8 +74,8 @@ from stixis import (
   * `font_feature_settings={"liga": True, "dlig": False, "swsh": 2}` -> `'"liga", "dlig" 0, "swsh" 2'`.
   * `font_variation_settings={"wght": 700, "wdth": 87.5}` or `[("wght", 700), ("wdth", 87.5)]` -> `'"wght" 700, "wdth" 87.5'`.
 * **`unicode-range` (`<urange>#`) & Cascade Shadowing Compaction**:
-  * `unicode_range=[0x3000, (0x3040, 0x309F)]` or `set[int]` -> `"U+3000, U+3040-309F"`.
-  * When generating multi-slice `@font-face` rules, use `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)` where `forbidden_sorted` is the sorted list of code points present in **later** slices (`all_font_cps - current_slice_cps`). This bridges small gaps up to `max_gap` without shadowing code points owned by subsequent `@font-face` rules.
+  * `unicode_range=[0x3000, (0x3040, 0x309F)]` or `set[int]` or `Sequence[int]` -> `"U+3000, U+3040-309F"`. Contiguous integers in a `set[int]`, `list[int]`, or `tuple[int, ...]` are automatically coalesced into ranges (`[0x3041, 0x3042, 0x3043]` -> `"U+3041-3043"`); pass `coalesce=True` to `format_urange` / `parse_urange` to sort and merge intervals across mixed sequences or raw CSS strings.
+  * When generating multi-slice `@font-face` rules, use `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)` where `forbidden_sorted` is the sorted list of code points present in **later** slices (`all_font_cps - current_slice_cps`) and `max_gap` is the maximum missing code point count (`cp - prev_end - 1 <= max_gap`). This bridges small gaps up to `max_gap` without shadowing code points owned by subsequent `@font-face` rules.
 
 ## PEP 750 `Template` (`t"..."`) Usage
 
@@ -99,3 +102,16 @@ Instead of reading specification files, run the `stixis` CLI to inspect grammars
 * Validate and canonicalize a CSS value (exits `0` with canonical CSS on `stdout`, `1` on invalid CSS, `2` on bad CLI usage, `4` on unknown target):
   * `uv run stixis check font-weight "100 900" --at-rule @font-face`
   * `uv run stixis check unicode-range "u+3040-309f" --at-rule @font-face`
+
+## Filing Issues from Consumer Projects
+
+When a consumer project (such as Cleome) or its coding agent encounters a bug or ergonomics gap in Stixis and files a GitHub Issue on `myakura/stixis`, follow these rules so the maintainer agent can act on it without back-and-forth:
+
+1. **One logical concern per Issue**: Group tightly related edge cases in the same module (e.g., `urange.py` or `CommentNode` template rendering) into one Issue, and split independent subsystems into separate Issues.
+2. **Use the 3-section structure (`What Happens?` / `How to Reproduce?` / `What Should Happen?`)**:
+   * Name the exact Stixis function, class, or CLI command and its observed behavior.
+   * Provide a self-contained Python 3.14+ snippet using **only** `stixis` imports (strip out consumer-project classes).
+3. **Verify every reproduction assertion against live runtime output before filing**:
+   * Run the snippet with `uv run python -c "..."` or `uv run stixis check ...` and paste the actual output or exception. Do not mix unexecuted hypotheses from static code reading with verified assertions.
+4. **Attach labels at creation time**:
+   * Pass `--label bug` or `--label enhancement` (or `--label documentation`) to `gh issue create`, and use `--body-file <file>` when the Markdown body contains backticks or shell characters.

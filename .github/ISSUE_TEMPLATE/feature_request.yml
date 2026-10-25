@@ -1,0 +1,31 @@
+name: Feature or Ergonomics Request
+description: Propose an API ergonomics improvement, microsyntax helper, or serialization option
+title: ""
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what-happens
+    attributes:
+      label: What Happens?
+      description: Describe the current limitation or friction when using `stixis` in a consumer project.
+      placeholder: |
+        Currently, constructing `...` requires `...`.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to Reproduce?
+      description: Show a minimal Python snippet illustrating the current behavior or boilerplate required.
+      render: python
+      placeholder: |
+        from stixis import ...
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What Should Happen?
+      description: Describe the proposed API signature, option, or serialization behavior and how it preserves Stixis invariants (eager validation, zero runtime dependencies, W3C spec compliance).
+    validations:
+      required: true
