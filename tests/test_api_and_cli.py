@@ -791,3 +791,78 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     assert all(prop != "font-language-override" for prop, _, _ in fonts_v_3)
 
 
+def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
+    import ast
+    import inspect
+    import re
+
+    import stixis
+
+    repo_root = Path(__file__).resolve().parent.parent
+    skill_path = repo_root / "skills" / "stixis" / "SKILL.md"
+    readme_path = repo_root / "README.md"
+    skill_text = skill_path.read_text(encoding="utf-8")
+    readme_text = readme_path.read_text(encoding="utf-8")
+
+    # 1. Every runtime symbol in `stixis.__all__` (excluding type aliases / constants) must be documented in SKILL.md
+    exempt_exports = {
+        "DEFAULT_OPTIONS",
+        "FontDisplayKeyword",
+        "FontFormatKeyword",
+        "FontTechKeyword",
+        "FontWidthKeyword",
+        "Percentage",
+        "__version__",
+    }
+    missing_symbols = [
+        sym for sym in stixis.__all__ if sym not in exempt_exports and sym not in skill_text
+    ]
+    assert not missing_symbols, (
+        f"Public exports in stixis.__all__ missing from skills/stixis/SKILL.md: {missing_symbols}"
+    )
+
+    # 2. Every public parameter of core entry points and AST constructors must appear in SKILL.md
+    core_callables = (
+        stixis.dumps,
+        stixis.FontFace,
+        stixis.StyleRule,
+        stixis.AtRule,
+        stixis.CommentNode,
+        stixis.StyleSheet,
+        stixis.serialize_value,
+        stixis.canonicalize,
+        stixis.format_urange,
+        stixis.parse_urange,
+        stixis.compact_urange,
+        stixis.using_options,
+    )
+    missing_params: list[str] = []
+    for fn in core_callables:
+        sig = inspect.signature(fn)
+        for param_name in sig.parameters:
+            if param_name.startswith("_"):
+                continue
+            if param_name not in skill_text:
+                missing_params.append(f"{fn.__name__}({param_name}=...)")
+    assert not missing_params, (
+        f"Public parameters missing from skills/stixis/SKILL.md: {missing_params}"
+    )
+
+    # 3. Every fenced `python` code block in SKILL.md and README.md must parse and execute cleanly
+    code_block_re = re.compile(r"```python\n(.*?)```", re.DOTALL)
+    for doc_name, doc_content in (("SKILL.md", skill_text), ("README.md", readme_text)):
+        blocks = code_block_re.findall(doc_content)
+        assert blocks, f"Expected at least one ```python block in {doc_name}"
+        for idx, block in enumerate(blocks):
+            tree = ast.parse(block, filename=f"{doc_name}#block-{idx}")
+            assert tree.body
+            res = subprocess.run(
+                [sys.executable, "-c", block],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert res.returncode == 0, f"{doc_name}#block-{idx} failed: {res.stderr}"
+
+
+
