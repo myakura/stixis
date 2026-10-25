@@ -75,8 +75,10 @@ class UpstreamReport:
     webref_new_commit: str
     wpt_old_commit: str
     wpt_new_commit: str
+    min_engines: int = 2
     unit_changes: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     syntax_changes: list[SyntaxChange] = field(default_factory=list)
+    experimental_syntax_changes: list[SyntaxChange] = field(default_factory=list)
     unresolved_targets: list[SyntaxChange] = field(default_factory=list)
     wpt_counts_old: dict[str, int] = field(default_factory=dict)
     wpt_counts_new: dict[str, int] = field(default_factory=dict)
@@ -87,17 +89,11 @@ class UpstreamReport:
     @property
     def has_changes(self) -> bool:
         return bool(
-            self.specs_files_changed
-            or self.wpt_files_changed
-            or self.unit_changes
+            self.unit_changes
             or self.syntax_changes
             or self.unresolved_targets
             or self.wpt_failures
-            or (
-                self.webref_new_commit != "unknown"
-                and self.webref_old_commit != self.webref_new_commit
-            )
-            or (self.wpt_new_commit != "unknown" and self.wpt_old_commit != self.wpt_new_commit)
+            or self.wpt_files_changed
         )
 
     @property
@@ -203,10 +199,16 @@ def _expect_invalid_raises(
     return WptFailure(suite, target, raw_css, None, f"accepted as {got!r}")
 
 
-def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], bool]:
+def _check_wpt_cases(
+    wpt_dir: Path,
+    *,
+    min_engines: int = 2,
+) -> tuple[dict[str, int], list[WptFailure], bool]:
     """Run WPT extraction and verify every extracted vector against current Stixis."""
+    from stixis.nodes import is_property_enabled
+
     failures: list[WptFailure] = []
-    opts = SerializationOptions.cssom()
+    opts = SerializationOptions.cssom(min_engines=min_engines)
 
     urange_v, urange_i = gen_wpt_tests._extract_urange_cases(wpt_dir)
     for raw_css, expected in urange_v:
@@ -265,6 +267,8 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
 
     fonts_v, fonts_i = gen_wpt_tests._extract_css_fonts_property_cases(wpt_dir)
     for prop, raw_css, expected in fonts_v:
+        if prop in current_specs.PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+            continue
         try:
             got = canonicalize(prop, raw_css, options=opts)
             if got != expected:
@@ -274,11 +278,15 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
         except StixisError as exc:
             failures.append(WptFailure("css-fonts", prop, raw_css, expected, f"raised {exc}"))
     for prop, raw_css in fonts_i:
+        if prop in current_specs.PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+            continue
         failure = _expect_invalid_raises("css-fonts-invalid", prop, raw_css, options=opts)
         if failure is not None:
             failures.append(failure)
 
-    broad_v, broad_i = gen_wpt_tests._extract_broad_css_property_cases(wpt_dir)
+    broad_v, broad_i = gen_wpt_tests._extract_broad_css_property_cases(
+        wpt_dir, min_engines=min_engines
+    )
 
     # Also verify that all previously committed general CSS property vectors in
     # `tests/_generated/test_wpt_css_properties.py` still pass and were not silently dropped,
@@ -290,6 +298,8 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
     new_broad_i_set = set(broad_i)
     dropped_props: set[str] = set()
     for prop, raw_css, expected in committed_broad.VALID_PROPERTY_CASES:
+        if not is_property_enabled(prop, opts):
+            continue
         if (prop, raw_css, expected) not in new_broad_v_set:
             dropped_props.add(prop)
             try:
@@ -303,13 +313,15 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
                     WptFailure("css-properties", prop, raw_css, expected, f"raised {exc}")
                 )
     for prop, raw_css in committed_broad.INVALID_PROPERTY_CASES:
+        if not is_property_enabled(prop, opts):
+            continue
         if (prop, raw_css) not in new_broad_i_set:
             dropped_props.add(prop)
             failure = _expect_invalid_raises("css-properties-invalid", prop, raw_css, options=opts)
             if failure is not None:
                 failures.append(failure)
 
-    # Scan candidate WPT files directly for any failing vector on known properties when
+    # Scan candidate WPT files directly for any failing vector on enabled properties when
     # either a committed property was dropped or no clean broad cases were extracted.
     if dropped_props or (not broad_v and not broad_i):
         for html_file in sorted(wpt_dir.glob("css-*/parsing/*-*.html")):
@@ -324,7 +336,9 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
                 prop = m.group(2)
                 if dropped_props and prop not in dropped_props:
                     continue
-                if prop not in current_specs.PROPERTY_SYNTAXES:
+                if prop not in current_specs.PROPERTY_SYNTAXES or not is_property_enabled(
+                    prop, opts
+                ):
                     continue
                 val = gen_wpt_tests._unescape_js_string(m.group(4))
                 if any(
@@ -360,7 +374,9 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
                 prop = m.group(2)
                 if dropped_props and prop not in dropped_props:
                     continue
-                if prop not in current_specs.PROPERTY_SYNTAXES:
+                if prop not in current_specs.PROPERTY_SYNTAXES or not is_property_enabled(
+                    prop, opts
+                ):
                     continue
                 val = gen_wpt_tests._unescape_js_string(m.group(4))
                 if any(
@@ -419,11 +435,31 @@ def analyze_upstream(
     wpt_dir: Path,
     patches_path: Path,
     baseline_path: Path,
+    *,
+    min_engines: int = 2,
+    bcd_dir: Path | None = None,
 ) -> UpstreamReport:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     patches = tomllib.loads(patches_path.read_text(encoding="utf-8"))
 
     units_by_type, properties, values, atrules = gen_specs.load_and_merge_specs(webref_dir, patches)
+    if bcd_dir is not None and (bcd_dir / "properties").is_dir():
+        engine_counts = gen_specs.load_bcd_engine_counts(bcd_dir, properties)
+    else:
+        existing_counts = dict(getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}))
+        engine_counts = {p: existing_counts.get(p, 0) for p in properties}
+
+    allow_props = set(patches.get("support", {}).get("allow_properties", []))
+
+    def _is_prop_monitored(pname: str) -> bool:
+        if min_engines <= 0:
+            return True
+        if pname in allow_props:
+            return True
+        return max(
+            engine_counts.get(pname, 0),
+            getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}).get(pname, 0),
+        ) >= min_engines
 
     # Compare units
     unit_changes: dict[str, dict[str, list[str]]] = {}
@@ -435,6 +471,7 @@ def analyze_upstream(
             unit_changes[utype] = {"added": added, "removed": removed}
 
     syntax_changes: list[SyntaxChange] = []
+    experimental_syntax_changes: list[SyntaxChange] = []
     unresolved_targets: list[SyntaxChange] = []
 
     def _inspect_target(
@@ -442,17 +479,21 @@ def analyze_upstream(
         kind: str,
         old_syn: str | None,
         new_syn: str | None,
+        *,
+        monitored: bool = True,
     ) -> None:
         if new_syn is None and old_syn is not None:
-            syntax_changes.append(
-                SyntaxChange(
-                    target=target,
-                    kind=kind,
-                    change_type="removed",
-                    old_syntax=old_syn,
-                    new_syntax=None,
-                )
+            entry = SyntaxChange(
+                target=target,
+                kind=kind,
+                change_type="removed",
+                old_syntax=old_syn,
+                new_syntax=None,
             )
+            if monitored:
+                syntax_changes.append(entry)
+            else:
+                experimental_syntax_changes.append(entry)
             return
         if new_syn is None:
             return
@@ -485,8 +526,11 @@ def analyze_upstream(
             compile_error=compile_err,
         )
         if change_type != "unchanged":
-            syntax_changes.append(entry)
-        if not resolvable and kind in ("property", "descriptor"):
+            if monitored:
+                syntax_changes.append(entry)
+            else:
+                experimental_syntax_changes.append(entry)
+        if not resolvable and kind in ("property", "descriptor") and monitored:
             unresolved_targets.append(entry)
 
     # 1. Properties
@@ -497,6 +541,7 @@ def analyze_upstream(
             "property",
             current_specs.PROPERTY_SYNTAXES.get(pname),
             properties.get(pname),
+            monitored=_is_prop_monitored(pname),
         )
 
     # 2. At-rule descriptors
@@ -523,12 +568,20 @@ def analyze_upstream(
     specs_changed = (
         (gen_dir / "units.py").read_text(encoding="utf-8") != gen_specs.format_units_py(units_by_type)
         or (gen_dir / "specs.py").read_text(encoding="utf-8")
-        != gen_specs.format_specs_py(properties, values, atrules)
+        != gen_specs.format_specs_py(
+            properties,
+            values,
+            atrules,
+            engine_counts=engine_counts,
+            support_cfg=patches.get("support", {}),
+        )
         or (gen_dir / "types.py").read_text(encoding="utf-8")
         != gen_specs.format_types_py(properties, values, atrules)
     )
 
-    wpt_counts_new, wpt_failures, wpt_changed = _check_wpt_cases(wpt_dir)
+    wpt_counts_new, wpt_failures, wpt_changed = _check_wpt_cases(
+        wpt_dir, min_engines=min_engines
+    )
     wpt_counts_old = {
         k: baseline["wpt"][k]
         for k in (
@@ -546,8 +599,10 @@ def analyze_upstream(
         webref_new_commit=_detect_git_commit(webref_dir),
         wpt_old_commit=baseline["wpt"]["commit"],
         wpt_new_commit=_detect_git_commit(wpt_dir),
+        min_engines=min_engines,
         unit_changes=unit_changes,
         syntax_changes=syntax_changes,
+        experimental_syntax_changes=experimental_syntax_changes,
         unresolved_targets=unresolved_targets,
         wpt_counts_old=wpt_counts_old,
         wpt_counts_new=wpt_counts_new,
@@ -573,6 +628,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
         "# Upstream Specification & WPT Sync Report",
         "",
         f"* **Status**: {status_badge}",
+        f"* **Support Threshold**: `min_engines = {report.min_engines}` (pass `--min-engines 1` to include single-engine prototypes)",
         f"* **`w3c/webref` (`ed/css`)**: `{report.webref_old_commit[:12]}` -> `{report.webref_new_commit[:12]}`",
         f"* **`web-platform-tests/wpt` (`css`)**: `{report.wpt_old_commit[:12]}` -> `{report.wpt_new_commit[:12]}`",
         "",
@@ -581,7 +637,11 @@ def format_markdown_issue(report: UpstreamReport) -> str:
     ]
 
     if not report.unit_changes and not report.syntax_changes and not report.wpt_files_changed:
-        lines.append("* No syntax, unit, or WPT test vector changes detected against `src/stixis/_generated/` and `tests/_generated/`.")
+        lines.append("* No syntax, unit, or WPT test vector changes detected for enabled targets (`min_engines >= " + str(report.min_engines) + "`).")
+        if report.experimental_syntax_changes:
+            lines.append(
+                f"* ({len(report.experimental_syntax_changes)} experimental `< {report.min_engines}`-engine property change(s) ignored; run with `--min-engines 1` or `--min-engines 0` to inspect.)"
+            )
         lines.append("")
     else:
         if report.unit_changes:
@@ -751,6 +811,18 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Exit with code 3 when upstream changes or unresolved targets are detected.",
     )
+    parser.add_argument(
+        "--min-engines",
+        type=int,
+        default=None,
+        help="Minimum browser engine count to monitor (0..3; defaults to support.default_min_engines in spec_patches.toml).",
+    )
+    parser.add_argument(
+        "--bcd-dir",
+        type=Path,
+        default=None,
+        help="Optional path to @mdn/browser-compat-data css/ directory.",
+    )
     args = parser.parse_args(argv)
 
     if not args.patches.is_file():
@@ -761,11 +833,25 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     patches = tomllib.loads(args.patches.read_text(encoding="utf-8"))
+    effective_min_engines = (
+        args.min_engines
+        if args.min_engines is not None
+        else int(patches.get("support", {}).get("default_min_engines", 2))
+    )
     if args.webref_dir is not None:
         webref_dir = args.webref_dir.expanduser()
     else:
         raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
         webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+
+    bcd_dir: Path | None = None
+    if args.bcd_dir is not None:
+        bcd_dir = args.bcd_dir.expanduser()
+    elif "bcd_css_dir" in patches.get("meta", {}):
+        raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
+        candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
+        if candidate_bcd.is_dir():
+            bcd_dir = candidate_bcd
 
     wpt_dir = args.wpt_dir.expanduser()
     if not webref_dir.is_dir():
@@ -775,7 +861,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"WPT directory not found: {wpt_dir}", file=sys.stderr)
         return 1
 
-    report = analyze_upstream(webref_dir, wpt_dir, args.patches, args.baseline)
+    report = analyze_upstream(
+        webref_dir,
+        wpt_dir,
+        args.patches,
+        args.baseline,
+        min_engines=effective_min_engines,
+        bcd_dir=bcd_dir,
+    )
 
     if args.update_baseline:
         if report.needs_agent_intervention:
@@ -811,7 +904,14 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(new_baseline, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        report = analyze_upstream(webref_dir, wpt_dir, args.patches, args.baseline)
+        report = analyze_upstream(
+            webref_dir,
+            wpt_dir,
+            args.patches,
+            args.baseline,
+            min_engines=effective_min_engines,
+            bcd_dir=bcd_dir,
+        )
 
     if args.format == "json":
         payload = asdict(report)

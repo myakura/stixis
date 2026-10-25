@@ -9,13 +9,17 @@ from collections.abc import Sequence
 from typing import Any, NoReturn
 
 from stixis._generated.specs import (
+    ALWAYS_ALLOWED_PROPERTIES,
     ATRULE_DESCRIPTORS,
     ATRULE_PRELUDE_SYNTAXES,
+    DEFAULT_MIN_ENGINES,
+    PROPERTY_ENGINE_COUNTS,
     PROPERTY_SYNTAXES,
     VALUE_SYNTAXES,
 )
 from stixis.errors import StixisError
 from stixis.nodes import canonicalize, normalize_identifier_key
+from stixis.options import SerializationOptions
 
 EXIT_OK = 0
 EXIT_VALIDATION_ERROR = 1
@@ -121,6 +125,7 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
         return None
     if norm in PROPERTY_SYNTAXES:
         syn = PROPERTY_SYNTAXES[norm]
+        eng = PROPERTY_ENGINE_COUNTS.get(norm, 0)
         also_in_at_rules = sorted(
             at_name for at_name, descs in ATRULE_DESCRIPTORS.items() if norm in descs
         )
@@ -129,6 +134,8 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
             "name": norm,
             "python_key": norm.replace("-", "_"),
             "syntax": syn,
+            "engines": eng,
+            "enabled_by_default": eng >= DEFAULT_MIN_ENGINES or norm in ALWAYS_ALLOWED_PROPERTIES,
             "also_descriptor_in": also_in_at_rules,
             "python_inputs": _describe_python_inputs("property", norm, syn),
         }
@@ -197,6 +204,9 @@ def _run_inspect(args: argparse.Namespace) -> int:
     sys.stdout.write(f"  syntax: {info['syntax']}\n")
     if info.get("python_key"):
         sys.stdout.write(f"  python_key: {info['python_key']}\n")
+    if "engines" in info:
+        status_note = "enabled" if info["enabled_by_default"] else f"disabled by default (requires min_engines<={info['engines']})"
+        sys.stdout.write(f"  engines: {info['engines']}/3 ({status_note})\n")
     if info.get("also_descriptor_in"):
         sys.stdout.write(f"  also_descriptor_in: {', '.join(info['also_descriptor_in'])}\n")
     if info.get("python_inputs"):
@@ -237,7 +247,10 @@ def _run_check(args: argparse.Namespace) -> int:
             effective_at_rule = info.get("at_rule")
 
     try:
-        canonical = canonicalize(effective_target, args.value, at_rule=effective_at_rule)
+        opts = SerializationOptions(min_engines=args.min_engines)
+        canonical = canonicalize(
+            effective_target, args.value, at_rule=effective_at_rule, options=opts
+        )
     except StixisError as exc:
         msg = str(exc).splitlines()[0] if str(exc) else "invalid CSS value"
         sys.stderr.write(f"error: {msg}\n")
@@ -293,6 +306,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="at_rule",
         default=None,
         help="Validate as a descriptor of the specified at-rule (e.g. '@font-face').",
+    )
+    check_p.add_argument(
+        "--min-engines",
+        dest="min_engines",
+        type=int,
+        default=DEFAULT_MIN_ENGINES,
+        help="Minimum browser engine count required for CSS properties (0..3, default: 2).",
     )
     check_p.set_defaults(handler=_run_check)
 

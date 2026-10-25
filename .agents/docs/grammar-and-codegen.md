@@ -33,6 +33,7 @@ When `serialize_value`, `StyleRule`, `AtRule`, `FontFace`, or `StyleSheet` recei
 
 W3C `@webref/css` (`ed/css/*.json`) has prose-defined aliases and delta specifications (`css-fonts-5.json`, `css-values-5.json`, `css-color-5.json`). Never hardcode spec overrides inside `codegen/gen_specs.py`; declare them in `codegen/spec_patches.toml`:
 
+* `[support]`: Controls browser implementation filtering (`default_min_engines = 2`, `allow_properties = [...]`, `exclude_specs = [...]`) using engine counts (`0..3` across Blink, Gecko, WebKit) extracted from `@mdn/browser-compat-data` (`PROPERTY_ENGINE_COUNTS` in `src/stixis/_generated/specs.py`). At runtime, callers can lower the threshold with `SerializationOptions(min_engines=1)` / `SerializationOptions.cleome(min_engines=1)` or enable specific single-engine properties via `SerializationOptions(extra_properties=frozenset({"..."}))`.
 * `[extra_units]`: Units defined in prose or pending upstream extraction (such as container query length units `cqw`..`cqmax` and speech units `dB`, `st`).
 * `[delta_merges]`: Explicit ordering of base and delta JSON files so delta descriptors (`@font-face/size-adjust`, two-value `ascent-override`, `<font-features-tech>` with `avar2`) extend or override base definitions cleanly.
 * `[values]`: Non-terminal syntax aliases defined in prose (`<font-src-list> = "<font-src>#"`, `<palette-identifier> = "<dashed-ident>"`, `<counter-name> = "<custom-ident>"`).

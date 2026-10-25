@@ -531,4 +531,51 @@ def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path
     assert ("css-properties", "transform-origin", "top center") not in failure_targets
 
 
+def test_engine_support_threshold_toggle_and_extra_properties(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # 1. `hanging-punctuation` (1 engine: WebKit) is rejected by default (`min_engines=2`)
+    with pytest.raises(StixisValidationError, match="min_engines=2"):
+        StyleRule("p", {"hanging_punctuation": "first"})
+    with pytest.raises(StixisValidationError, match="min_engines=2"):
+        canonicalize("hanging-punctuation", "first")
+
+    # 2. Enabling 1-engine support (`min_engines=1`) or `SerializationOptions.cleome(min_engines=1)` allows it
+    rule_1eng = StyleRule(
+        "p",
+        {"hanging_punctuation": "first"},
+        options=SerializationOptions.cleome(min_engines=1),
+    )
+    assert "hanging-punctuation: first;" in str(rule_1eng)
+    assert (
+        canonicalize(
+            "hanging-punctuation",
+            "first",
+            options=SerializationOptions(min_engines=1),
+        )
+        == "first"
+    )
+
+    # 3. Pinpoint opt-in via `extra_properties` keeps `min_engines=2` for everything else
+    opts_pinpoint = SerializationOptions(
+        min_engines=2,
+        extra_properties=frozenset({"hanging-punctuation"}),
+    )
+    assert serialize_value("hanging-punctuation", "first", options=opts_pinpoint) == "first"
+    with pytest.raises(StixisValidationError, match="min_engines=2"):
+        serialize_value("block-step-size", "none", options=opts_pinpoint)
+
+    # 4. CLI `--min-engines` flag toggles 1-engine property validation
+    rc_default = cli_main(["check", "hanging-punctuation", "first"])
+    captured = capsys.readouterr()
+    assert rc_default == EXIT_VALIDATION_ERROR
+    assert "min_engines=2" in captured.err
+
+    rc_one = cli_main(["check", "hanging-punctuation", "first", "--min-engines", "1"])
+    captured = capsys.readouterr()
+    assert rc_one == EXIT_OK
+    assert captured.out.strip() == "first"
+
+
+
 

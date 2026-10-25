@@ -3,6 +3,21 @@
 
 [meta]
 webref_css_dir = "resources/specs/w3c/webref/ed/css"
+bcd_css_dir = "resources/data/browser-compat-data/css"
+
+# Browser implementation threshold (`@mdn/browser-compat-data` engines: Blink, Gecko, WebKit):
+#   3 = Baseline Newly/Widely available (all 3 engines)
+#   2 = Stable multi-engine (default; avoids single-browser prototype churn)
+#   1 = Single-engine prototype included (or opt in per property via `allow_properties` / `SerializationOptions.extra_properties`)
+#   0 = All Editor's Draft specs included (including unimplemented Spec Fiction)
+[support]
+default_min_engines = 2
+allow_properties = [
+    "font-width",
+    "font-stretch",
+    "font-synthesis-position",
+]
+exclude_specs = []
 
 # Additional container query and speech units defined in prose or pending reffy extraction
 [extra_units]

@@ -8,6 +8,7 @@ from functools import lru_cache
 from string.templatelib import Template
 from typing import Any, Unpack
 
+from stixis._generated import specs as _gen_specs
 from stixis._generated.specs import (
     ATRULE_DESCRIPTORS,
     ATRULE_PRELUDE_SYNTAXES,
@@ -82,10 +83,24 @@ def normalize_identifier_key(key: str) -> str:
     return serialize_ident(ident_val.replace("_", "-").lower())
 
 
+def is_property_enabled(prop: str, options: SerializationOptions = DEFAULT_OPTIONS) -> bool:
+    """Return True if `prop` meets `options.min_engines` or is explicitly enabled."""
+    if prop not in PROPERTY_SYNTAXES:
+        return False
+    if options.min_engines <= 0:
+        return True
+    always_allowed: frozenset[str] = getattr(_gen_specs, "ALWAYS_ALLOWED_PROPERTIES", frozenset())
+    if prop in always_allowed or prop in options.extra_properties:
+        return True
+    engine_counts: dict[str, int] = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {})
+    return engine_counts.get(prop, 3) >= options.min_engines
+
+
 def resolve_target_syntax(
     target: str,
     *,
     at_rule: str | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, str | None, str, ValueNode]:
     """Resolve `target` (property, descriptor, or `<type>`) to `(normalized_name, normalized_at_rule, syntax_str, ValueNode)`."""
     if not isinstance(target, str):
@@ -123,7 +138,7 @@ def resolve_target_syntax(
 
     if raw.startswith("@") and "/" in raw:
         at_part, desc_part = raw.split("/", 1)
-        return resolve_target_syntax(desc_part, at_rule=at_part)
+        return resolve_target_syntax(desc_part, at_rule=at_part, options=options)
 
     norm_prop = normalize_identifier_key(raw)
     if norm_prop.startswith("--") and len(norm_prop) >= 3:
@@ -131,6 +146,14 @@ def resolve_target_syntax(
 
     syn = PROPERTY_SYNTAXES.get(norm_prop)
     if syn is not None:
+        if not is_property_enabled(norm_prop, options):
+            eng = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {}).get(norm_prop, 0)
+            raise StixisValidationError(
+                norm_prop,
+                f"CSS property with >= {options.min_engines} browser engines (got {eng})",
+                target,
+                f"Experimental CSS property {norm_prop!r} ({eng} engine(s)) is disabled by min_engines={options.min_engines}; pass SerializationOptions(min_engines={eng}) or extra_properties=frozenset({{{norm_prop!r}}})",
+            )
         return norm_prop, None, syn, compile_value_syntax(syn)
 
     if f"<{norm_prop}>" in VALUE_SYNTAXES:
@@ -155,7 +178,9 @@ def serialize_value(
 ) -> str:
     """Validate and serialize a structured Python `value` (or PEP 750 `Template`) for `target`."""
     opts = DEFAULT_OPTIONS if options is None else options
-    norm_target, norm_at, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
+    norm_target, norm_at, syntax, node = resolve_target_syntax(
+        target, at_rule=at_rule, options=opts
+    )
     return evaluate_serialize_value(
         norm_target,
         syntax,
@@ -176,7 +201,9 @@ def canonicalize(
 ) -> str:
     """Tokenize and validate raw `css_text` against `target`'s `ValueNode` grammar, returning canonical CSSOM text."""
     opts = DEFAULT_OPTIONS if options is None else options
-    norm_target, norm_at, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
+    norm_target, norm_at, syntax, node = resolve_target_syntax(
+        target, at_rule=at_rule, options=opts
+    )
     return evaluate_canonicalize(
         norm_target,
         syntax,
@@ -354,7 +381,7 @@ def _validate_and_normalize_declarations(
             continue
 
         # Standard style rule property
-        if prop in PROPERTY_SYNTAXES:
+        if prop in PROPERTY_SYNTAXES and is_property_enabled(prop, options):
             val_str = serialize_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
             continue
@@ -372,6 +399,15 @@ def _validate_and_normalize_declarations(
             )
             normalized_pairs.append((prop, val_str))
             continue
+
+        if prop in PROPERTY_SYNTAXES:
+            eng = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {}).get(prop, 0)
+            raise StixisValidationError(
+                prop,
+                f"CSS property with >= {options.min_engines} browser engines (got {eng})",
+                val,
+                f"Experimental CSS property {prop!r} ({eng} engine(s)) is disabled by min_engines={options.min_engines}; pass SerializationOptions(min_engines={eng}) or extra_properties=frozenset({{{prop!r}}})",
+            )
 
         raise StixisValidationError(
             prop,

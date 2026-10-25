@@ -76,6 +76,47 @@ def _collect_nested_types(
             _collect_nested_types(sv["values"], values_map)
 
 
+def load_bcd_engine_counts(
+    bcd_css_dir: Path | None,
+    properties: dict[str, str],
+) -> dict[str, int]:
+    """Compute how many core browser engines (Blink, Gecko, WebKit; 0..3) ship each CSS property."""
+    counts: dict[str, int] = {p: 0 for p in properties}
+    if bcd_css_dir is not None and (bcd_css_dir / "properties").is_dir():
+        for jf in sorted((bcd_css_dir / "properties").glob("*.json")):
+            pname = jf.stem
+            data = json.loads(jf.read_text(encoding="utf-8"))
+            compat = (
+                data.get("css", {})
+                .get("properties", {})
+                .get(pname, {})
+                .get("__compat", {})
+            )
+            sup = compat.get("support", {})
+            eng = 0
+            for browser in ("chrome", "firefox", "safari"):
+                b_sup = sup.get(browser)
+                if isinstance(b_sup, list):
+                    b_sup = b_sup[0] if b_sup else {}
+                if (
+                    isinstance(b_sup, dict)
+                    and b_sup.get("version_added")
+                    and not b_sup.get("flags")
+                ):
+                    eng += 1
+            if pname in counts:
+                counts[pname] = eng
+
+    # Propagate target engine counts to non-prefixed `legacyAliasOf` properties (`word-wrap`, `grid-gap`, `font-stretch`)
+    for pname, syn in properties.items():
+        if not pname.startswith("-") and syn.startswith("<'") and syn.endswith("'>"):
+            target = syn[2:-2]
+            if target in counts and counts[target] > counts.get(pname, 0):
+                counts[pname] = counts[target]
+
+    return counts
+
+
 def load_and_merge_specs(
     webref_dir: Path,
     patches: dict[str, Any],
@@ -88,7 +129,10 @@ def load_and_merge_specs(
     if not webref_dir.is_dir():
         raise FileNotFoundError(f"@webref/css directory not found: {webref_dir}")
 
-    json_files = sorted(webref_dir.glob("*.json"))
+    excluded_specs: set[str] = set(patches.get("support", {}).get("exclude_specs", []))
+    json_files = [
+        p for p in sorted(webref_dir.glob("*.json")) if p.name not in excluded_specs
+    ]
     if not json_files:
         raise FileNotFoundError(f"No JSON files found in {webref_dir}")
 
@@ -370,14 +414,38 @@ def format_specs_py(
     properties: dict[str, str],
     values: dict[str, str],
     atrules: dict[str, dict[str, Any]],
+    engine_counts: dict[str, int] | None = None,
+    support_cfg: dict[str, Any] | None = None,
 ) -> str:
+    if engine_counts is None:
+        from stixis._generated import specs as existing_specs
+
+        engine_counts = dict(getattr(existing_specs, "PROPERTY_ENGINE_COUNTS", {}))
+    if support_cfg is None:
+        support_cfg = {}
+
+    default_min_engines = int(support_cfg.get("default_min_engines", 2))
+    allow_props = sorted(set(support_cfg.get("allow_properties", [])))
+
     lines = [
         '"""Auto-generated W3C `@webref/css` property, at-rule, descriptor, and value syntax tables."""',
         "",
         "from __future__ import annotations",
         "",
-        "VALUE_SYNTAXES: dict[str, str] = {",
+        f"DEFAULT_MIN_ENGINES: int = {default_min_engines}",
+        f"ALWAYS_ALLOWED_PROPERTIES: frozenset[str] = frozenset({{{', '.join(repr(p) for p in allow_props)}}})",
+        "",
+        "PROPERTY_ENGINE_COUNTS: dict[str, int] = {",
     ]
+    for k in sorted(properties):
+        lines.append(f"    {k!r}: {engine_counts.get(k, 0)},")
+    lines.extend(
+        [
+            "}",
+            "",
+            "VALUE_SYNTAXES: dict[str, str] = {",
+        ]
+    )
     for k in sorted(values):
         lines.append(f"    {k!r}: {values[k]!r},")
     lines.extend(
@@ -526,6 +594,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Path to @webref/css ed/css/ directory (overrides spec_patches.toml).",
     )
+    parser.add_argument(
+        "--bcd-dir",
+        type=Path,
+        default=None,
+        help="Path to @mdn/browser-compat-data css/ directory (overrides spec_patches.toml).",
+    )
     args = parser.parse_args(argv)
 
     patches_path = Path(args.patches)
@@ -543,7 +617,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{patches_path}:1: missing webref_css_dir {webref_dir}", file=sys.stderr)
         return 4
 
+    bcd_dir: Path | None = None
+    if args.bcd_dir is not None:
+        cand = args.bcd_dir.expanduser()
+        if (cand / "properties").is_dir():
+            bcd_dir = cand
+    elif "bcd_css_dir" in patches.get("meta", {}):
+        raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
+        candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
+        if (candidate_bcd / "properties").is_dir():
+            bcd_dir = candidate_bcd
+
     units_by_type, properties, values, atrules = load_and_merge_specs(webref_dir, patches)
+    if bcd_dir is not None:
+        engine_counts = load_bcd_engine_counts(bcd_dir, properties)
+    else:
+        from stixis._generated import specs as existing_specs
+
+        existing_counts = dict(getattr(existing_specs, "PROPERTY_ENGINE_COUNTS", {}))
+        engine_counts = {p: existing_counts.get(p, 0) for p in properties}
 
     # Measure resolvability coverage across all properties and descriptors
     resolvable_props = sum(
@@ -577,7 +669,17 @@ def main(argv: list[str] | None = None) -> int:
     gen_dir = REPO_ROOT / "src" / "stixis" / "_generated"
     ok = True
     ok &= _write_or_check(gen_dir / "units.py", format_units_py(units_by_type), args.check)
-    ok &= _write_or_check(gen_dir / "specs.py", format_specs_py(properties, values, atrules), args.check)
+    ok &= _write_or_check(
+        gen_dir / "specs.py",
+        format_specs_py(
+            properties,
+            values,
+            atrules,
+            engine_counts=engine_counts,
+            support_cfg=patches.get("support", {}),
+        ),
+        args.check,
+    )
     ok &= _write_or_check(gen_dir / "types.py", format_types_py(properties, values, atrules), args.check)
 
     if not ok:

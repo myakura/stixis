@@ -239,12 +239,15 @@ def _extract_css_fonts_property_cases(
 
 def _extract_broad_css_property_cases(
     wpt_dir: Path,
+    *,
+    min_engines: int = 2,
 ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
     """Extract valid and invalid property vectors across WPT `css-*/parsing/*-{valid,invalid}.html`."""
     from stixis import SerializationOptions, StixisError, canonicalize
     from stixis._generated.specs import PROPERTY_SYNTAXES
+    from stixis.nodes import is_property_enabled
 
-    opts = SerializationOptions.cssom()
+    opts = SerializationOptions.cssom(min_engines=min_engines)
     valid: list[tuple[str, str, str]] = []
     invalid: list[tuple[str, str]] = []
 
@@ -265,7 +268,7 @@ def _extract_broad_css_property_cases(
 
         for m in v_matches:
             prop = m.group(2)
-            if prop not in PROPERTY_SYNTAXES:
+            if prop not in PROPERTY_SYNTAXES or not is_property_enabled(prop, opts):
                 clean = False
                 break
             val = _unescape_js_string(m.group(4))
@@ -288,7 +291,7 @@ def _extract_broad_css_property_cases(
         if clean:
             for m in i_matches:
                 prop = m.group(2)
-                if prop not in PROPERTY_SYNTAXES:
+                if prop not in PROPERTY_SYNTAXES or not is_property_enabled(prop, opts):
                     clean = False
                     break
                 val = _unescape_js_string(m.group(4))
@@ -491,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_WPT_CSS_DIR,
         help="Path to WPT css/ directory.",
     )
+    parser.add_argument(
+        "--min-engines",
+        type=int,
+        default=2,
+        help="Minimum browser engine count required for general WPT property suites (0..3, default: 2).",
+    )
     args = parser.parse_args(argv)
 
     wpt_dir: Path = args.wpt_dir
@@ -502,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
     ff_ser_cases = _extract_font_family_serialization_cases(wpt_dir)
     ff_desc_v, ff_desc_i = _extract_font_face_descriptor_cases(wpt_dir)
     fonts_v, fonts_i = _extract_css_fonts_property_cases(wpt_dir)
-    broad_v, broad_i = _extract_broad_css_property_cases(wpt_dir)
+    broad_v, broad_i = _extract_broad_css_property_cases(wpt_dir, min_engines=args.min_engines)
 
     files_to_write = {
         OUT_DIR / "__init__.py": '"""Auto-generated WPT test suites."""\n',

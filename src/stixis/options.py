@@ -18,9 +18,11 @@ class SerializationOptions:
     font_face_stretch_alias: Literal["font-width", "font-stretch", "both"] = "font-width"
     quote_font_format: bool = False
     uppercase_urange_prefix: bool = True
+    min_engines: int = 2
+    extra_properties: frozenset[str] = frozenset()
 
     @classmethod
-    def cssom(cls) -> SerializationOptions:
+    def cssom(cls, *, min_engines: int = 2) -> SerializationOptions:
         """Strict W3C CSSOM serialization mode used by Web Platform Tests."""
         return cls(
             quote_char='"',
@@ -31,10 +33,11 @@ class SerializationOptions:
             font_face_stretch_alias="font-width",
             quote_font_format=False,
             uppercase_urange_prefix=True,
+            min_engines=min_engines,
         )
 
     @classmethod
-    def cleome(cls) -> SerializationOptions:
+    def cleome(cls, *, min_engines: int = 2) -> SerializationOptions:
         """Cleome-compatible serialization mode (`'` quotes, `font-stretch`, `format('woff2')`)."""
         return cls(
             quote_char="'",
@@ -45,6 +48,7 @@ class SerializationOptions:
             font_face_stretch_alias="font-stretch",
             quote_font_format=True,
             uppercase_urange_prefix=True,
+            min_engines=min_engines,
         )
 
 
