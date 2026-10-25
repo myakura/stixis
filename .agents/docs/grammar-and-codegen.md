@@ -63,3 +63,22 @@ Always verify that generated files are synchronized before committing:
 uv run python codegen/gen_wpt_tests.py --check
 uv run pytest
 ```
+
+## Upstream Sync & Agent Triage (`codegen/check_upstream.py` & `codegen/upstream.json`)
+
+`codegen/upstream.json` records the baseline commit SHAs and generated counts for `w3c/webref` (`ed/css`) and `web-platform-tests/wpt` (`css`).
+
+When upstream repositories advance (or when `.github/workflows/upstream-watch.yml` opens or updates an `upstream-sync` GitHub Issue), run `codegen/check_upstream.py` to classify what changed:
+
+1. **Auto-applicable updates**: New or modified properties, descriptors, units, or WPT vectors that compile and pass with the existing `src/stixis/syntax.py` kernel and `codegen/spec_patches.toml`.
+2. **Action-required items**:
+   * **Unresolved non-terminals (`<new-type>`)**: Add prose aliases to `[values]` in `codegen/spec_patches.toml`, or add a microsyntax handler under `src/stixis/microsyntax/`.
+   * **Failing WPT vectors**: Inspect the target grammar with `uv run stixis inspect <target> --json`, reproduce with `uv run stixis check <target> <raw_css>`, and adjust `codegen/spec_patches.toml` or `src/stixis/syntax.py`.
+
+After resolving any action items, regenerate all tables, tests, and baseline metadata:
+
+```bash
+uv run python codegen/gen_specs.py --webref-dir <path-to-webref-ed-css>
+uv run python codegen/gen_wpt_tests.py --wpt-dir <path-to-wpt-css>
+uv run python codegen/check_upstream.py --webref-dir <path-to-webref-ed-css> --wpt-dir <path-to-wpt-css> --update-baseline
+```

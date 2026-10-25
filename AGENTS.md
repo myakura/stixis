@@ -11,6 +11,7 @@ Stixis (`stixis`) is a zero-dependency, spec-driven CSS serializer and validator
 * Verify generated spec tables are current: `uv run python codegen/gen_specs.py --check`
 * Regenerate WPT test suite: `uv run python codegen/gen_wpt_tests.py --wpt-dir <path-to-wpt-css>`
 * Verify generated WPT tests are current: `uv run python codegen/gen_wpt_tests.py --check`
+* Diff upstream `@webref/css` & WPT and emit an agent Issue report: `uv run python codegen/check_upstream.py [--webref-dir <dir>] [--wpt-dir <dir>] [--format markdown|json] [--update-baseline]`
 * Inspect CSS syntax or `@font-face` descriptors: `uv run stixis inspect <target> [--json]`
 * Validate and canonicalize a CSS value: `uv run stixis check <target> <value> [--at-rule <name>]`
 

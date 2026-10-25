@@ -1,0 +1,72 @@
+name: Upstream Spec & WPT Watch
+
+on:
+  schedule:
+    # Run every Monday at 03:00 UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout stixis
+        uses: actions/checkout@v4
+
+      - name: Sparse-checkout w3c/webref (ed/css)
+        uses: actions/checkout@v4
+        with:
+          repository: w3c/webref
+          ref: main
+          path: .upstream/webref
+          sparse-checkout: |
+            ed/css
+
+      - name: Sparse-checkout web-platform-tests/wpt (css)
+        uses: actions/checkout@v4
+        with:
+          repository: web-platform-tests/wpt
+          ref: master
+          path: .upstream/wpt
+          sparse-checkout: |
+            css
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Analyze upstream changes and build agent report
+        id: check
+        continue-on-error: true
+        run: |
+          uv run python codegen/check_upstream.py \
+            --webref-dir .upstream/webref/ed/css \
+            --wpt-dir .upstream/wpt/css \
+            --format markdown \
+            --output .upstream/report.md \
+            --fail-on-changes
+
+      - name: Create or update upstream-sync Issue when changes are detected
+        if: steps.check.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "upstream-sync" --color "0E8A16" --description "Upstream @webref/css or WPT specification update" --force
+          EXISTING_ISSUE=$(gh issue list --label "upstream-sync" --state open --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING_ISSUE" ]; then
+            gh issue edit "$EXISTING_ISSUE" --body-file .upstream/report.md
+          else
+            gh issue create \
+              --title "chore(specs): sync upstream @webref/css and WPT updates" \
+              --label "upstream-sync" \
+              --body-file .upstream/report.md
+          fi

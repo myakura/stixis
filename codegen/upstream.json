@@ -1,0 +1,23 @@
+{
+  "webref": {
+    "repository": "https://github.com/w3c/webref.git",
+    "branch": "main",
+    "commit": "98d7c382dae2bd9f7f861b58d8895b0028aa7d69",
+    "subpath": "ed/css",
+    "json_files": 125,
+    "properties": 814,
+    "descriptors": 103,
+    "values": 792
+  },
+  "wpt": {
+    "repository": "https://github.com/web-platform-tests/wpt.git",
+    "branch": "master",
+    "commit": "850b36a56cfc15b9117a9d222d32a63104662f49",
+    "subpath": "css",
+    "urange_cases": 94,
+    "font_family_cases": 54,
+    "font_face_cases": 130,
+    "css_fonts_cases": 450,
+    "css_properties_cases": 2998
+  }
+}

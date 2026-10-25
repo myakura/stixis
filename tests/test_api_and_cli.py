@@ -6,6 +6,7 @@ import json
 import math
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -407,4 +408,70 @@ def test_security_and_descriptor_resolution_regressions(
     captured = capsys.readouterr()
     assert rc_bad_desc == EXIT_NOT_FOUND
     assert len(captured.err.strip().splitlines()) == 1
+
+
+def test_upstream_checker_detects_unresolved_refs_and_formats_agent_issue() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import check_upstream
+
+    from stixis._generated.specs import PROPERTY_SYNTAXES, VALUE_SYNTAXES
+    from stixis.syntax import compile_value_syntax
+
+    # 1. Resolved syntax produces no unresolved references
+    node_ok = compile_value_syntax("normal | <length-percentage>")
+    assert check_upstream.find_unresolved_refs(node_ok, PROPERTY_SYNTAXES, VALUE_SYNTAXES) == []
+
+    # 2. Newly introduced upstream non-terminal is flagged for spec_patches.toml
+    node_missing = compile_value_syntax("auto | <future-css-type>")
+    assert check_upstream.find_unresolved_refs(
+        node_missing, PROPERTY_SYNTAXES, VALUE_SYNTAXES
+    ) == ["<future-css-type>"]
+
+    # 3. Markdown Issue renderer emits structured agent instructions and unresolved references
+    report = check_upstream.UpstreamReport(
+        webref_old_commit="1111111111111111111111111111111111111111",
+        webref_new_commit="2222222222222222222222222222222222222222",
+        wpt_old_commit="3333333333333333333333333333333333333333",
+        wpt_new_commit="4444444444444444444444444444444444444444",
+        syntax_changes=[
+            check_upstream.SyntaxChange(
+                target="font-future",
+                kind="property",
+                change_type="added",
+                old_syntax=None,
+                new_syntax="auto | <future-css-type>",
+                resolvable=False,
+                unresolved_refs=["<future-css-type>"],
+            )
+        ],
+        unresolved_targets=[
+            check_upstream.SyntaxChange(
+                target="font-future",
+                kind="property",
+                change_type="added",
+                old_syntax=None,
+                new_syntax="auto | <future-css-type>",
+                resolvable=False,
+                unresolved_refs=["<future-css-type>"],
+            )
+        ],
+        wpt_failures=[
+            check_upstream.WptFailure(
+                suite="css-fonts",
+                target="font-future",
+                raw_css="future-token",
+                expected="future-token",
+                actual_or_error="raised StixisValidationError",
+            )
+        ],
+    )
+    assert report.has_changes
+    assert report.needs_agent_intervention
+    md = check_upstream.format_markdown_issue(report)
+    assert "Action Required" in md
+    assert "`<future-css-type>`" in md
+    assert "`font-future`" in md
+    assert "codegen/spec_patches.toml" in md
+
 

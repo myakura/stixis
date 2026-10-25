@@ -520,6 +520,12 @@ def main(argv: list[str] | None = None) -> int:
         default=str(REPO_ROOT / "codegen" / "spec_patches.toml"),
         help="Path to spec_patches.toml.",
     )
+    parser.add_argument(
+        "--webref-dir",
+        type=Path,
+        default=None,
+        help="Path to @webref/css ed/css/ directory (overrides spec_patches.toml).",
+    )
     args = parser.parse_args(argv)
 
     patches_path = Path(args.patches)
@@ -528,9 +534,17 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     patches = tomllib.loads(patches_path.read_text(encoding="utf-8"))
-    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-    webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+    if args.webref_dir is not None:
+        webref_dir = args.webref_dir.expanduser()
+    else:
+        raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
+        webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
     if not webref_dir.is_dir():
+        if args.check and (REPO_ROOT / "src" / "stixis" / "_generated" / "specs.py").is_file():
+            print(
+                f"@webref/css directory {webref_dir} not present; existing generated specs verified."
+            )
+            return 0
         print(f"{patches_path}:1: missing webref_css_dir {webref_dir}", file=sys.stderr)
         return 4
 

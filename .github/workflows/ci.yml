@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python 3.14
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint with Ruff
+        run: uv run ruff check
+
+      - name: Verify generated files are current
+        run: |
+          uv run python codegen/gen_specs.py --check
+          uv run python codegen/gen_wpt_tests.py --check
+
+      - name: Run pytest suite (WPT + Hypothesis + API/CLI)
+        run: uv run pytest
+
+      - name: Build wheel and sdist
+        run: uv build
