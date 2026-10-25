@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -330,20 +331,30 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
                     fn in val.lower() for fn in ("calc(", "var(", "env(", "min(", "max(", "clamp(")
                 ):
                     continue
-                exp = (
-                    gen_wpt_tests._unescape_js_string(m.group(6))
-                    if m.group(6) is not None
-                    else val
-                )
+                if m.group(6) is not None:
+                    candidates = [gen_wpt_tests._unescape_js_string(m.group(6))]
+                elif m.group(7) is not None:
+                    candidates = [
+                        gen_wpt_tests._unescape_js_string(cm.group(2))
+                        for cm in re.finditer(r"(['\"])((?:\\.|(?!\1).)*)\1", m.group(7))
+                    ]
+                    if not candidates:
+                        candidates = [val]
+                else:
+                    candidates = [val]
                 try:
                     got = canonicalize(prop, val, options=opts)
-                    if got != exp:
+                    if got not in candidates:
                         failures.append(
-                            WptFailure("css-properties", prop, val, exp, f"got {got!r}")
+                            WptFailure(
+                                "css-properties", prop, val, candidates[0], f"got {got!r}"
+                            )
                         )
                 except StixisError as exc:
                     failures.append(
-                        WptFailure("css-properties", prop, val, exp, f"raised {exc}")
+                        WptFailure(
+                            "css-properties", prop, val, candidates[0], f"raised {exc}"
+                        )
                     )
             for m in gen_wpt_tests._INVALID_CALL_RE.finditer(text):
                 prop = m.group(2)

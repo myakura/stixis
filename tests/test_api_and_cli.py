@@ -517,11 +517,18 @@ def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path
         'test_valid_value("width", "1px", "2px");\n',
         encoding="utf-8",
     )
+    transforms_parsing = wpt_css / "css-transforms" / "parsing"
+    transforms_parsing.mkdir(parents=True)
+    (transforms_parsing / "transform-origin-valid.html").write_text(
+        'test_valid_value("transform-origin", "top center", ["center top 0px", "center top"]);\n',
+        encoding="utf-8",
+    )
 
     _counts, failures, _changed = check_upstream._check_wpt_cases(wpt_css)
     failure_targets = {(f.suite, f.target, f.raw_css) for f in failures}
     assert ("css-fonts", "font-weight", "not-a-weight") in failure_targets
     assert ("css-properties", "width", "1px") in failure_targets
+    assert ("css-properties", "transform-origin", "top center") not in failure_targets
 
 
 
