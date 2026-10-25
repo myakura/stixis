@@ -526,14 +526,15 @@ def analyze_upstream(
         resolvable = True
         missing: list[str] = []
         compile_err: str | None = None
-        try:
-            node = compile_value_syntax(new_syn)
-            missing = find_unresolved_refs(node, properties, values)
-            if missing or not gen_specs.is_node_resolvable(node, properties, values):
+        if new_syn != "":
+            try:
+                node = compile_value_syntax(new_syn)
+                missing = find_unresolved_refs(node, properties, values)
+                if missing or not gen_specs.is_node_resolvable(node, properties, values):
+                    resolvable = False
+            except StixisError as exc:
                 resolvable = False
-        except StixisError as exc:
-            resolvable = False
-            compile_err = str(exc)
+                compile_err = str(exc)
 
         change_type = (
             "added"
@@ -555,7 +556,7 @@ def analyze_upstream(
                 syntax_changes.append(entry)
             else:
                 experimental_syntax_changes.append(entry)
-        if not resolvable and kind in ("property", "descriptor") and monitored:
+        if not resolvable and kind in ("property", "descriptor", "prelude") and monitored:
             unresolved_targets.append(entry)
 
     # 1. Properties
@@ -588,6 +589,12 @@ def analyze_upstream(
     new_vals = {k: v for k, v in values.items() if k.startswith("<")}
     for vkey in sorted(set(old_vals) | set(new_vals)):
         _inspect_target(vkey, "value", old_vals.get(vkey), new_vals.get(vkey))
+
+    # 4. At-rule preludes
+    old_preludes = getattr(current_specs, "ATRULE_PRELUDE_SYNTAXES", {})
+    new_preludes = {aname: ainfo.get("prelude") for aname, ainfo in atrules.items()}
+    for aname in sorted(set(old_preludes) | set(new_preludes)):
+        _inspect_target(aname, "prelude", old_preludes.get(aname), new_preludes.get(aname))
 
     gen_dir = REPO_ROOT / "src" / "stixis" / "_generated"
     specs_changed = (
