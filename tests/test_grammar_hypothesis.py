@@ -191,7 +191,7 @@ _GRAMMAR_ROUNDTRIP_PROPERTIES: tuple[str, ...] = (
 def test_synthesized_grammar_strategy_roundtrip(prop_name: str) -> None:
     """Every `ValueNode` in `_GRAMMAR_ROUNDTRIP_PROPERTIES` synthesizes valid CSS that round-trips."""
     at_rule = "@font-face" if prop_name == "font-display" else None
-    _, _, node = resolve_target_syntax(prop_name, at_rule=at_rule)
+    _, _, _, node = resolve_target_syntax(prop_name, at_rule=at_rule)
     strat = strategy_from_value_node(node)
 
     @settings(max_examples=25, suppress_health_check=[HealthCheck.too_slow])

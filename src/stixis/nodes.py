@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -39,22 +40,38 @@ def lookup_value_node(name: str, is_property: bool = False) -> ValueNode | None:
     return compile_value_syntax(syn)
 
 
+_CSS_IDENT_NAME_RE = re.compile(
+    r"^(?:--[a-zA-Z0-9_\-\x80-\U0010ffff]+|-?[a-zA-Z_\x80-\U0010ffff][a-zA-Z0-9_\-\x80-\U0010ffff]*)$"
+)
+_AT_RULE_IDENT_RE = re.compile(
+    r"^-?[a-zA-Z_\x80-\U0010ffff][a-zA-Z0-9_\-\x80-\U0010ffff]*$"
+)
+
+
 def normalize_identifier_key(key: str) -> str:
     """Normalize a Python `snake_case` property or descriptor key to `kebab-case`, preserving `--*` custom properties."""
     if not isinstance(key, str) or not key.strip():
         raise StixisValidationError("property", "<ident>", key, "Empty property or descriptor name")
     stripped = key.strip()
-    if stripped.startswith("--"):
-        return stripped
-    return stripped.replace("_", "-").lower()
+    norm = stripped if stripped.startswith("--") else stripped.replace("_", "-").lower()
+    if not _CSS_IDENT_NAME_RE.match(norm):
+        raise StixisValidationError(
+            "property",
+            "<ident>",
+            key,
+            f"Invalid CSS property or descriptor identifier: {key!r}",
+        )
+    return norm
 
 
 def resolve_target_syntax(
     target: str,
     *,
     at_rule: str | None = None,
-) -> tuple[str, str, ValueNode]:
-    """Resolve `target` (property, descriptor, or `<type>`) to `(normalized_name, syntax_str, ValueNode)`."""
+) -> tuple[str, str | None, str, ValueNode]:
+    """Resolve `target` (property, descriptor, or `<type>`) to `(normalized_name, normalized_at_rule, syntax_str, ValueNode)`."""
+    if not isinstance(target, str):
+        raise StixisValidationError(str(target), "<ident>", target)
     raw = target.strip()
     if not raw:
         raise StixisValidationError(target, "<ident>", target)
@@ -77,31 +94,31 @@ def resolve_target_syntax(
                 target,
                 f"Unknown descriptor {norm_desc!r} for {norm_at}",
             )
-        return norm_desc, syn, compile_value_syntax(syn)
+        return norm_desc, norm_at, syn, compile_value_syntax(syn)
 
     if raw.startswith("<") and raw.endswith(">"):
         syn = VALUE_SYNTAXES.get(raw)
         if syn is not None:
-            return raw, syn, compile_value_syntax(syn)
+            return raw, None, syn, compile_value_syntax(syn)
         node = compile_value_syntax(raw)
-        return raw, raw, node
+        return raw, None, raw, node
 
     if raw.startswith("@") and "/" in raw:
         at_part, desc_part = raw.split("/", 1)
         return resolve_target_syntax(desc_part, at_rule=at_part)
 
     norm_prop = normalize_identifier_key(raw)
-    if norm_prop.startswith("--") and len(norm_prop) >= 2:
-        return norm_prop, "<declaration-value>", compile_value_syntax("<declaration-value>")
+    if norm_prop.startswith("--") and len(norm_prop) >= 3:
+        return norm_prop, None, "<declaration-value>", compile_value_syntax("<declaration-value>")
 
     syn = PROPERTY_SYNTAXES.get(norm_prop)
     if syn is not None:
-        return norm_prop, syn, compile_value_syntax(syn)
+        return norm_prop, None, syn, compile_value_syntax(syn)
 
     if f"<{norm_prop}>" in VALUE_SYNTAXES:
         tname = f"<{norm_prop}>"
         tsyn = VALUE_SYNTAXES[tname]
-        return tname, tsyn, compile_value_syntax(tsyn)
+        return tname, None, tsyn, compile_value_syntax(tsyn)
 
     raise StixisValidationError(
         norm_prop,
@@ -120,12 +137,7 @@ def serialize_value(
 ) -> str:
     """Validate and serialize a structured Python `value` (or PEP 750 `Template`) for `target`."""
     opts = DEFAULT_OPTIONS if options is None else options
-    norm_target, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
-    norm_at = (
-        (at_rule.strip().lower() if at_rule.strip().startswith("@") else f"@{at_rule.strip().lower()}")
-        if at_rule is not None
-        else None
-    )
+    norm_target, norm_at, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
     return evaluate_serialize_value(
         norm_target,
         syntax,
@@ -146,12 +158,7 @@ def canonicalize(
 ) -> str:
     """Tokenize and validate raw `css_text` against `target`'s `ValueNode` grammar, returning canonical CSSOM text."""
     opts = DEFAULT_OPTIONS if options is None else options
-    norm_target, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
-    norm_at = (
-        (at_rule.strip().lower() if at_rule.strip().startswith("@") else f"@{at_rule.strip().lower()}")
-        if at_rule is not None
-        else None
-    )
+    norm_target, norm_at, syntax, node = resolve_target_syntax(target, at_rule=at_rule)
     return evaluate_canonicalize(
         norm_target,
         syntax,
@@ -509,6 +516,7 @@ class StyleRule:
         indent: int = 0,
         options: SerializationOptions | None = None,
     ) -> str:
+        eff_opts = options if options is not None else self.options
         if options is not None and options != (self.options or DEFAULT_OPTIONS):
             rebuilt = StyleRule(
                 self.selector,
@@ -517,7 +525,7 @@ class StyleRule:
                 comment=self.comment,
                 options=options,
             )
-            return rebuilt.format(minify=minify, indent=indent)
+            return rebuilt.format(minify=minify, indent=indent, options=options)
 
         pad = "" if minify else ("  " * indent)
         inner_pad = "" if minify else ("  " * (indent + 1))
@@ -534,13 +542,13 @@ class StyleRule:
 
         for child in self._rules_tuple:
             body_items.append(
-                _format_rule_node(child, minify=minify, indent=indent + 1, options=options)
+                _format_rule_node(child, minify=minify, indent=indent + 1, options=eff_opts)
             )
 
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=options)
+                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
                 for c in self._rules_tuple
             )
             sep = ";" if (decl_part and child_part) else ""
@@ -577,11 +585,11 @@ class AtRule:
 
     def __post_init__(self) -> None:
         opts = DEFAULT_OPTIONS if self.options is None else self.options
-        raw_name = self.name.strip().lower()
+        raw_name = self.name.strip().lower() if isinstance(self.name, str) else ""
         if not raw_name:
             raise StixisValidationError("at-rule", "@<ident>", self.name)
         at_name = raw_name if raw_name.startswith("@") else f"@{raw_name}"
-        if len(at_name) < 2 or any(ch.isspace() or ch in ("{", "}", ";") for ch in at_name):
+        if not _AT_RULE_IDENT_RE.match(at_name[1:]):
             raise StixisValidationError("at-rule", "@<ident>", self.name)
 
         prelude_s = _validate_at_rule_prelude(at_name, self.prelude, options=opts)
@@ -610,6 +618,7 @@ class AtRule:
         indent: int = 0,
         options: SerializationOptions | None = None,
     ) -> str:
+        eff_opts = options if options is not None else self.options
         if options is not None and options != (self.options or DEFAULT_OPTIONS):
             rebuilt = AtRule(
                 self.name,
@@ -620,7 +629,7 @@ class AtRule:
                 statement=self.statement,
                 options=options,
             )
-            return rebuilt.format(minify=minify, indent=indent)
+            return rebuilt.format(minify=minify, indent=indent, options=options)
 
         pad = "" if minify else ("  " * indent)
         inner_pad = "" if minify else ("  " * (indent + 1))
@@ -645,7 +654,7 @@ class AtRule:
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=options)
+                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
                 for c in self._rules_tuple
             )
             sep = ";" if (decl_part and child_part) else ""
@@ -656,7 +665,7 @@ class AtRule:
             body_items.append(f"{inner_pad}{k}: {v};")
         for child in self._rules_tuple:
             body_items.append(
-                _format_rule_node(child, minify=minify, indent=indent + 1, options=options)
+                _format_rule_node(child, minify=minify, indent=indent + 1, options=eff_opts)
             )
 
         if not body_items:

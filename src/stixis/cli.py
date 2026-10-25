@@ -71,7 +71,10 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
         descs = ATRULE_DESCRIPTORS.get(norm_at)
         if descs is None:
             return None
-        norm_desc = normalize_identifier_key(target)
+        try:
+            norm_desc = normalize_identifier_key(target)
+        except StixisError:
+            return None
         syn = descs.get(norm_desc)
         if syn is None:
             return None
@@ -112,7 +115,10 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
             "python_inputs": _describe_python_inputs("type", target, syn),
         }
 
-    norm = normalize_identifier_key(target)
+    try:
+        norm = normalize_identifier_key(target)
+    except StixisError:
+        return None
     if norm in PROPERTY_SYNTAXES:
         syn = PROPERTY_SYNTAXES[norm]
         also_in_at_rules = sorted(
@@ -203,20 +209,35 @@ def _run_check(args: argparse.Namespace) -> int:
     at_rule: str | None = args.at_rule
 
     # Resolve target existence first so unknown targets return EXIT_NOT_FOUND (4)
-    norm_prop = normalize_identifier_key(target) if not target.startswith(("<", "@")) else target.strip()
-    is_custom_prop = norm_prop.startswith("--") and len(norm_prop) >= 3 and at_rule is None
+    stripped = target.strip()
+    if not stripped:
+        ctx = f" (in {at_rule})" if at_rule else ""
+        sys.stderr.write(f"error: unknown CSS target {target!r}{ctx}\n")
+        return EXIT_NOT_FOUND
+
+    is_custom_prop = False
+    if not stripped.startswith(("<", "@")) and at_rule is None:
+        try:
+            norm_prop = normalize_identifier_key(stripped)
+            is_custom_prop = norm_prop.startswith("--") and len(norm_prop) >= 3
+        except StixisError:
+            is_custom_prop = False
+
     info = _inspect_target(target, at_rule=at_rule)
     if not is_custom_prop and info is None:
         ctx = f" (in {at_rule})" if at_rule else ""
         sys.stderr.write(f"error: unknown CSS target {target!r}{ctx}\n")
         return EXIT_NOT_FOUND
 
+    effective_target = target
     effective_at_rule = at_rule
-    if effective_at_rule is None and info is not None and info["kind"] == "descriptor":
-        effective_at_rule = info.get("at_rule")
+    if info is not None and info["kind"] == "descriptor":
+        effective_target = info["name"]
+        if effective_at_rule is None:
+            effective_at_rule = info.get("at_rule")
 
     try:
-        canonical = canonicalize(target, args.value, at_rule=effective_at_rule)
+        canonical = canonicalize(effective_target, args.value, at_rule=effective_at_rule)
     except StixisError as exc:
         msg = str(exc).splitlines()[0] if str(exc) else "invalid CSS value"
         sys.stderr.write(f"error: {msg}\n")

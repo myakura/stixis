@@ -27,6 +27,7 @@ from stixis import (
     StyleRule,
     StyleSheet,
     Url,
+    canonicalize,
     compact_urange,
     dumps,
     generic,
@@ -344,3 +345,58 @@ def test_cli_subprocess_entrypoint() -> None:
     )
     assert res.returncode == 0
     assert res.stdout.strip() == "U+3040-309F"
+
+
+def test_security_and_descriptor_resolution_regressions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # 1. Custom property names with injection characters (`--x: red; color`) must be rejected eagerly
+    with pytest.raises(StixisValidationError):
+        StyleRule("body", {"--x: red; color": "blue"})
+    with pytest.raises(StixisValidationError):
+        StyleRule("body", {"--": "blue"})
+
+    # 2. At-rule names with comment or non-ident characters (`media/*`) must be rejected eagerly
+    with pytest.raises(StixisValidationError):
+        AtRule("media/*", "screen")
+    with pytest.raises(StixisValidationError):
+        AtRule("@123invalid", "screen")
+
+    # 3. Nested rules preserve overridden SerializationOptions across `dumps` / `format`
+    nested = AtRule("@media", "screen", rules=[FontFace(font_family="Inter", src=Url("inter.woff2"))])
+    cleome_out = dumps(nested, options=SerializationOptions.cleome())
+    assert "font-family: 'Inter';" in cleome_out
+    assert "src: url('inter.woff2');" in cleome_out
+
+    nested_style = StyleRule(
+        ".card",
+        {"font_family": "Inter"},
+        rules=[StyleRule("&:hover", {"font_family": "Noto Sans JP"})],
+    )
+    assert "font-family: 'Noto Sans JP';" in dumps(nested_style, options=SerializationOptions.cleome())
+
+    # 4. Slash-qualified targets (`@font-face/font-style`, `@font-face/font-family`) preserve `@font-face` descriptor context
+    assert (
+        serialize_value("@font-face/font-style", ("oblique", Deg(-10), Deg(20)))
+        == "oblique -10deg 20deg"
+    )
+    assert canonicalize("@font-face/font-weight", "100 900") == "100 900"
+    with pytest.raises(StixisValidationError):
+        serialize_value("@font-face/font-family", ["Inter", "Roboto"])
+
+    # 5. CLI check with slash-qualified descriptor and empty/whitespace target
+    rc = cli_main(["check", "@font-face/font-weight", "100 900"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    assert captured.out.strip() == "100 900"
+
+    rc_empty = cli_main(["check", "", "red"])
+    captured = capsys.readouterr()
+    assert rc_empty == EXIT_NOT_FOUND
+    assert len(captured.err.strip().splitlines()) == 1
+
+    rc_bad_desc = cli_main(["inspect", "bad;name", "--at-rule", "@font-face"])
+    captured = capsys.readouterr()
+    assert rc_bad_desc == EXIT_NOT_FOUND
+    assert len(captured.err.strip().splitlines()) == 1
+
