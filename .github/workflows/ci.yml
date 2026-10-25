@@ -21,6 +21,7 @@ jobs:
         run: |
           echo "webref_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["webref"]["commit"])')" >> "$GITHUB_OUTPUT"
           echo "wpt_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["wpt"]["commit"])')" >> "$GITHUB_OUTPUT"
+          echo "bcd_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["bcd"]["commit"])')" >> "$GITHUB_OUTPUT"
 
       - name: Sparse-checkout w3c/webref at baseline commit
         uses: actions/checkout@v4
@@ -40,6 +41,15 @@ jobs:
           sparse-checkout: |
             css
 
+      - name: Sparse-checkout mdn/browser-compat-data at baseline commit
+        uses: actions/checkout@v4
+        with:
+          repository: mdn/browser-compat-data
+          ref: ${{ steps.baseline.outputs.bcd_sha }}
+          path: .upstream/bcd
+          sparse-checkout: |
+            css
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -56,7 +66,7 @@ jobs:
 
       - name: Verify generated files are current against baseline upstream commits
         run: |
-          uv run python codegen/gen_specs.py --check --webref-dir .upstream/webref/ed/css
+          uv run python codegen/gen_specs.py --check --webref-dir .upstream/webref/ed/css --bcd-dir .upstream/bcd/css
           uv run python codegen/gen_wpt_tests.py --check --wpt-dir .upstream/wpt/css
 
       - name: Run pytest suite (WPT + Hypothesis + API/CLI)

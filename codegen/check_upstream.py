@@ -75,10 +75,13 @@ class UpstreamReport:
     webref_new_commit: str
     wpt_old_commit: str
     wpt_new_commit: str
+    bcd_old_commit: str = "unknown"
+    bcd_new_commit: str = "unknown"
     min_engines: int = 2
     unit_changes: dict[str, dict[str, list[str]]] = field(default_factory=dict)
     syntax_changes: list[SyntaxChange] = field(default_factory=list)
     experimental_syntax_changes: list[SyntaxChange] = field(default_factory=list)
+    support_changes: list[str] = field(default_factory=list)
     unresolved_targets: list[SyntaxChange] = field(default_factory=list)
     wpt_counts_old: dict[str, int] = field(default_factory=dict)
     wpt_counts_new: dict[str, int] = field(default_factory=dict)
@@ -91,8 +94,10 @@ class UpstreamReport:
         return bool(
             self.unit_changes
             or self.syntax_changes
+            or self.support_changes
             or self.unresolved_targets
             or self.wpt_failures
+            or self.specs_files_changed
             or self.wpt_files_changed
         )
 
@@ -397,6 +402,7 @@ def _check_wpt_cases(
         "css_properties_cases": len(broad_v) + len(broad_i),
     }
 
+    opt_min = None if min_engines == getattr(current_specs, "DEFAULT_MIN_ENGINES", 2) else min_engines
     expected_files = {
         gen_wpt_tests.OUT_DIR / "test_wpt_urange.py": gen_wpt_tests._render_urange_test_file(
             urange_v, urange_i
@@ -412,6 +418,7 @@ def _check_wpt_cases(
             fonts_v,
             fonts_i,
             "css_fonts",
+            min_engines=opt_min,
         ),
         gen_wpt_tests.OUT_DIR / "test_wpt_css_properties.py": (
             gen_wpt_tests._render_property_test_file(
@@ -419,6 +426,7 @@ def _check_wpt_cases(
                 broad_v,
                 broad_i,
                 "css_properties",
+                min_engines=opt_min,
             )
         ),
     }
@@ -443,13 +451,29 @@ def analyze_upstream(
     patches = tomllib.loads(patches_path.read_text(encoding="utf-8"))
 
     units_by_type, properties, values, atrules = gen_specs.load_and_merge_specs(webref_dir, patches)
+    old_engine_counts = dict(getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}))
     if bcd_dir is not None and (bcd_dir / "properties").is_dir():
         engine_counts = gen_specs.load_bcd_engine_counts(bcd_dir, properties)
+        bcd_new_commit = _detect_git_commit(bcd_dir)
     else:
-        existing_counts = dict(getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}))
-        engine_counts = {p: existing_counts.get(p, 0) for p in properties}
+        engine_counts = {p: old_engine_counts.get(p, 0) for p in properties}
+        bcd_new_commit = baseline.get("bcd", {}).get("commit", "unknown")
 
     allow_props = set(patches.get("support", {}).get("allow_properties", []))
+    support_changes: list[str] = []
+    for pname in sorted(set(old_engine_counts) | set(engine_counts)):
+        old_c = old_engine_counts.get(pname, 0)
+        new_c = engine_counts.get(pname, 0)
+        if old_c != new_c:
+            old_en = min_engines <= 0 or pname in allow_props or old_c >= min_engines
+            new_en = min_engines <= 0 or pname in allow_props or new_c >= min_engines
+            if old_en != new_en:
+                state_str = "ENABLED" if new_en else "DISABLED"
+                support_changes.append(
+                    f"`{pname}`: {old_c} -> {new_c} engines (**{state_str}** at `min_engines={min_engines}`)"
+                )
+            elif max(old_c, new_c) >= min_engines:
+                support_changes.append(f"`{pname}`: {old_c} -> {new_c} engines")
 
     def _is_prop_monitored(pname: str) -> bool:
         if min_engines <= 0:
@@ -458,7 +482,7 @@ def analyze_upstream(
             return True
         return max(
             engine_counts.get(pname, 0),
-            getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}).get(pname, 0),
+            old_engine_counts.get(pname, 0),
         ) >= min_engines
 
     # Compare units
@@ -579,9 +603,15 @@ def analyze_upstream(
         != gen_specs.format_types_py(properties, values, atrules)
     )
 
-    wpt_counts_new, wpt_failures, wpt_changed = _check_wpt_cases(
-        wpt_dir, min_engines=min_engines
-    )
+    saved_counts = getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {})
+    try:
+        current_specs.PROPERTY_ENGINE_COUNTS = engine_counts
+        wpt_counts_new, wpt_failures, wpt_changed = _check_wpt_cases(
+            wpt_dir, min_engines=min_engines
+        )
+    finally:
+        current_specs.PROPERTY_ENGINE_COUNTS = saved_counts
+
     wpt_counts_old = {
         k: baseline["wpt"][k]
         for k in (
@@ -599,10 +629,13 @@ def analyze_upstream(
         webref_new_commit=_detect_git_commit(webref_dir),
         wpt_old_commit=baseline["wpt"]["commit"],
         wpt_new_commit=_detect_git_commit(wpt_dir),
+        bcd_old_commit=baseline.get("bcd", {}).get("commit", "unknown"),
+        bcd_new_commit=bcd_new_commit,
         min_engines=min_engines,
         unit_changes=unit_changes,
         syntax_changes=syntax_changes,
         experimental_syntax_changes=experimental_syntax_changes,
+        support_changes=support_changes,
         unresolved_targets=unresolved_targets,
         wpt_counts_old=wpt_counts_old,
         wpt_counts_new=wpt_counts_new,
@@ -631,19 +664,33 @@ def format_markdown_issue(report: UpstreamReport) -> str:
         f"* **Support Threshold**: `min_engines = {report.min_engines}` (pass `--min-engines 1` to include single-engine prototypes)",
         f"* **`w3c/webref` (`ed/css`)**: `{report.webref_old_commit[:12]}` -> `{report.webref_new_commit[:12]}`",
         f"* **`web-platform-tests/wpt` (`css`)**: `{report.wpt_old_commit[:12]}` -> `{report.wpt_new_commit[:12]}`",
+        f"* **`mdn/browser-compat-data` (`css`)**: `{report.bcd_old_commit[:12]}` -> `{report.bcd_new_commit[:12]}`",
         "",
         "## What Changed Upstream?",
         "",
     ]
 
-    if not report.unit_changes and not report.syntax_changes and not report.wpt_files_changed:
-        lines.append("* No syntax, unit, or WPT test vector changes detected for enabled targets (`min_engines >= " + str(report.min_engines) + "`).")
+    if (
+        not report.unit_changes
+        and not report.syntax_changes
+        and not report.support_changes
+        and not report.wpt_files_changed
+        and not report.specs_files_changed
+    ):
+        lines.append("* No syntax, unit, engine-support, or WPT test vector changes detected for enabled targets (`min_engines >= " + str(report.min_engines) + "`).")
         if report.experimental_syntax_changes:
             lines.append(
                 f"* ({len(report.experimental_syntax_changes)} experimental `< {report.min_engines}`-engine property change(s) ignored; run with `--min-engines 1` or `--min-engines 0` to inspect.)"
             )
         lines.append("")
     else:
+        if report.support_changes:
+            lines.append("### Browser Engine Support Changes (`@mdn/browser-compat-data`)")
+            lines.append("")
+            for sc_line in report.support_changes:
+                lines.append(f"* {sc_line}")
+            lines.append("")
+
         if report.unit_changes:
             lines.append("### Unit Table Changes (`src/stixis/_generated/units.py`)")
             lines.append("")
@@ -898,6 +945,12 @@ def main(argv: list[str] | None = None) -> int:
                 "commit": report.wpt_new_commit,
                 "subpath": "css",
                 **report.wpt_counts_new,
+            },
+            "bcd": {
+                "repository": "https://github.com/mdn/browser-compat-data.git",
+                "branch": "main",
+                "commit": report.bcd_new_commit,
+                "subpath": "css",
             },
         }
         args.baseline.write_text(

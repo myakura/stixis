@@ -577,5 +577,78 @@ def test_engine_support_threshold_toggle_and_extra_properties(
     assert captured.out.strip() == "first"
 
 
+def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) -> None:
+    import tomllib
 
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import check_upstream
+    import gen_specs
+    import gen_wpt_tests
+
+    # 1. `_is_shipping_unprefixed_statement` rejects preview, removed, prefixed, and flagged entries
+    assert gen_specs._is_shipping_unprefixed_statement({"version_added": "120"})
+    assert not gen_specs._is_shipping_unprefixed_statement({"version_added": "preview"})
+    assert not gen_specs._is_shipping_unprefixed_statement(
+        {"version_added": "1", "version_removed": "50"}
+    )
+    assert not gen_specs._is_shipping_unprefixed_statement(
+        {"version_added": "1", "prefix": "-webkit-"}
+    )
+    assert not gen_specs._is_shipping_unprefixed_statement(
+        {"version_added": "1", "alternative_name": "old-name"}
+    )
+    assert not gen_specs._is_shipping_unprefixed_statement(
+        {"version_added": "1", "flags": [{"name": "flag"}]}
+    )
+
+    # 2. `_render_property_test_file` threads `min_engines=1` into `SerializationOptions.cssom(min_engines=1)`
+    rendered_1 = gen_wpt_tests._render_property_test_file(
+        "Docstring.",
+        [("hanging-punctuation", "first", "first")],
+        [],
+        "custom_1eng",
+        min_engines=1,
+    )
+    assert "SerializationOptions.cssom(min_engines=1)" in rendered_1
+
+    # 3. `analyze_upstream` detects when a BCD property crosses `min_engines`
+    bcd_css = tmp_path / "bcd_css"
+    (bcd_css / "properties").mkdir(parents=True)
+    (bcd_css / "properties" / "hanging-punctuation.json").write_text(
+        json.dumps(
+            {
+                "css": {
+                    "properties": {
+                        "hanging-punctuation": {
+                            "__compat": {
+                                "support": {
+                                    "chrome": {"version_added": "140"},
+                                    "firefox": {"version_added": False},
+                                    "safari": {"version_added": "10"},
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    patches = tomllib.loads((repo_root / "codegen" / "spec_patches.toml").read_text(encoding="utf-8"))
+    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
+    webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+    if not webref_dir.is_dir():
+        pytest.skip(f"Local @webref/css directory not available: {webref_dir}")
+
+    report = check_upstream.analyze_upstream(
+        webref_dir,
+        gen_wpt_tests.DEFAULT_WPT_CSS_DIR,
+        repo_root / "codegen" / "spec_patches.toml",
+        repo_root / "codegen" / "upstream.json",
+        min_engines=2,
+        bcd_dir=bcd_css,
+    )
+    assert report.has_changes
+    assert any("`hanging-punctuation`: 1 -> 2 engines" in s for s in report.support_changes)
 

@@ -76,6 +76,19 @@ def _collect_nested_types(
             _collect_nested_types(sv["values"], values_map)
 
 
+def _is_shipping_unprefixed_statement(stmt: Any) -> bool:
+    if not isinstance(stmt, dict):
+        return False
+    ver = stmt.get("version_added")
+    if not ver or ver == "preview":
+        return False
+    if stmt.get("version_removed"):
+        return False
+    if stmt.get("flags"):
+        return False
+    return not bool(stmt.get("prefix") or stmt.get("alternative_name"))
+
+
 def load_bcd_engine_counts(
     bcd_css_dir: Path | None,
     properties: dict[str, str],
@@ -96,13 +109,8 @@ def load_bcd_engine_counts(
             eng = 0
             for browser in ("chrome", "firefox", "safari"):
                 b_sup = sup.get(browser)
-                if isinstance(b_sup, list):
-                    b_sup = b_sup[0] if b_sup else {}
-                if (
-                    isinstance(b_sup, dict)
-                    and b_sup.get("version_added")
-                    and not b_sup.get("flags")
-                ):
+                stmts = b_sup if isinstance(b_sup, list) else ([b_sup] if b_sup else [])
+                if any(_is_shipping_unprefixed_statement(s) for s in stmts):
                     eng += 1
             if pname in counts:
                 counts[pname] = eng

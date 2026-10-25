@@ -438,7 +438,14 @@ def _render_property_test_file(
     valid: list[tuple[str, str, str]],
     invalid: list[tuple[str, str]],
     func_suffix: str,
+    *,
+    min_engines: int | None = None,
 ) -> str:
+    opts_expr = (
+        "SerializationOptions.cssom()"
+        if min_engines is None
+        else f"SerializationOptions.cssom(min_engines={min_engines})"
+    )
     lines = [
         f'"""{doc} DO NOT EDIT."""',
         "",
@@ -448,7 +455,7 @@ def _render_property_test_file(
         "",
         "from stixis import SerializationOptions, StixisError, canonicalize",
         "",
-        "CSSOM_OPTS = SerializationOptions.cssom()",
+        f"CSSOM_OPTS = {opts_expr}",
         "",
         "VALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (",
     ]
@@ -497,10 +504,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--min-engines",
         type=int,
-        default=2,
-        help="Minimum browser engine count required for general WPT property suites (0..3, default: 2).",
+        default=None,
+        help="Minimum browser engine count required for general WPT property suites (0..3, default: DEFAULT_MIN_ENGINES).",
     )
     args = parser.parse_args(argv)
+
+    from stixis._generated import specs as _gen_specs
+
+    default_min = getattr(_gen_specs, "DEFAULT_MIN_ENGINES", 2)
+    eff_min = default_min if args.min_engines is None else args.min_engines
+    opt_min = None if eff_min == default_min else eff_min
 
     wpt_dir: Path = args.wpt_dir
     if not wpt_dir.is_dir():
@@ -511,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
     ff_ser_cases = _extract_font_family_serialization_cases(wpt_dir)
     ff_desc_v, ff_desc_i = _extract_font_face_descriptor_cases(wpt_dir)
     fonts_v, fonts_i = _extract_css_fonts_property_cases(wpt_dir)
-    broad_v, broad_i = _extract_broad_css_property_cases(wpt_dir, min_engines=args.min_engines)
+    broad_v, broad_i = _extract_broad_css_property_cases(wpt_dir, min_engines=eff_min)
 
     files_to_write = {
         OUT_DIR / "__init__.py": '"""Auto-generated WPT test suites."""\n',
@@ -523,12 +536,14 @@ def main(argv: list[str] | None = None) -> int:
             fonts_v,
             fonts_i,
             "css_fonts",
+            min_engines=opt_min,
         ),
         OUT_DIR / "test_wpt_css_properties.py": _render_property_test_file(
             "Auto-generated WPT `css-*/parsing/*-{valid,invalid}.html` property tests.",
             broad_v,
             broad_i,
             "css_properties",
+            min_engines=opt_min,
         ),
     }
 

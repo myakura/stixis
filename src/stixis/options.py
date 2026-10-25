@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from stixis._generated import specs as _gen_specs
+
+_DEFAULT_MIN_ENGINES: int = getattr(_gen_specs, "DEFAULT_MIN_ENGINES", 2)
+
 
 @dataclass(frozen=True, slots=True)
 class SerializationOptions:
@@ -18,12 +22,13 @@ class SerializationOptions:
     font_face_stretch_alias: Literal["font-width", "font-stretch", "both"] = "font-width"
     quote_font_format: bool = False
     uppercase_urange_prefix: bool = True
-    min_engines: int = 2
+    min_engines: int = _DEFAULT_MIN_ENGINES
     extra_properties: frozenset[str] = frozenset()
 
     @classmethod
-    def cssom(cls, *, min_engines: int = 2) -> SerializationOptions:
+    def cssom(cls, *, min_engines: int | None = None) -> SerializationOptions:
         """Strict W3C CSSOM serialization mode used by Web Platform Tests."""
+        eff_min = _DEFAULT_MIN_ENGINES if min_engines is None else min_engines
         return cls(
             quote_char='"',
             always_quote_family_name=False,
@@ -33,12 +38,13 @@ class SerializationOptions:
             font_face_stretch_alias="font-width",
             quote_font_format=False,
             uppercase_urange_prefix=True,
-            min_engines=min_engines,
+            min_engines=eff_min,
         )
 
     @classmethod
-    def cleome(cls, *, min_engines: int = 2) -> SerializationOptions:
+    def cleome(cls, *, min_engines: int | None = None) -> SerializationOptions:
         """Cleome-compatible serialization mode (`'` quotes, `font-stretch`, `format('woff2')`)."""
+        eff_min = _DEFAULT_MIN_ENGINES if min_engines is None else min_engines
         return cls(
             quote_char="'",
             always_quote_family_name=True,
@@ -48,7 +54,7 @@ class SerializationOptions:
             font_face_stretch_alias="font-stretch",
             quote_font_format=True,
             uppercase_urange_prefix=True,
-            min_engines=min_engines,
+            min_engines=eff_min,
         )
 
 

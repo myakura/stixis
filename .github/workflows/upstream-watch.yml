@@ -35,6 +35,15 @@ jobs:
           sparse-checkout: |
             css
 
+      - name: Sparse-checkout mdn/browser-compat-data (css)
+        uses: actions/checkout@v4
+        with:
+          repository: mdn/browser-compat-data
+          ref: main
+          path: .upstream/bcd
+          sparse-checkout: |
+            css
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v5
 
@@ -51,6 +60,7 @@ jobs:
           uv run python codegen/check_upstream.py \
             --webref-dir .upstream/webref/ed/css \
             --wpt-dir .upstream/wpt/css \
+            --bcd-dir .upstream/bcd/css \
             --format markdown \
             --output .upstream/report.md \
             --fail-on-changes
