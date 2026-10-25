@@ -195,10 +195,14 @@ def _extract_font_face_descriptor_cases(
 
 def _extract_css_fonts_property_cases(
     wpt_dir: Path,
+    *,
+    min_engines: int = 2,
 ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
     from stixis import SerializationOptions, StixisError, canonicalize
+    from stixis._generated.specs import PROPERTY_SYNTAXES
+    from stixis.nodes import is_property_enabled
 
-    opts = SerializationOptions.cssom()
+    opts = SerializationOptions.cssom(min_engines=min_engines)
     parsing_dir = wpt_dir / "css-fonts" / "parsing"
     valid: list[tuple[str, str, str]] = []
     invalid: list[tuple[str, str]] = []
@@ -207,6 +211,8 @@ def _extract_css_fonts_property_cases(
         text = html_file.read_text(encoding="utf-8")
         for m in _VALID_CALL_RE.finditer(text):
             prop = m.group(2)
+            if prop in PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+                continue
             val = _unescape_js_string(m.group(4))
             if "calc(" in val or "var(" in val:
                 continue
@@ -229,6 +235,8 @@ def _extract_css_fonts_property_cases(
 
         for m in _INVALID_CALL_RE.finditer(text):
             prop = m.group(2)
+            if prop in PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+                continue
             val = _unescape_js_string(m.group(4))
             if "calc(" in val or "var(" in val:
                 continue
@@ -523,7 +531,7 @@ def main(argv: list[str] | None = None) -> int:
     urange_v, urange_i = _extract_urange_cases(wpt_dir)
     ff_ser_cases = _extract_font_family_serialization_cases(wpt_dir)
     ff_desc_v, ff_desc_i = _extract_font_face_descriptor_cases(wpt_dir)
-    fonts_v, fonts_i = _extract_css_fonts_property_cases(wpt_dir)
+    fonts_v, fonts_i = _extract_css_fonts_property_cases(wpt_dir, min_engines=eff_min)
     broad_v, broad_i = _extract_broad_css_property_cases(wpt_dir, min_engines=eff_min)
 
     files_to_write = {

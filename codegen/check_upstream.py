@@ -97,7 +97,6 @@ class UpstreamReport:
             or self.support_changes
             or self.unresolved_targets
             or self.wpt_failures
-            or self.specs_files_changed
             or self.wpt_files_changed
         )
 
@@ -270,7 +269,9 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    fonts_v, fonts_i = gen_wpt_tests._extract_css_fonts_property_cases(wpt_dir)
+    fonts_v, fonts_i = gen_wpt_tests._extract_css_fonts_property_cases(
+        wpt_dir, min_engines=min_engines
+    )
     for prop, raw_css, expected in fonts_v:
         if prop in current_specs.PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
             continue
@@ -675,7 +676,6 @@ def format_markdown_issue(report: UpstreamReport) -> str:
         and not report.syntax_changes
         and not report.support_changes
         and not report.wpt_files_changed
-        and not report.specs_files_changed
     ):
         lines.append("* No syntax, unit, engine-support, or WPT test vector changes detected for enabled targets (`min_engines >= " + str(report.min_engines) + "`).")
         if report.experimental_syntax_changes:
