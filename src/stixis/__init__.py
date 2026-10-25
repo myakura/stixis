@@ -31,7 +31,7 @@ from stixis.nodes import (
     serialize_declarations,
     serialize_value,
 )
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions, using_options
 from stixis.primitives import (
     Deg,
     Dimension,
@@ -90,4 +90,5 @@ __all__ = [
     "serialize",
     "serialize_declarations",
     "serialize_value",
+    "using_options",
 ]
