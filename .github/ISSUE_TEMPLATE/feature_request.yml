@@ -7,16 +7,16 @@ body:
     id: what-happens
     attributes:
       label: What Happens?
-      description: Describe the current limitation or friction when using `stixis` in a consumer project.
+      description: Describe the current limitation when using `stixis`.
       placeholder: |
-        Currently, constructing `...` requires `...`.
+        Constructing `...` requires `...`.
     validations:
       required: true
   - type: textarea
     id: reproduction
     attributes:
       label: How to Reproduce?
-      description: Show a minimal Python snippet illustrating the current behavior or boilerplate required.
+      description: Show a minimal Python snippet illustrating the current behavior.
       render: python
       placeholder: |
         from stixis import ...
@@ -26,6 +26,6 @@ body:
     id: expected
     attributes:
       label: What Should Happen?
-      description: Describe the proposed API signature, option, or serialization behavior and how it preserves Stixis invariants (eager validation, zero runtime dependencies, W3C spec compliance).
+      description: Describe the proposed API signature, option, or serialization behavior.
     validations:
       required: true
