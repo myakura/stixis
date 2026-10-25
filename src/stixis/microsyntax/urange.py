@@ -97,7 +97,21 @@ def format_single_urange(
     return f"{prefix}{start:X}-{end:X}"
 
 
-def parse_urange(value: Any) -> list[tuple[int, int]]:
+def _coalesce_codepoint_set(cps: list[int]) -> list[tuple[int, int]]:
+    unique_sorted = sorted(set(cps))
+    ranges: list[tuple[int, int]] = []
+    r_start = r_end = unique_sorted[0]
+    for cp in unique_sorted[1:]:
+        if cp == r_end + 1:
+            r_end = cp
+        else:
+            ranges.append((r_start, r_end))
+            r_start = r_end = cp
+    ranges.append((r_start, r_end))
+    return ranges
+
+
+def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]:
     """Parse a CSS `unicode-range` string or structured Python value into a list of `(start, end)` intervals."""
     if isinstance(value, str):
         if not value.strip():
@@ -107,7 +121,18 @@ def parse_urange(value: Any) -> list[tuple[int, int]]:
         parts = no_comments.split(",")
         if not parts:
             raise StixisValidationError("unicode-range", "<urange>#", value)
-        return [parse_single_urange(part) for part in parts]
+        parsed = [parse_single_urange(part) for part in parts]
+        if coalesce and parsed:
+            sorted_iv = sorted(parsed)
+            merged: list[tuple[int, int]] = [sorted_iv[0]]
+            for s, e in sorted_iv[1:]:
+                prev_s, prev_e = merged[-1]
+                if s <= prev_e + 1:
+                    merged[-1] = (prev_s, max(prev_e, e))
+                else:
+                    merged.append((s, e))
+            return merged
+        return parsed
 
     if isinstance(value, bool):
         raise StixisValidationError("unicode-range", "<urange>#", value)
@@ -138,25 +163,18 @@ def parse_urange(value: Any) -> list[tuple[int, int]]:
             if isinstance(item, bool) or not isinstance(item, int) or item < 0 or item > MAX_CODEPOINT:
                 raise StixisValidationError("unicode-range", "<urange>#", value)
             cps.append(item)
-        cps.sort()
-        ranges: list[tuple[int, int]] = []
-        r_start = r_end = cps[0]
-        for cp in cps[1:]:
-            if cp == r_end + 1:
-                r_end = cp
-            else:
-                ranges.append((r_start, r_end))
-                r_start = r_end = cp
-        ranges.append((r_start, r_end))
-        return ranges
+        return _coalesce_codepoint_set(cps)
 
     if isinstance(value, Sequence):
         if not value:
             raise StixisValidationError("unicode-range", "<urange>#", value)
         out: list[tuple[int, int]] = []
+        int_cps: list[int] = []
+        all_plain_ints = True
         for elem in value:
             if isinstance(elem, str):
-                out.extend(parse_urange(elem))
+                all_plain_ints = False
+                out.extend(parse_urange(elem, coalesce=coalesce))
             elif (
                 isinstance(elem, tuple)
                 and len(elem) == 2
@@ -165,6 +183,7 @@ def parse_urange(value: Any) -> list[tuple[int, int]]:
                 and isinstance(elem[0], int)
                 and isinstance(elem[1], int)
             ):
+                all_plain_ints = False
                 s, e = elem
                 if s < 0 or e < s or e > MAX_CODEPOINT:
                     raise StixisValidationError("unicode-range", "<urange>#", value)
@@ -172,9 +191,25 @@ def parse_urange(value: Any) -> list[tuple[int, int]]:
             elif not isinstance(elem, bool) and isinstance(elem, int):
                 if elem < 0 or elem > MAX_CODEPOINT:
                     raise StixisValidationError("unicode-range", "<urange>#", value)
+                int_cps.append(elem)
                 out.append((elem, elem))
             else:
                 raise StixisValidationError("unicode-range", "<urange>#", value)
+        if coalesce:
+            if all_plain_ints:
+                return _coalesce_codepoint_set(int_cps)
+            # Merge overlapping/adjacent intervals when coalesce=True on mixed sequences
+            sorted_iv = sorted(out)
+            merged: list[tuple[int, int]] = [sorted_iv[0]]
+            for s, e in sorted_iv[1:]:
+                prev_s, prev_e = merged[-1]
+                if s <= prev_e + 1:
+                    merged[-1] = (prev_s, max(prev_e, e))
+                else:
+                    merged.append((s, e))
+            return merged
+        if all_plain_ints:
+            return _coalesce_codepoint_set(int_cps)
         return out
 
     raise StixisValidationError("unicode-range", "<urange>#", value)
@@ -192,10 +227,11 @@ def parse_urange_codepoints(value: Any) -> set[int]:
 def format_urange(
     value: Any,
     *,
+    coalesce: bool = False,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     """Validate and format a `unicode-range` value into a comma-separated CSS string."""
-    intervals = parse_urange(value)
+    intervals = parse_urange(value, coalesce=coalesce)
     return ", ".join(format_single_urange(s, e, options=options) for s, e in intervals)
 
 
@@ -208,17 +244,32 @@ def compact_urange(
 ) -> str:
     """Compact target code points into minimal `unicode-range` intervals using CSS Cascade Shadowing.
 
-    Adjacent intervals within `max_gap` are merged only when no code point in `forbidden_sorted`
-    (representing lower-priority cascade chunks) lies inside the bridged gap.
+    `max_gap` specifies the maximum number of missing code points between two target code points
+    (`cp - prev_end - 1 <= max_gap`) that may be bridged into a single interval when no code point
+    in `forbidden_sorted` lies inside `(prev_end, cp)`.
     """
-    cps = sorted({int(cp) for cp in sorted_target_cps})
-    if not cps:
+    if isinstance(max_gap, bool) or not isinstance(max_gap, int) or max_gap < 0:
+        raise StixisValidationError("unicode-range", "<urange>#", max_gap)
+    if isinstance(sorted_target_cps, (str, bytes)) or not isinstance(sorted_target_cps, Iterable):
         raise StixisValidationError("unicode-range", "<urange>#", sorted_target_cps)
-    for cp in cps:
-        if cp < 0 or cp > MAX_CODEPOINT:
-            raise StixisValidationError("unicode-range", "<urange>#", cp)
+    if isinstance(forbidden_sorted, (str, bytes)) or not isinstance(forbidden_sorted, Iterable):
+        raise StixisValidationError("unicode-range", "<urange>#", forbidden_sorted)
 
-    forbidden = sorted(forbidden_sorted) if not isinstance(forbidden_sorted, list) else forbidden_sorted
+    raw_cps: set[int] = set()
+    for cp in sorted_target_cps:
+        if isinstance(cp, bool) or not isinstance(cp, int) or cp < 0 or cp > MAX_CODEPOINT:
+            raise StixisValidationError("unicode-range", "<urange>#", cp)
+        raw_cps.add(cp)
+    if not raw_cps:
+        raise StixisValidationError("unicode-range", "<urange>#", sorted_target_cps)
+    cps = sorted(raw_cps)
+
+    forbidden_set: list[int] = []
+    for fcp in forbidden_sorted:
+        if isinstance(fcp, bool) or not isinstance(fcp, int) or fcp < 0 or fcp > MAX_CODEPOINT:
+            raise StixisValidationError("unicode-range", "<urange>#", fcp)
+        forbidden_set.append(fcp)
+    forbidden = sorted(forbidden_set)
 
     intervals: list[tuple[int, int]] = []
     cur_start = cur_end = cps[0]
