@@ -356,8 +356,10 @@ def test_security_and_descriptor_resolution_regressions(
         StyleRule("body", {"--x: red; color": "blue"})
     with pytest.raises(StixisValidationError):
         StyleRule("body", {"--": "blue"})
-    escaped_custom = StyleRule("body", {r"--foo\+bar": "blue"})
+    escaped_custom = StyleRule("body", {r"--foo\+bar": "blue", r"\2d\2d MyVar": "red", r"\43 olor": "green"})
     assert r"--foo\+bar: blue;" in str(escaped_custom)
+    assert "--MyVar: red;" in str(escaped_custom)
+    assert "color: green;" in str(escaped_custom)
 
     # 2. At-rule names with comment or non-ident characters (`media/*`) must be rejected eagerly,
     #    while valid double-hyphen at-rule names (`--custom`) are accepted.

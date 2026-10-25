@@ -53,9 +53,8 @@ def normalize_identifier_key(key: str) -> str:
             key,
             f"Invalid CSS property or descriptor identifier: {key!r}",
         )
-    cand = stripped if stripped.startswith("--") else stripped.replace("_", "-").lower()
     try:
-        toks = tokenize_css(cand, preserve_whitespace=True)
+        toks = tokenize_css(stripped, preserve_whitespace=True)
     except StixisSyntaxError as exc:
         raise StixisValidationError(
             "property",
@@ -80,7 +79,7 @@ def normalize_identifier_key(key: str) -> str:
                 "CSS custom property name must contain characters after '--'",
             )
         return serialize_dashed_ident(ident_val)
-    return serialize_ident(ident_val)
+    return serialize_ident(ident_val.replace("_", "-").lower())
 
 
 def resolve_target_syntax(
