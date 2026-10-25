@@ -252,11 +252,37 @@ def test_number_primitive_rejects_bool_and_non_finite() -> None:
 
 
 def test_compact_urange_cascade_shadowing() -> None:
+    from stixis import format_urange, parse_urange
+
     target = [0x3041, 0x3042, 0x3045]
     # Without forbidden codepoints, gap of 2 (0x3043..0x3044) is bridged when max_gap >= 2
     assert compact_urange(target, [], max_gap=0x10) == "U+3041-3045"
     # With 0x3043 in forbidden_sorted, bridging across 0x3043 is prevented to avoid cascade shadowing!
     assert compact_urange(target, [0x3043], max_gap=0x10) == "U+3041-3042, U+3045"
+
+    # Reject bool and non-int values in sorted_target_cps and forbidden_sorted, and invalid max_gap
+    with pytest.raises(StixisValidationError):
+        compact_urange([True])
+    with pytest.raises(StixisValidationError):
+        compact_urange([False])
+    with pytest.raises(StixisValidationError):
+        compact_urange([0x3041, 0x3042], forbidden_sorted=[False])
+    with pytest.raises(StixisValidationError):
+        compact_urange([0x3041, 0x3042], forbidden_sorted=["bad"])  # type: ignore[list-item]
+    with pytest.raises(StixisValidationError):
+        compact_urange([0x3041], max_gap=-1)
+    with pytest.raises(StixisValidationError):
+        compact_urange([0x3041], max_gap=True)
+
+    # Pure integer sequences (`list[int]`, `tuple[int, ...]`) coalesce contiguous code points like `set[int]`
+    assert format_urange({0x3041, 0x3042, 0x3043}) == "U+3041-3043"
+    assert format_urange([0x3041, 0x3042, 0x3043]) == "U+3041-3043"
+    assert format_urange((0x3043, 0x3041, 0x3042, 0x3045)) == "U+3041-3043, U+3045"
+    assert parse_urange([0x3041, 0x3042, 0x3043]) == [(0x3041, 0x3043)]
+
+    # Mixed interval/codepoint sequences preserve explicit segments by default and merge when coalesce=True
+    assert format_urange([(0x3040, 0x309F), 0x3000]) == "U+3040-309F, U+3000"
+    assert format_urange([(0x3040, 0x3042), 0x3043], coalesce=True) == "U+3040-3043"
 
 
 def test_stylesheet_and_nested_rules_formatting() -> None:

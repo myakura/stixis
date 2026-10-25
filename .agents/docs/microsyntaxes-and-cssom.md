@@ -24,7 +24,8 @@ All primitive serializers implement W3C CSSOM §2.1 (`Common Serializing Idioms`
 ### 1. `<urange>` and Cascade Shadowing Compaction (`urange.py`)
 
 * `parse_urange(text)` implements CSS Syntax Level 3 §8 and passes all 94 cases in WPT `urange-parsing.html`. Because CSS tokenizers absorb `U+...` into `ident`, `number` (including scientific notation like `u+1e3`), or `dimension` tokens, `parse_urange` strips comments first while verifying that no comment separated the leading `u`/`U` from `+` (rejecting `u/**/0` while accepting `u/**/+/**/0`).
-* `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)` merges adjacent ranges when `gap <= max_gap` **only** if `bisect_right` confirms that no code point in `forbidden_sorted` lies inside `(prev_end, next_start)`. This minimizes `unicode-range` string length without shadowing glyphs in subsequent `@font-face` slices.
+* `parse_urange` and `format_urange` coalesce contiguous integer code points into inclusive `(start, end)` ranges for both `set[int]` and pure-integer sequences (`list[int]`, `tuple[int, ...]`), and accept `coalesce=True` to sort and merge adjacent or overlapping intervals on mixed sequences or raw CSS strings.
+* `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)` merges adjacent ranges when the missing code point count `gap = cp - prev_end - 1 <= max_gap` **only** if `bisect_right` confirms that no code point in `forbidden_sorted` lies inside `(prev_end, next_start)`. This minimizes `unicode-range` string length without shadowing glyphs in subsequent `@font-face` slices.
 
 ### 2. `<opentype-tag>` and Feature/Variation Settings (`opentype.py`)
 
