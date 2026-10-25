@@ -1,0 +1,91 @@
+# Declarative patches and merge rules for `@webref/css` (`ed/css/*.json`).
+# Consumed by `codegen/gen_specs.py` to generate `src/stixis/_generated/`.
+
+[meta]
+webref_css_dir = "resources/specs/w3c/webref/ed/css"
+
+# Additional container query and speech units defined in prose or pending reffy extraction
+[extra_units]
+"<length>" = ["cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"]
+"<decibel>" = ["dB"]
+"<semitones>" = ["st"]
+
+# Explicit Delta specs whose descriptor and value definitions override or extend base specs
+[delta_merges]
+order = [
+    "CSS.json",
+    "css-values.json",
+    "css-values-5.json",
+    "css-color.json",
+    "css-color-5.json",
+    "css-fonts.json",
+    "css-fonts-5.json",
+]
+
+# Prose-defined or missing non-terminal value definitions (`<type>`)
+[values]
+"<font-src-list>" = "<font-src>#"
+"<family-name>" = "<string> | <custom-ident>+"
+"<generic-family>" = "<generic-font-family>"
+"<palette-identifier>" = "<dashed-ident>"
+"<counter-name>" = "<custom-ident>"
+"<counter-style-name>" = "<custom-ident>"
+"<timeline-range-name>" = "cover | contain | entry | exit | entry-crossing | exit-crossing | <custom-ident>"
+"<timeline-range-center-subject>" = "source | target"
+"<custom-property-name>" = "<dashed-ident>"
+"<extension-name>" = "<dashed-ident>"
+"<target-name>" = "<string>"
+"<id>" = "<id-selector>"
+"<url-modifier>" = "<ident> | <function-token> <any-value> )"
+"<outline-line-style>" = "auto | <line-style>"
+"<voice-family-name>" = "<string> | <custom-ident>+"
+"<age>" = "child | young | old"
+"<gender>" = "male | female | neutral"
+"<page-size>" = "A5 | A4 | A3 | B5 | B4 | JIS-B5 | JIS-B4 | letter | legal | ledger"
+"<size-keyword>" = "<custom-ident>"
+"<url-set>" = "<image-set()>"
+"<transform-function>" = "matrix( <number>#{6} ) | translate( <length-percentage> , <length-percentage>? ) | translateX( <length-percentage> ) | translateY( <length-percentage> ) | scale( [ <number> | <percentage> ]#{1,2} ) | scaleX( <number> | <percentage> ) | scaleY( <number> | <percentage> ) | rotate( [ <angle> | <zero> ] ) | skew( [ <angle> | <zero> ] , [ <angle> | <zero> ]? ) | skewX( [ <angle> | <zero> ] ) | skewY( [ <angle> | <zero> ] ) | matrix3d( <number>#{16} ) | translate3d( <length-percentage> , <length-percentage> , <length> ) | translateZ( <length> ) | scale3d( [ <number> | <percentage> ]#{3} ) | scaleZ( <number> | <percentage> ) | rotate3d( <number> , <number> , <number> , [ <angle> | <zero> ] ) | rotateX( [ <angle> | <zero> ] ) | rotateY( [ <angle> | <zero> ] ) | rotateZ( [ <angle> | <zero> ] ) | perspective( [ <length [0,∞]> | none ] )"
+"<whole-value>" = "<declaration-value>"
+"<declaration>" = "<declaration-value>"
+"<media-query-list>" = "<any-value>"
+"<supports-condition-name>" = "<extension-name>"
+"<boolean-expr-group>" = "<any-value>"
+"<anchored-feature>" = "<any-value>"
+"<style-feature-name>" = "<ident>"
+"<style-feature-value>" = "<declaration-value>"
+"<scroll-state-feature>" = "<any-value>"
+"<size-feature>" = "<any-value>"
+"<scope-start>" = "<any-value>"
+"<scope-end>" = "<any-value>"
+"<animation-action>" = "none | play | play-once | play-forwards | play-backwards | pause | reset | replay"
+"<quirky-color>" = "<color>"
+"<quirky-length>" = "<length>"
+"<uri>" = "<url>"
+"<view-transition-type>" = "<custom-ident>"
+
+# Extend `<font-features-tech>` with `avar2` from `css-fonts-5.json`
+"<font-features-tech>" = "[ features-opentype | features-aat | features-graphite | avar2 ]"
+
+# At-rule prelude grammars (`ValueNode` validated when present; `"<condition>"` uses token safety)
+[atrule_preludes]
+"@font-face" = ""
+"@font-palette-values" = "<dashed-ident>"
+"@font-feature-values" = "<font-family-name>#"
+"@property" = "<custom-property-name>#"
+"@keyframes" = "<keyframes-name>"
+"@counter-style" = "<counter-style-name>"
+"@color-profile" = "<dashed-ident> | device-cmyk"
+"@position-try" = "<dashed-ident>"
+"@layer" = "<layer-name>? | <layer-name>#"
+"@view-transition" = ""
+"@starting-style" = ""
+
+# Prose-defined descriptor aliases and overrides on at-rules
+[atrule_descriptors."@font-face"]
+"font-stretch" = "auto | <'font-width'>{1,2}"
+"unicode-range" = "<urange>#"
+
+# Property syntax overrides where a Level 4/5 draft broke standard longhand syntax or omitted prose keywords
+[properties]
+"font-stretch" = "<'font-width'>"
+"font-synthesis" = "none | [ weight || [ style | oblique-only ] || small-caps || position ]"
