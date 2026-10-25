@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Read baseline upstream commits from codegen/upstream.json
         id: baseline
@@ -24,7 +24,7 @@ jobs:
           echo "bcd_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["bcd"]["commit"])')" >> "$GITHUB_OUTPUT"
 
       - name: Sparse-checkout w3c/webref at baseline commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: w3c/webref
           ref: ${{ steps.baseline.outputs.webref_sha }}
@@ -33,7 +33,7 @@ jobs:
             ed/css
 
       - name: Sparse-checkout web-platform-tests/wpt at baseline commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: web-platform-tests/wpt
           ref: ${{ steps.baseline.outputs.wpt_sha }}
@@ -42,7 +42,7 @@ jobs:
             css
 
       - name: Sparse-checkout mdn/browser-compat-data at baseline commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mdn/browser-compat-data
           ref: ${{ steps.baseline.outputs.bcd_sha }}
@@ -51,7 +51,7 @@ jobs:
             css
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           enable-cache: true
 
