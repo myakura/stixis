@@ -7,9 +7,30 @@ name = "stixis"
 version = "0.1.0"
 description = "Spec-driven CSS serializer and validator generated from W3C @webref/css and Web Platform Tests"
 readme = "README.md"
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Masataka Yakura", email = "myakura.web@gmail.com" },
+]
+keywords = ["css", "cssom", "serializer", "validator", "webref", "wpt", "font-face", "pep-750"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Text Processing :: Markup",
+    "Typing :: Typed",
+]
 requires-python = ">=3.14"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/myakura/stixis"
+Repository = "https://github.com/myakura/stixis.git"
+Issues = "https://github.com/myakura/stixis/issues"
 
 [dependency-groups]
 dev = [
@@ -23,6 +44,19 @@ stixis = "stixis.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/stixis"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/stixis",
+    "codegen",
+    "tests",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "AGENTS.md",
+    ".agents",
+    "pyproject.toml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
