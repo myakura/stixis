@@ -196,7 +196,7 @@ def _extract_font_face_descriptor_cases(
 def _extract_css_fonts_property_cases(
     wpt_dir: Path,
 ) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
-    from stixis import SerializationOptions, canonicalize
+    from stixis import SerializationOptions, StixisError, canonicalize
 
     opts = SerializationOptions.cssom()
     parsing_dir = wpt_dir / "css-fonts" / "parsing"
@@ -217,8 +217,12 @@ def _extract_css_fonts_property_cases(
                     _unescape_js_string(cm.group(2))
                     for cm in re.finditer(r"(['\"])((?:\\.|(?!\1).)*)\1", m.group(7))
                 ]
-                got = canonicalize(prop, val, options=opts)
-                exp = got if got in candidates else candidates[0]
+                try:
+                    got = canonicalize(prop, val, options=opts)
+                except StixisError:
+                    exp = candidates[0] if candidates else val
+                else:
+                    exp = got if got in candidates else (candidates[0] if candidates else val)
             else:
                 exp = val
             valid.append((prop, val, exp))
@@ -491,9 +495,6 @@ def main(argv: list[str] | None = None) -> int:
 
     wpt_dir: Path = args.wpt_dir
     if not wpt_dir.is_dir():
-        if args.check and OUT_DIR.is_dir():
-            print(f"WPT directory {wpt_dir} not present; existing generated tests verified.")
-            return 0
         print(f"Error: WPT directory not found at {wpt_dir}", file=sys.stderr)
         return 1
 

@@ -21,6 +21,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.path.insert(0, str(REPO_ROOT / "codegen"))
+sys.path.insert(0, str(REPO_ROOT))
 
 import gen_specs
 import gen_wpt_tests
@@ -277,6 +278,89 @@ def _check_wpt_cases(wpt_dir: Path) -> tuple[dict[str, int], list[WptFailure], b
             failures.append(failure)
 
     broad_v, broad_i = gen_wpt_tests._extract_broad_css_property_cases(wpt_dir)
+
+    # Also verify that all previously committed general CSS property vectors in
+    # `tests/_generated/test_wpt_css_properties.py` still pass and were not silently dropped,
+    # and diagnose any failing vector in WPT `css-*/parsing/*-{valid,invalid}.html` files
+    # when either a previously clean file regresses or `wpt_dir` contains only failing files.
+    from tests._generated import test_wpt_css_properties as committed_broad
+
+    new_broad_v_set = set(broad_v)
+    new_broad_i_set = set(broad_i)
+    dropped_props: set[str] = set()
+    for prop, raw_css, expected in committed_broad.VALID_PROPERTY_CASES:
+        if (prop, raw_css, expected) not in new_broad_v_set:
+            dropped_props.add(prop)
+            try:
+                got = canonicalize(prop, raw_css, options=opts)
+                if got != expected:
+                    failures.append(
+                        WptFailure("css-properties", prop, raw_css, expected, f"got {got!r}")
+                    )
+            except StixisError as exc:
+                failures.append(
+                    WptFailure("css-properties", prop, raw_css, expected, f"raised {exc}")
+                )
+    for prop, raw_css in committed_broad.INVALID_PROPERTY_CASES:
+        if (prop, raw_css) not in new_broad_i_set:
+            dropped_props.add(prop)
+            failure = _expect_invalid_raises("css-properties-invalid", prop, raw_css, options=opts)
+            if failure is not None:
+                failures.append(failure)
+
+    # Scan candidate WPT files directly for any failing vector on known properties when
+    # either a committed property was dropped or no clean broad cases were extracted.
+    if dropped_props or (not broad_v and not broad_i):
+        for html_file in sorted(wpt_dir.glob("css-*/parsing/*-*.html")):
+            if html_file.parent.parent.name == "css-fonts":
+                continue
+            if not (
+                html_file.name.endswith("-valid.html") or html_file.name.endswith("-invalid.html")
+            ):
+                continue
+            text = html_file.read_text(encoding="utf-8", errors="ignore")
+            for m in gen_wpt_tests._VALID_CALL_RE.finditer(text):
+                prop = m.group(2)
+                if dropped_props and prop not in dropped_props:
+                    continue
+                if prop not in current_specs.PROPERTY_SYNTAXES:
+                    continue
+                val = gen_wpt_tests._unescape_js_string(m.group(4))
+                if any(
+                    fn in val.lower() for fn in ("calc(", "var(", "env(", "min(", "max(", "clamp(")
+                ):
+                    continue
+                exp = (
+                    gen_wpt_tests._unescape_js_string(m.group(6))
+                    if m.group(6) is not None
+                    else val
+                )
+                try:
+                    got = canonicalize(prop, val, options=opts)
+                    if got != exp:
+                        failures.append(
+                            WptFailure("css-properties", prop, val, exp, f"got {got!r}")
+                        )
+                except StixisError as exc:
+                    failures.append(
+                        WptFailure("css-properties", prop, val, exp, f"raised {exc}")
+                    )
+            for m in gen_wpt_tests._INVALID_CALL_RE.finditer(text):
+                prop = m.group(2)
+                if dropped_props and prop not in dropped_props:
+                    continue
+                if prop not in current_specs.PROPERTY_SYNTAXES:
+                    continue
+                val = gen_wpt_tests._unescape_js_string(m.group(4))
+                if any(
+                    fn in val.lower() for fn in ("calc(", "var(", "env(", "min(", "max(", "clamp(")
+                ):
+                    continue
+                failure = _expect_invalid_raises(
+                    "css-properties-invalid", prop, val, options=opts
+                )
+                if failure is not None:
+                    failures.append(failure)
 
     counts = {
         "urange_cases": len(urange_v) + len(urange_i),

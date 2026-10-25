@@ -475,3 +475,53 @@ def test_upstream_checker_detects_unresolved_refs_and_formats_agent_issue() -> N
     assert "codegen/spec_patches.toml" in md
 
 
+def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import check_upstream
+
+    # Set up a minimal synthetic WPT directory with:
+    # 1. A css-fonts test with candidate array `[...]` on an unsupported/invalid value
+    # 2. A non-font WPT property test where `width` has a failing expected value `"2px"` for `"1px"`
+    wpt_css = tmp_path / "css"
+    (wpt_css / "css-syntax").mkdir(parents=True)
+    (wpt_css / "css-syntax" / "urange-parsing.html").write_text(
+        'testUrange("U+41", "U+41");\n', encoding="utf-8"
+    )
+    (wpt_css / "css-fonts" / "support").mkdir(parents=True)
+    (wpt_css / "css-fonts" / "support" / "font-family-keywords.js").write_text(
+        'const kGenericFontFamilyKeywords = ["serif"];\nconst kNonGenericFontFamilyKeywords = [];\n',
+        encoding="utf-8",
+    )
+    (wpt_css / "cssom").mkdir(parents=True)
+    (wpt_css / "cssom" / "font-family-serialization-001.html").write_text("", encoding="utf-8")
+    fonts_parsing = wpt_css / "css-fonts" / "parsing"
+    fonts_parsing.mkdir(parents=True)
+    for fname in (
+        "font-face-metric-overrides.html",
+        "font-face-size-adjust.html",
+        "font-face-width.html",
+        "font-face-src-local.html",
+        "font-face-src-format.html",
+        "font-face-src-tech.html",
+    ):
+        (fonts_parsing / fname).write_text("", encoding="utf-8")
+
+    (fonts_parsing / "font-weight-valid.html").write_text(
+        'test_valid_value("font-weight", "not-a-weight", ["400", "normal"]);\n',
+        encoding="utf-8",
+    )
+    sizing_parsing = wpt_css / "css-sizing" / "parsing"
+    sizing_parsing.mkdir(parents=True)
+    (sizing_parsing / "width-valid.html").write_text(
+        'test_valid_value("width", "1px", "2px");\n',
+        encoding="utf-8",
+    )
+
+    _counts, failures, _changed = check_upstream._check_wpt_cases(wpt_css)
+    failure_targets = {(f.suite, f.target, f.raw_css) for f in failures}
+    assert ("css-fonts", "font-weight", "not-a-weight") in failure_targets
+    assert ("css-properties", "width", "1px") in failure_targets
+
+
+
