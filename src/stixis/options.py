@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal
 
@@ -57,5 +60,32 @@ class SerializationOptions:
             min_engines=eff_min,
         )
 
+    @contextmanager
+    def activate(self) -> Iterator[SerializationOptions]:
+        """Temporarily set this `SerializationOptions` as the default for newly constructed AST nodes."""
+        token = _ACTIVE_OPTIONS.set(self)
+        try:
+            yield self
+        finally:
+            _ACTIVE_OPTIONS.reset(token)
+
 
 DEFAULT_OPTIONS = SerializationOptions()
+
+_ACTIVE_OPTIONS: ContextVar[SerializationOptions] = ContextVar(
+    "_ACTIVE_OPTIONS", default=DEFAULT_OPTIONS
+)
+
+
+def current_options(options: SerializationOptions | None = None) -> SerializationOptions:
+    """Return `options` if provided, otherwise the active context options or `DEFAULT_OPTIONS`."""
+    if options is not None:
+        return options
+    return _ACTIVE_OPTIONS.get()
+
+
+@contextmanager
+def using_options(options: SerializationOptions) -> Iterator[SerializationOptions]:
+    """Context manager that sets default `SerializationOptions` for AST nodes constructed in the block."""
+    with options.activate() as active:
+        yield active

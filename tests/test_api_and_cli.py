@@ -315,6 +315,87 @@ def test_stylesheet_and_nested_rules_formatting() -> None:
     assert minified == '@font-face{font-family:"Inter";src:url("inter.woff2");font-display:swap}@media (min-width: 768px){.container{max-width:720px;margin:0px auto}}'
 
 
+def test_comment_node_section_spacing_and_options_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import stixis.nodes as nodes_mod
+    from stixis import using_options
+
+    # 1. Leading newline on a section comment (or `leading_newline=True`) emits a blank line in non-minified output
+    sheet = StyleSheet(
+        rules=[
+            FontFace(font_family="Inter", src=Url("inter-400.woff2"), font_weight=400),
+            CommentNode("\n/* === Bold === */"),
+            FontFace(font_family="Inter", src=Url("inter-700.woff2"), font_weight=700),
+            CommentNode("=== Italic ===", leading_newline=True),
+            FontFace(font_family="Inter", src=Url("inter-400i.woff2"), font_style="italic"),
+        ],
+    )
+    rendered = dumps(sheet)
+    assert "\n\n/* === Bold === */\n@font-face" in rendered
+    assert "\n\n/* === Italic === */\n@font-face" in rendered
+    assert "/*" not in dumps(sheet, minify=True)
+
+    # 2. `using_options` / `options.activate()` supplies default options to child rules without repeating `options=`
+    cleome_1eng = SerializationOptions.cleome(min_engines=1)
+    with using_options(cleome_1eng):
+        s_ctx = StyleSheet(
+            rules=[
+                FontFace(font_family="Inter", src=FontSrc(url="inter.woff2", format="woff2"), font_width=Pct(100)),
+                StyleRule("p", {"hanging_punctuation": "first"}),
+            ],
+        )
+    out_ctx = dumps(s_ctx)
+    assert "font-family: 'Inter';" in out_ctx
+    assert "font-stretch: 100%;" in out_ctx
+    assert "hanging-punctuation: first;" in out_ctx
+
+    # 3. `format` / `dumps` skips redundant child rule rebuilds when formatting profile matches and gates are not tightened
+    rule = StyleRule("body", {"margin": Px(0)})
+    calls = 0
+    orig_validate = nodes_mod._validate_and_normalize_declarations
+
+    def _counting_validate(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        return orig_validate(*args, **kwargs)
+
+    monkeypatch.setattr(nodes_mod, "_validate_and_normalize_declarations", _counting_validate)
+    assert dumps(rule, options=SerializationOptions(min_engines=1)) == "body {\n  margin: 0px;\n}"
+    assert calls == 0
+
+    # 4. Child rules constructed with explicit options keep their options when wrapped in `StyleSheet([rule])` without parent `options=`
+    child_1eng = StyleRule(
+        "p",
+        {"hanging_punctuation": "first"},
+        options=SerializationOptions.cleome(min_engines=1),
+    )
+    assert "hanging-punctuation: first;" in dumps(StyleSheet([child_1eng]))
+
+    # 5. Re-validating when `allow_unknown_properties=True` or `allow_vendor_prefixes=True` and a previously disabled property becomes enabled
+    raw_unknown_rule = StyleRule(
+        "p",
+        {"hanging_punctuation": 123},
+        options=SerializationOptions(min_engines=3, allow_unknown_properties=True),
+    )
+    with pytest.raises(StixisValidationError):
+        dumps(
+            raw_unknown_rule,
+            options=SerializationOptions(min_engines=0, allow_unknown_properties=True),
+        )
+
+    raw_vendor_rule = StyleRule(
+        "p",
+        {"-webkit-animation-duration": 123},
+        options=SerializationOptions(allow_vendor_prefixes=True),
+    )
+    with pytest.raises(StixisValidationError):
+        dumps(
+            raw_vendor_rule,
+            options=SerializationOptions(min_engines=0, allow_vendor_prefixes=True),
+        )
+
+
 def test_serialize_declarations_helper() -> None:
     text = serialize_declarations(
         {"font_family": "Inter", "font_weight": (100, 900)},

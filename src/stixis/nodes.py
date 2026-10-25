@@ -17,7 +17,7 @@ from stixis._generated.specs import (
 )
 from stixis._generated.types import FontFaceDescriptors
 from stixis.errors import StixisSyntaxError, StixisValidationError
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions, current_options
 from stixis.primitives import serialize_dashed_ident, serialize_ident
 from stixis.syntax import (
     ValueNode,
@@ -177,7 +177,7 @@ def serialize_value(
     options: SerializationOptions | None = None,
 ) -> str:
     """Validate and serialize a structured Python `value` (or PEP 750 `Template`) for `target`."""
-    opts = DEFAULT_OPTIONS if options is None else options
+    opts = current_options(options)
     norm_target, norm_at, syntax, node = resolve_target_syntax(
         target, at_rule=at_rule, options=opts
     )
@@ -200,7 +200,7 @@ def canonicalize(
     options: SerializationOptions | None = None,
 ) -> str:
     """Tokenize and validate raw `css_text` against `target`'s `ValueNode` grammar, returning canonical CSSOM text."""
-    opts = DEFAULT_OPTIONS if options is None else options
+    opts = current_options(options)
     norm_target, norm_at, syntax, node = resolve_target_syntax(
         target, at_rule=at_rule, options=opts
     )
@@ -229,10 +229,27 @@ class RawDeclaration:
         rendered = serialize_value(
             "--raw",
             self.value,
-            options=DEFAULT_OPTIONS,
+            options=current_options(),
         )
         object.__setattr__(self, "property", norm)
         object.__setattr__(self, "value", rendered)
+
+
+def _has_leading_newline(comment: str | Template) -> bool:
+    if isinstance(comment, str):
+        for ch in comment:
+            if ch in ("\n", "\r"):
+                return True
+            if not ch.isspace():
+                return False
+        return False
+    if isinstance(comment, Template) and comment.strings:
+        for ch in comment.strings[0]:
+            if ch in ("\n", "\r"):
+                return True
+            if not ch.isspace():
+                return False
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,11 +257,37 @@ class CommentNode:
     """A standalone CSS comment (`/* ... */`) validated against comment-close injection."""
 
     text: str | Template
+    leading_newline: bool = False
+    options: SerializationOptions | None = None
+    _effective_options: SerializationOptions = field(init=False, repr=False)
+    _has_leading_nl: bool = field(init=False, repr=False)
     _rendered: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        rendered = _validate_and_render_comment(self.text, options=DEFAULT_OPTIONS)
+        opts = current_options(self.options)
+        has_nl = bool(self.leading_newline) or _has_leading_newline(self.text)
+        rendered = _validate_and_render_comment(self.text, options=opts)
+        object.__setattr__(self, "_effective_options", opts)
+        object.__setattr__(self, "_has_leading_nl", has_nl)
         object.__setattr__(self, "_rendered", rendered)
+
+    def format(
+        self,
+        *,
+        minify: bool = False,
+        indent: int = 0,
+        options: SerializationOptions | None = None,
+    ) -> str:
+        if minify:
+            return ""
+        pad = "  " * indent
+        body = (
+            _validate_and_render_comment(self.text, options=options)
+            if options is not None and options != self._effective_options
+            else self._rendered
+        )
+        prefix = "\n" if self._has_leading_nl else ""
+        return f"{prefix}{pad}{body}"
 
     def __str__(self) -> str:
         return self._rendered
@@ -432,7 +475,7 @@ def serialize_declarations(
     options: SerializationOptions | None = None,
 ) -> str:
     """Validate and serialize a mapping of CSS declarations (`prop: value;`)."""
-    opts = DEFAULT_OPTIONS if options is None else options
+    opts = current_options(options)
     pairs = _validate_and_normalize_declarations(declarations, at_rule=at_rule, options=opts)
     if minify:
         return ";".join(f"{k}:{v}" for k, v in pairs)
@@ -535,6 +578,42 @@ def _validate_at_rule_prelude(
     return raw_prelude
 
 
+def _formatting_profile(options: SerializationOptions) -> tuple[Any, ...]:
+    return (
+        options.quote_char,
+        options.always_quote_family_name,
+        options.normalize_zero_oblique,
+        options.font_face_stretch_alias,
+        options.quote_font_format,
+        options.uppercase_urange_prefix,
+    )
+
+
+def _needs_rebuild_for_options(
+    built_opts: SerializationOptions,
+    target_opts: SerializationOptions,
+) -> bool:
+    if built_opts == target_opts:
+        return False
+    if _formatting_profile(built_opts) != _formatting_profile(target_opts):
+        return True
+    # When `allow_unknown_properties` or `allow_vendor_prefixes` was active, disabled known properties
+    # were accepted as `<declaration-value>` rather than validated against their specific property grammar.
+    if (built_opts.allow_unknown_properties or built_opts.allow_vendor_prefixes) and (
+        target_opts.min_engines != built_opts.min_engines
+        or target_opts.extra_properties != built_opts.extra_properties
+    ):
+        return True
+    # Tightening validation gates requires re-validating declarations/descriptors
+    if target_opts.min_engines > built_opts.min_engines:
+        return True
+    if not (built_opts.extra_properties <= target_opts.extra_properties):
+        return True
+    if built_opts.allow_vendor_prefixes and not target_opts.allow_vendor_prefixes:
+        return True
+    return bool(built_opts.allow_unknown_properties and not target_opts.allow_unknown_properties)
+
+
 @dataclass(frozen=True, slots=True)
 class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
@@ -546,23 +625,25 @@ class StyleRule:
     rules: Sequence[Rule] = ()
     comment: str | Template | None = None
     options: SerializationOptions | None = None
+    _effective_options: SerializationOptions = field(init=False, repr=False)
     _selector_str: str = field(init=False, repr=False)
     _decl_pairs: tuple[tuple[str, str], ...] = field(init=False, repr=False)
     _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _comment_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        opts = DEFAULT_OPTIONS if self.options is None else self.options
+        opts = current_options(self.options)
         sel_s = _validate_selector(self.selector)
         decls = _validate_and_normalize_declarations(
             self.declarations, at_rule=None, options=opts
         )
-        rules_t = _validate_child_rules(self.rules)
+        rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
             if self.comment is not None
             else None
         )
+        object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_selector_str", sel_s)
         object.__setattr__(self, "_decl_pairs", decls)
         object.__setattr__(self, "_rules_tuple", rules_t)
@@ -576,7 +657,7 @@ class StyleRule:
         options: SerializationOptions | None = None,
     ) -> str:
         eff_opts = options if options is not None else self.options
-        if options is not None and options != (self.options or DEFAULT_OPTIONS):
+        if options is not None and _needs_rebuild_for_options(self._effective_options, options):
             rebuilt = StyleRule(
                 self.selector,
                 self.declarations,
@@ -636,6 +717,7 @@ class AtRule:
     comment: str | Template | None = None
     statement: bool = False
     options: SerializationOptions | None = None
+    _effective_options: SerializationOptions = field(init=False, repr=False)
     _at_name: str = field(init=False, repr=False)
     _prelude_str: str = field(init=False, repr=False)
     _decl_pairs: tuple[tuple[str, str], ...] = field(init=False, repr=False)
@@ -643,7 +725,7 @@ class AtRule:
     _comment_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        opts = DEFAULT_OPTIONS if self.options is None else self.options
+        opts = current_options(self.options)
         raw_name = self.name.strip() if isinstance(self.name, str) else ""
         if not raw_name or "/*" in raw_name or "*/" in raw_name:
             raise StixisValidationError("at-rule", "@<ident>", self.name)
@@ -667,13 +749,14 @@ class AtRule:
             at_rule=at_name if ATRULE_DESCRIPTORS.get(at_name) else None,
             options=opts,
         )
-        rules_t = _validate_child_rules(self.rules)
+        rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
             if self.comment is not None
             else None
         )
 
+        object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_at_name", at_name)
         object.__setattr__(self, "_prelude_str", prelude_s)
         object.__setattr__(self, "_decl_pairs", decls)
@@ -688,7 +771,7 @@ class AtRule:
         options: SerializationOptions | None = None,
     ) -> str:
         eff_opts = options if options is not None else self.options
-        if options is not None and options != (self.options or DEFAULT_OPTIONS):
+        if options is not None and _needs_rebuild_for_options(self._effective_options, options):
             rebuilt = AtRule(
                 self.name,
                 self.prelude,
@@ -752,13 +835,17 @@ class AtRule:
 type Rule = StyleRule | AtRule | CommentNode
 
 
-def _validate_child_rules(rules: Sequence[Rule] | Iterable[Rule]) -> tuple[Rule, ...]:
+def _validate_child_rules(
+    rules: Sequence[Rule] | Iterable[Rule],
+    *,
+    options: SerializationOptions | None = None,
+) -> tuple[Rule, ...]:
     out: list[Rule] = []
     for r in rules:
         if isinstance(r, (StyleRule, AtRule, CommentNode)):
             out.append(r)
         elif isinstance(r, (str, Template)):
-            out.append(CommentNode(r))
+            out.append(CommentNode(r, options=options))
         else:
             raise StixisValidationError("rules", "StyleRule | AtRule | CommentNode", r)
     return tuple(out)
@@ -791,17 +878,19 @@ class StyleSheet:
     rules: Sequence[Rule]
     header_comment: str | Template | None = None
     options: SerializationOptions | None = None
+    _effective_options: SerializationOptions = field(init=False, repr=False)
     _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _header_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        opts = DEFAULT_OPTIONS if self.options is None else self.options
-        rules_t = _validate_child_rules(self.rules)
+        opts = current_options(self.options)
+        rules_t = _validate_child_rules(self.rules, options=opts)
         hdr_s = (
             _validate_and_render_comment(self.header_comment, options=opts)
             if self.header_comment is not None
             else None
         )
+        object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_header_str", hdr_s)
 
@@ -814,7 +903,7 @@ class StyleSheet:
         eff_opts = options if options is not None else self.options
         blocks: list[str] = []
         if self._header_str and not minify:
-            if options is not None and self.header_comment is not None:
+            if options is not None and options != self._effective_options and self.header_comment is not None:
                 blocks.append(_validate_and_render_comment(self.header_comment, options=options))
             else:
                 blocks.append(self._header_str)
@@ -840,12 +929,7 @@ def _format_rule_node(
     options: SerializationOptions | None,
 ) -> str:
     if isinstance(node, CommentNode):
-        if minify:
-            return ""
-        pad = "  " * indent
-        if options is not None:
-            return f"{pad}{_validate_and_render_comment(node.text, options=options)}"
-        return f"{pad}{node}"
+        return node.format(minify=minify, indent=indent, options=options)
     return node.format(minify=minify, indent=indent, options=options)
 
 
