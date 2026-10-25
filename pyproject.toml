@@ -65,4 +65,4 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py314"
 line-length = 100
-extend-exclude = ["src/stixis/_generated", "tests/_generated"]
+extend-exclude = [".upstream", "src/stixis/_generated", "tests/_generated"]

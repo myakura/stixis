@@ -10,4 +10,5 @@ dist/
 .hypothesis/
 .ruff_cache/
 .mypy_cache/
+.upstream/
 .DS_Store
