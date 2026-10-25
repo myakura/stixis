@@ -256,15 +256,18 @@ def _validate_and_render_comment(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     if isinstance(comment, Template):
-        rendered = render_css_template(comment, options=options).strip()
-        if rendered.startswith("/*") and rendered.endswith("*/"):
+        rendered = render_css_template(comment, options=options, start_in_comment=True).strip()
+        if rendered.startswith("/*") and rendered.endswith("*/") and len(rendered) >= 4:
             # Ensure no premature `*/` exists inside the body
             body = rendered[2:-2]
-            if "*/" in body:
+            while "*/" in body:
                 body = body.replace("*/", "* /")
-                return f"/*{body}*/"
-            return rendered
-        cleaned = rendered.replace("*/", "* /")
+            if body.endswith("*"):
+                body = f"{body} "
+            return f"/*{body}*/"
+        cleaned = rendered
+        while "*/" in cleaned:
+            cleaned = cleaned.replace("*/", "* /")
         return f"/* {cleaned} */"
 
     if isinstance(comment, str):
@@ -278,6 +281,8 @@ def _validate_and_render_comment(
                     comment,
                     "CSS comment contains premature closing `*/`",
                 )
+            if body.endswith("*"):
+                return f"/*{body} */"
             return stripped
         if "*/" in comment:
             raise StixisValidationError(

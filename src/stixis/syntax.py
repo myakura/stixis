@@ -404,6 +404,7 @@ def render_css_template(
     tpl: Template | str,
     *,
     options: SerializationOptions = DEFAULT_OPTIONS,
+    start_in_comment: bool = False,
 ) -> str:
     """Render a PEP 750 `Template` (`t"..."`) with context-aware escaping for CSS comments, strings, URLs, and numbers."""
     if isinstance(tpl, str):
@@ -412,7 +413,7 @@ def render_css_template(
         raise TypeError(f"Expected str or string.templatelib.Template, got {type(tpl).__name__}")
 
     out: list[str] = []
-    in_comment = False
+    in_comment = start_in_comment
     in_quote: str | None = None
     in_unquoted_url = False
 
@@ -424,7 +425,7 @@ def render_css_template(
             while i < n:
                 ch = item[i]
                 if in_comment:
-                    if ch == "*" and i + 1 < n and item[i + 1] == "/":
+                    if not start_in_comment and ch == "*" and i + 1 < n and item[i + 1] == "/":
                         in_comment = False
                         i += 2
                         continue
@@ -444,7 +445,11 @@ def render_css_template(
                         in_unquoted_url = False
                     elif ch == ")":
                         in_unquoted_url = False
-                    elif item[max(0, i - 3) : i + 1].lower() == "url(":
+                    elif (
+                        i >= 3
+                        and item[i - 3 : i + 1].lower() == "url("
+                        and (i < 4 or not _is_ident_code_point(item[i - 4]))
+                    ):
                         in_unquoted_url = True
                 i += 1
         elif isinstance(item, Interpolation):
@@ -481,7 +486,7 @@ def render_css_template(
                 text = format(val, item.format_spec) if item.format_spec else str(val)
                 out.append(text)
 
-    if in_comment:
+    if in_comment and not start_in_comment:
         raise StixisSyntaxError("Unclosed CSS comment `/*` in Template")
     if in_quote is not None:
         raise StixisSyntaxError(f"Unclosed CSS string quote {in_quote!r} in Template")
