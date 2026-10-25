@@ -1,19 +1,19 @@
 # Stixis
 
-**Stixis** (`stixis`) is a spec-driven, zero-dependency CSS serializer and validator for Python 3.14+ that generates its grammar tables and `TypedDict` definitions from W3C `@webref/css` (`ed/css/*.json`) and its conformance test suites from Web Platform Tests (WPT) and Hypothesis.
+Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero runtime dependencies. It generates its grammar tables and `TypedDict` definitions from W3C `@webref/css` (`ed/css/*.json`) and builds its test suite from Web Platform Tests (WPT) and Hypothesis.
 
-## Highlights
+## What it does
 
-* **100% `@webref/css` property & descriptor coverage**: Compiles W3C Value Definition Syntax (`|`, `||`, `&&`, juxtaposition, `?`, `*`, `+`, `#`, `{A,B}`, `[...]!`, `<type [min,max]>`, `<'prop'>`) into a dual-mode `ValueNode` evaluator that serializes structured Python objects (`serialize_value`) and canonicalizes raw CSS token streams (`canonicalize`).
-* **Eagerly validated immutable AST nodes**: `FontFace`, `StyleRule`, `AtRule`, `StyleSheet`, `CommentNode`, and `RawDeclaration` (`dataclass(frozen=True, slots=True)`) validate selectors, preludes, descriptors, and declarations inside `__post_init__`.
-* **First-class Python 3.14+ PEP 750 `Template` (`t"..."`) support**: Separates static CSS syntax from dynamic `Interpolation` slots, applying context-aware escaping inside comments (`/* ... */`), strings, `url(...)`, and numeric slots before validating the resulting token stream against the `ValueNode` grammar.
-* **Five built-in CSS microsyntaxes**:
-  1. `<urange>` (`parse_urange`, `format_urange`, and `bisect`-based cascade-shadowing range compaction `compact_urange`).
-  2. `<opentype-tag>` (`font-feature-settings`, `font-variation-settings`, `font-language-override`).
-  3. `<font-src-list>` (`FontSrc`, `Url`, `LocalFont` with `format()` -> `tech()` ordering and keyword validation).
-  4. `<family-name>` & `<generic-family>` (safe default quoting of Python `str` family names, explicit `generic("serif")` / `Keyword("serif")`, and WPT `font-family-serialization-001.html` conformance).
-  5. `{1,2}` descriptor and property ranges (`font-weight`, `font-width` / `font-stretch`, `font-style: oblique`, metric overrides).
-* **Agent-first read-only CLI**: `stixis inspect` and `stixis check` with deterministic exit codes (`0` valid, `1` invalid value, `2` usage error, `4` unknown target).
+* **Compiles W3C Value Definition Syntax.** `compile_value_syntax` turns `@webref/css` grammars (`|`, `||`, `&&`, juxtaposition, `?`, `*`, `+`, `#`, `{A,B}`, `[...]!`, `<type [min,max]>`, `<'prop'>`) into a `ValueNode` tree. `serialize_value` formats structured Python values against that tree, and `canonicalize` validates raw CSS token streams.
+* **Validates AST nodes on construction.** `FontFace`, `StyleRule`, `AtRule`, `StyleSheet`, `CommentNode`, and `RawDeclaration` are frozen dataclasses (`dataclass(frozen=True, slots=True)`) that check selectors, preludes, descriptors, declarations, and comments in `__post_init__`.
+* **Escapes PEP 750 `Template` (`t"..."`) slots by context.** `render_css_template` checks the CSS tokens before each `Interpolation` slot, escapes comments (`/* ... */`), strings, `url(...)`, and numbers accordingly, and validates the rendered tokens against the target `ValueNode` grammar.
+* **Handles five CSS microsyntaxes.**
+  1. `<urange>`: `parse_urange`, `format_urange`, and `compact_urange` for cascade-shadowing range compaction.
+  2. `<opentype-tag>`: `font-feature-settings`, `font-variation-settings`, and `font-language-override`.
+  3. `<font-src-list>`: `FontSrc`, `Url`, and `LocalFont`, enforcing `format()` before `tech()`.
+  4. `<family-name>` and `<generic-family>`: quotes Python `str` family names by default, requires `generic("serif")` or `Keyword("serif")` for generic families, and matches WPT `font-family-serialization-001.html`.
+  5. `{1,2}` descriptor and property ranges: `font-weight`, `font-width` and `font-stretch`, `font-style: oblique`, and metric overrides.
+* **Includes a read-only CLI.** `stixis inspect` and `stixis check` exit with `0` for valid input, `1` for a validation error, `2` for a usage error, and `4` for an unknown target.
 
 ## Quickstart
 
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     print(dumps(sheet, options=SerializationOptions.cleome()))
 ```
 
-## CLI Usage
+## CLI usage
 
 ```bash
 # Inspect an at-rule, property, or <type>
@@ -84,7 +84,7 @@ uv run stixis check font-weight "100 900" --at-rule @font-face
 uv run stixis check unicode-range "u+3040-309f" --at-rule @font-face
 ```
 
-## Development & Verification
+## Development and verification
 
 ```bash
 uv sync
