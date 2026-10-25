@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -16,14 +15,16 @@ from stixis._generated.specs import (
     VALUE_SYNTAXES,
 )
 from stixis._generated.types import FontFaceDescriptors
-from stixis.errors import StixisValidationError
+from stixis.errors import StixisSyntaxError, StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+from stixis.primitives import serialize_dashed_ident, serialize_ident
 from stixis.syntax import (
     ValueNode,
     compile_value_syntax,
     evaluate_canonicalize,
     evaluate_serialize_value,
     render_css_template,
+    tokenize_css,
     validate_token_stream_safety,
 )
 
@@ -40,28 +41,46 @@ def lookup_value_node(name: str, is_property: bool = False) -> ValueNode | None:
     return compile_value_syntax(syn)
 
 
-_CSS_IDENT_NAME_RE = re.compile(
-    r"^(?:--[a-zA-Z0-9_\-\x80-\U0010ffff]+|-?[a-zA-Z_\x80-\U0010ffff][a-zA-Z0-9_\-\x80-\U0010ffff]*)$"
-)
-_AT_RULE_IDENT_RE = re.compile(
-    r"^-?[a-zA-Z_\x80-\U0010ffff][a-zA-Z0-9_\-\x80-\U0010ffff]*$"
-)
-
-
 def normalize_identifier_key(key: str) -> str:
     """Normalize a Python `snake_case` property or descriptor key to `kebab-case`, preserving `--*` custom properties."""
     if not isinstance(key, str) or not key.strip():
         raise StixisValidationError("property", "<ident>", key, "Empty property or descriptor name")
     stripped = key.strip()
-    norm = stripped if stripped.startswith("--") else stripped.replace("_", "-").lower()
-    if not _CSS_IDENT_NAME_RE.match(norm):
+    if "/*" in stripped or "*/" in stripped:
         raise StixisValidationError(
             "property",
             "<ident>",
             key,
             f"Invalid CSS property or descriptor identifier: {key!r}",
         )
-    return norm
+    cand = stripped if stripped.startswith("--") else stripped.replace("_", "-").lower()
+    try:
+        toks = tokenize_css(cand, preserve_whitespace=True)
+    except StixisSyntaxError as exc:
+        raise StixisValidationError(
+            "property",
+            "<ident>",
+            key,
+            f"Invalid CSS property or descriptor identifier: {key!r}",
+        ) from exc
+    if len(toks) != 1 or toks[0].kind != "ident":
+        raise StixisValidationError(
+            "property",
+            "<ident>",
+            key,
+            f"Invalid CSS property or descriptor identifier: {key!r}",
+        )
+    ident_val = toks[0].value
+    if ident_val.startswith("--"):
+        if len(ident_val) < 3:
+            raise StixisValidationError(
+                "property",
+                "<custom-property-name>",
+                key,
+                "CSS custom property name must contain characters after '--'",
+            )
+        return serialize_dashed_ident(ident_val)
+    return serialize_ident(ident_val)
 
 
 def resolve_target_syntax(
@@ -585,12 +604,22 @@ class AtRule:
 
     def __post_init__(self) -> None:
         opts = DEFAULT_OPTIONS if self.options is None else self.options
-        raw_name = self.name.strip().lower() if isinstance(self.name, str) else ""
-        if not raw_name:
+        raw_name = self.name.strip() if isinstance(self.name, str) else ""
+        if not raw_name or "/*" in raw_name or "*/" in raw_name:
             raise StixisValidationError("at-rule", "@<ident>", self.name)
-        at_name = raw_name if raw_name.startswith("@") else f"@{raw_name}"
-        if not _AT_RULE_IDENT_RE.match(at_name[1:]):
+        at_cand = raw_name if raw_name.startswith("@") else f"@{raw_name}"
+        try:
+            at_toks = tokenize_css(at_cand, preserve_whitespace=True)
+        except StixisSyntaxError as exc:
+            raise StixisValidationError("at-rule", "@<ident>", self.name) from exc
+        if len(at_toks) != 1 or at_toks[0].kind != "at-keyword" or not at_toks[0].value:
             raise StixisValidationError("at-rule", "@<ident>", self.name)
+        at_ident = at_toks[0].value.lower()
+        at_name = (
+            f"@{serialize_dashed_ident(at_ident)}"
+            if at_ident.startswith("--")
+            else f"@{serialize_ident(at_ident)}"
+        )
 
         prelude_s = _validate_at_rule_prelude(at_name, self.prelude, options=opts)
         decls = _validate_and_normalize_declarations(

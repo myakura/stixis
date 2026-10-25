@@ -350,17 +350,23 @@ def test_cli_subprocess_entrypoint() -> None:
 def test_security_and_descriptor_resolution_regressions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # 1. Custom property names with injection characters (`--x: red; color`) must be rejected eagerly
+    # 1. Custom property names with injection characters (`--x: red; color`) must be rejected eagerly,
+    #    while escaped CSS identifiers (`r"--foo\+bar"`) are preserved and serialized safely.
     with pytest.raises(StixisValidationError):
         StyleRule("body", {"--x: red; color": "blue"})
     with pytest.raises(StixisValidationError):
         StyleRule("body", {"--": "blue"})
+    escaped_custom = StyleRule("body", {r"--foo\+bar": "blue"})
+    assert r"--foo\+bar: blue;" in str(escaped_custom)
 
-    # 2. At-rule names with comment or non-ident characters (`media/*`) must be rejected eagerly
+    # 2. At-rule names with comment or non-ident characters (`media/*`) must be rejected eagerly,
+    #    while valid double-hyphen at-rule names (`--custom`) are accepted.
     with pytest.raises(StixisValidationError):
         AtRule("media/*", "screen")
     with pytest.raises(StixisValidationError):
         AtRule("@123invalid", "screen")
+    custom_at = AtRule("--custom", "screen")
+    assert str(custom_at) == "@--custom screen {}"
 
     # 3. Nested rules preserve overridden SerializationOptions across `dumps` / `format`
     nested = AtRule("@media", "screen", rules=[FontFace(font_family="Inter", src=Url("inter.woff2"))])
