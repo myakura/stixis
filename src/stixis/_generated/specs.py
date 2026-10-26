@@ -722,7 +722,7 @@ PROPERTY_ENGINE_COUNTS: dict[str, int] = {
     'text-combine-upright': 3,
     'text-decoration': 3,
     'text-decoration-color': 3,
-    'text-decoration-inset': 1,
+    'text-decoration-inset': 2,
     'text-decoration-line': 3,
     'text-decoration-skip': 1,
     'text-decoration-skip-box': 0,
@@ -828,7 +828,7 @@ VALUE_SYNTAXES: dict[str, str] = {
     '<absolute-size>': '[ xx-small | x-small | small | medium | large | x-large | xx-large | xxx-large ]',
     '<acos()>': 'acos( <calc-sum> )',
     '<age>': 'child | young | old',
-    '<alpha()>': 'alpha([from <color>] [ / [<alpha-value> | none] ]? )',
+    '<alpha()>': 'alpha(from <color> / [<alpha-value> | none])',
     '<alpha-value>': '<number> | <percentage>',
     '<alt-text>': '[ <string> | <counter> | <attr()> ]+',
     '<anchor()>': 'anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )',
@@ -908,7 +908,7 @@ VALUE_SYNTAXES: dict[str, str] = {
     '<change()>': 'change()',
     '<circle()>': 'circle( <radial-size>? [ at <position> ]? )',
     '<clamp()>': 'clamp( [ <calc-sum> | none ], <calc-sum>, [ <calc-sum> | none ] )',
-    '<class-selector>': "'.' <ident-token>",
+    '<class-selector>': "'.' <ident-token> '*'?",
     '<click()>': 'click()',
     '<clip-source>': '<url>',
     '<cmyk-component>': '<number> | <percentage> | none',
@@ -956,7 +956,7 @@ VALUE_SYNTAXES: dict[str, str] = {
     '<content-distribution>': 'space-between | space-around | space-evenly | stretch',
     '<content-level>': 'element | content | text | <attr()> | <counter>',
     '<content-list>': '[ <string> | <counter()> | <counters()> | <content()> | <attr()> ]+',
-    '<content-position>': 'center | start | end | flex-start | flex-end',
+    '<content-position>': 'center | start | end | flow-start | flow-end | flex-start | flex-end',
     '<content-replacement>': '<image>',
     '<contextual-alt-values>': '[ contextual | no-contextual ]',
     '<contrast()>': 'contrast( [ <number> | <percentage> ]? )',
@@ -1327,7 +1327,7 @@ VALUE_SYNTAXES: dict[str, str] = {
     '<scroll-state-query>': 'not <scroll-state-in-parens> | <scroll-state-in-parens> [ [ and <scroll-state-in-parens> ]* | [ or <scroll-state-in-parens> ]* ] | <scroll-state-feature>',
     '<scroller>': 'root | nearest | self',
     '<selector-list>': '<complex-selector-list>',
-    '<self-position>': 'center | start | end | self-start | self-end | flex-start | flex-end',
+    '<self-position>': 'center | start | end | self-start | self-end | flow-start | flow-end | flex-start | flex-end',
     '<sepia()>': 'sepia( [ <number> | <percentage> ]? )',
     '<shadow>': '<color>? && [ <length>{2} [ <length [0,∞]> <length>? ]? ] && inset?',
     '<shape()>': "shape( <'fill-rule'>? from <position> , <shape-command># )",
@@ -1460,7 +1460,7 @@ VALUE_SYNTAXES: dict[str, str] = {
     '<xyz-space>': 'xyz | xyz-d50 | xyz-d65',
     'abs()': 'abs( <calc-sum> )',
     'acos()': 'acos( <calc-sum> )',
-    'alpha()': 'alpha([from <color>] [ / [<alpha-value> | none] ]? )',
+    'alpha()': 'alpha(from <color> / [<alpha-value> | none])',
     'anchor()': 'anchor( <anchor-name>? && <anchor-side>, <length-percentage>? )',
     'anchor-size()': 'anchor-size( [ <anchor-name> || <anchor-size> ]? , <length-percentage>? )',
     'asin()': 'asin( <calc-sum> )',
@@ -1683,9 +1683,9 @@ PROPERTY_SYNTAXES: dict[str, str] = {
     '-webkit-transition-property': "<'transition-property'>",
     '-webkit-transition-timing-function': "<'transition-timing-function'>",
     'accent-color': 'auto | <color>',
-    'align-content': 'flex-start | flex-end | center | space-between | space-around | stretch',
-    'align-items': 'flex-start | flex-end | center | baseline | stretch',
-    'align-self': 'auto | flex-start | flex-end | center | baseline | stretch',
+    'align-content': 'flow-start | flow-end | flex-start | flex-end | center | space-between | space-around | stretch',
+    'align-items': 'flow-start | flow-end | flex-start | flex-end | center | baseline | stretch',
+    'align-self': 'auto | flow-start | flow-end | flex-start | flex-end | center | baseline | stretch',
     'alignment-baseline': 'baseline | <baseline-metric>',
     'all': 'initial | inherit | unset | revert | revert-layer | revert-rule',
     'anchor-name': 'none | <anchor-name>#',
@@ -2052,7 +2052,7 @@ PROPERTY_SYNTAXES: dict[str, str] = {
     'interest-delay-start': 'normal | <time>',
     'interpolate-size': 'numeric-only | allow-keywords',
     'isolation': '<isolation-mode>',
-    'justify-content': 'flex-start | flex-end | center | space-between | space-around',
+    'justify-content': 'flow-start | flow-end | flex-start | flex-end | center | space-between | space-around',
     'justify-items': 'normal | stretch | <baseline-position> | <overflow-position>? [ <self-position> | left | right ] | legacy | legacy && [ left | right | center ]',
     'justify-self': 'auto | <overflow-position>? [ normal | <self-position> | left | right ] | stretch | <baseline-position> | anchor-center',
     'left': 'auto | <length-percentage>',
@@ -2437,11 +2437,6 @@ PROPERTY_SYNTAXES: dict[str, str] = {
 ATRULE_PRELUDE_SYNTAXES: dict[str, str | None] = {
     '@-webkit-keyframes': None,
     '@apply': None,
-    '@bottom-center': None,
-    '@bottom-left': None,
-    '@bottom-left-corner': None,
-    '@bottom-right': None,
-    '@bottom-right-corner': None,
     '@charset': None,
     '@color-profile': '<dashed-ident> | device-cmyk',
     '@container': None,
@@ -2457,9 +2452,6 @@ ATRULE_PRELUDE_SYNTAXES: dict[str, str | None] = {
     '@import': None,
     '@keyframes': '<keyframes-name>',
     '@layer': '<layer-name>? | <layer-name>#',
-    '@left-bottom': None,
-    '@left-middle': None,
-    '@left-top': None,
     '@location': None,
     '@media': None,
     '@mixin': None,
@@ -2469,18 +2461,10 @@ ATRULE_PRELUDE_SYNTAXES: dict[str, str | None] = {
     '@position-try': '<dashed-ident>',
     '@private': None,
     '@property': '<custom-property-name>#',
-    '@right-bottom': None,
-    '@right-middle': None,
-    '@right-top': None,
     '@scope': None,
     '@starting-style': '',
     '@supports': None,
     '@supports-condition': None,
-    '@top-center': None,
-    '@top-left': None,
-    '@top-left-corner': None,
-    '@top-right': None,
-    '@top-right-corner': None,
     '@view-transition': '',
     '@when': None,
 }
@@ -2489,16 +2473,6 @@ ATRULE_DESCRIPTORS: dict[str, dict[str, str]] = {
     '@-webkit-keyframes': {
     },
     '@apply': {
-    },
-    '@bottom-center': {
-    },
-    '@bottom-left': {
-    },
-    '@bottom-left-corner': {
-    },
-    '@bottom-right': {
-    },
-    '@bottom-right-corner': {
     },
     '@charset': {
     },
@@ -2580,12 +2554,6 @@ ATRULE_DESCRIPTORS: dict[str, dict[str, str]] = {
     },
     '@layer': {
     },
-    '@left-bottom': {
-    },
-    '@left-middle': {
-    },
-    '@left-top': {
-    },
     '@location': {
     },
     '@media': {
@@ -2655,12 +2623,6 @@ ATRULE_DESCRIPTORS: dict[str, dict[str, str]] = {
         'initial-value': '<declaration-value>?',
         'syntax': '<string>',
     },
-    '@right-bottom': {
-    },
-    '@right-middle': {
-    },
-    '@right-top': {
-    },
     '@scope': {
     },
     '@starting-style': {
@@ -2668,16 +2630,6 @@ ATRULE_DESCRIPTORS: dict[str, dict[str, str]] = {
     '@supports': {
     },
     '@supports-condition': {
-    },
-    '@top-center': {
-    },
-    '@top-left': {
-    },
-    '@top-left-corner': {
-    },
-    '@top-right': {
-    },
-    '@top-right-corner': {
     },
     '@view-transition': {
         'navigation': 'auto | none',
