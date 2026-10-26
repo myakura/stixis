@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "stixis"
-version = "0.1.1"
+version = "0.1.2"
 description = "Spec-driven CSS serializer and validator generated from W3C @webref/css and Web Platform Tests"
 readme = "README.md"
 license = "MIT"
