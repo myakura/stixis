@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    { name = "Masataka Yakura", email = "myakura.web@gmail.com" },
+    { name = "Masataka Yakura", email = "masataka.yakura@gmail.com" },
 ]
 keywords = ["css", "cssom", "serializer", "validator", "webref", "wpt", "font-face", "pep-750"]
 classifiers = [
