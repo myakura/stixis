@@ -32,9 +32,9 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * **Verify premises first.** Before implementing an Issue, check every factual claim and reproduction snippet against live runtime output (`uv run pytest`, `uv run stixis check`) and the W3C CSS specification or WPT suite. If a claim contradicts the CSS specification, close the Issue or scope out that item, and cite the spec section or tokenizer behavior.
 * **Label and link Issues and PRs.**
   * Add appropriate labels (`bug`, `enhancement`, `documentation`, `upstream-sync`) to every Issue and PR.
-  * Use a dedicated branch per Issue, include `Closes #<n>` in the PR body, and run `codex review`, `uv run pytest`, and `uv run ruff check` before merging.
+  * Use a dedicated branch per Issue, keep behavior changes (`feat`, `fix`) and behavior-preserving refactors (`refactor`) in separate commits even within the same PR, include `Closes #<n>` in the PR body, and run `uv run python codegen/gen_specs.py --check`, `uv run python codegen/gen_wpt_tests.py --check`, `uv run pytest`, `uv run ruff check`, and `codex review` before creating or merging a PR.
 * **Keep the consumer skill and releases in sync.**
-  * When you add or change public APIs, options, or microsyntax behavior, update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`.
+  * Treat rejecting previously accepted input, changing a public function or constant's name, parameters, or return value, or changing a public keyword or default value as a breaking change: mark the commit type with `!` (`fix!:`, `feat!:`), state the breaking change at the top of the PR body, and update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`. Also update both files whenever you add or change public APIs, options, or microsyntax behavior.
   * To cut a release, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
 
 ## Domain guides
