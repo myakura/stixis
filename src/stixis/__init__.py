@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+
 from stixis._generated.types import (
     FontDisplayKeyword,
     FontFaceDescriptors,
@@ -47,7 +49,7 @@ from stixis.primitives import (
     generic,
 )
 
-__version__ = "0.1.2"
+__version__ = importlib.metadata.version("stixis")
 
 __all__ = [
     "DEFAULT_OPTIONS",

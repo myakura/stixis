@@ -35,7 +35,7 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
   * Use a dedicated branch per Issue, include `Closes #<n>` in the PR body, and run `codex review`, `uv run pytest`, and `uv run ruff check` before merging.
 * **Keep the consumer skill and releases in sync.**
   * When you add or change public APIs, options, or microsyntax behavior, update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`.
-  * To cut a release, bump the version in `pyproject.toml` and `src/stixis/__init__.py`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
+  * To cut a release, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
 
 ## Domain guides
 

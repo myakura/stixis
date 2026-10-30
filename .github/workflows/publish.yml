@@ -27,6 +27,15 @@ jobs:
           uv run ruff check
           uv run pytest
 
+      - name: Verify pushed tag matches package version
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          pkg_version=$(uv run python -c "import stixis; print(stixis.__version__)")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "Tag version ($tag_version) does not match stixis.__version__ ($pkg_version)" >&2
+            exit 1
+          fi
+
       - name: Build wheel and sdist
         run: uv build
 
