@@ -72,7 +72,6 @@ class Url:
         return serialize_url(self.value, modifiers=self.modifiers)
 
 
-
 @dataclass(frozen=True, slots=True)
 class LocalFont:
     """Explicit `local(<font-family-name>)` value for `@font-face` `src`."""
@@ -176,7 +175,15 @@ def serialize_ident(value: str) -> str:
         cp = ord(ch)
         if cp == 0x0000:
             out.append("\ufffd")
-        elif (0x0001 <= cp <= 0x001F) or cp == 0x007F or idx == 0 and "0" <= ch <= "9" or idx == 1 and "0" <= ch <= "9" and value[0] == "-":
+        elif (
+            (0x0001 <= cp <= 0x001F)
+            or cp == 0x007F
+            or idx == 0
+            and "0" <= ch <= "9"
+            or idx == 1
+            and "0" <= ch <= "9"
+            and value[0] == "-"
+        ):
             out.append(escape_code_point(cp))
         elif idx == 0 and ch == "-" and length == 1:
             out.append(escape_char(ch))
@@ -225,7 +232,6 @@ def serialize_unrestricted_ident(value: str) -> str:
         else:
             out.append(escape_char(ch))
     return "".join(out)
-
 
 
 def serialize_string(
@@ -285,9 +291,7 @@ def serialize_url_modifier(
             elif tok.kind in closing:
                 depth -= 1
                 if depth == 0 and idx != len(non_ws) - 1:
-                    raise StixisValidationError(
-                        "<url-modifier>", "<url-modifier>", modifier
-                    )
+                    raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
         return format_token_sequence(non_ws, options=options)
     raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
 

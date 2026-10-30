@@ -160,7 +160,12 @@ def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]
             raise StixisValidationError("unicode-range", "<urange>#", value)
         cps: list[int] = []
         for item in value:
-            if isinstance(item, bool) or not isinstance(item, int) or item < 0 or item > MAX_CODEPOINT:
+            if (
+                isinstance(item, bool)
+                or not isinstance(item, int)
+                or item < 0
+                or item > MAX_CODEPOINT
+            ):
                 raise StixisValidationError("unicode-range", "<urange>#", value)
             cps.append(item)
         return _coalesce_codepoint_set(cps)

@@ -358,7 +358,11 @@ def _validate_and_normalize_declarations(
 
     normalized_pairs: list[tuple[str, str]] = []
     norm_at = (
-        (at_rule.strip().lower() if at_rule.strip().startswith("@") else f"@{at_rule.strip().lower()}")
+        (
+            at_rule.strip().lower()
+            if at_rule.strip().startswith("@")
+            else f"@{at_rule.strip().lower()}"
+        )
         if at_rule is not None
         else None
     )
@@ -496,7 +500,9 @@ def _validate_selector(selector: str | Sequence[str] | Template) -> str:
         raise StixisValidationError("selector", "<selector-list>", selector)
 
     if not sel_str:
-        raise StixisValidationError("selector", "<selector-list>", selector, "Selector cannot be empty")
+        raise StixisValidationError(
+            "selector", "<selector-list>", selector, "Selector cannot be empty"
+        )
 
     validate_token_stream_safety(
         sel_str,
@@ -515,13 +521,18 @@ def _validate_at_rule_prelude(
 ) -> str:
     prelude_syntax = ATRULE_PRELUDE_SYNTAXES.get(at_name)
     if prelude is None or prelude == "":
-        if prelude_syntax and "?" not in prelude_syntax and at_name in (
-            "@font-palette-values",
-            "@property",
-            "@keyframes",
-            "@counter-style",
-            "@color-profile",
-            "@position-try",
+        if (
+            prelude_syntax
+            and "?" not in prelude_syntax
+            and at_name
+            in (
+                "@font-palette-values",
+                "@property",
+                "@keyframes",
+                "@counter-style",
+                "@color-profile",
+                "@position-try",
+            )
         ):
             raise StixisValidationError(
                 at_name,
@@ -634,9 +645,7 @@ class StyleRule:
     def __post_init__(self) -> None:
         opts = current_options(self.options)
         sel_s = _validate_selector(self.selector)
-        decls = _validate_and_normalize_declarations(
-            self.declarations, at_rule=None, options=opts
-        )
+        decls = _validate_and_normalize_declarations(self.declarations, at_rule=None, options=opts)
         rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
@@ -903,7 +912,11 @@ class StyleSheet:
         eff_opts = options if options is not None else self.options
         blocks: list[str] = []
         if self._header_str and not minify:
-            if options is not None and options != self._effective_options and self.header_comment is not None:
+            if (
+                options is not None
+                and options != self._effective_options
+                and self.header_comment is not None
+            ):
                 blocks.append(_validate_and_render_comment(self.header_comment, options=options))
             else:
                 blocks.append(self._header_str)

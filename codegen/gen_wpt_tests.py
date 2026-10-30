@@ -62,7 +62,6 @@ class WptSuitesExtraction:
     broad_css: PropertySuiteExtraction
 
 
-
 def _unescape_js_string(raw: str) -> str:
     """Unescape a JavaScript single- or double-quoted string literal body."""
     out: list[str] = []
@@ -124,15 +123,11 @@ def _extract_font_family_serialization_cases(wpt_dir: Path) -> list[tuple[str, s
     kw_js = (wpt_dir / "css-fonts" / "support" / "font-family-keywords.js").read_text(
         encoding="utf-8"
     )
-    generic_m = re.search(
-        r"kGenericFontFamilyKeywords\s*=\s*\[(.*?)\];", kw_js, flags=re.DOTALL
-    )
+    generic_m = re.search(r"kGenericFontFamilyKeywords\s*=\s*\[(.*?)\];", kw_js, flags=re.DOTALL)
     non_generic_m = re.search(
         r"kNonGenericFontFamilyKeywords\s*=\s*\[(.*?)\];", kw_js, flags=re.DOTALL
     )
-    generic_kws = (
-        re.findall(r'"([^"]+)"', generic_m.group(1)) if generic_m is not None else []
-    )
+    generic_kws = re.findall(r'"([^"]+)"', generic_m.group(1)) if generic_m is not None else []
     non_generic_kws = (
         re.findall(r'"([^"]+)"', non_generic_m.group(1)) if non_generic_m is not None else []
     )
@@ -183,9 +178,7 @@ def extract_font_face_descriptor_suite(
 
     # 2. font-face-size-adjust.html
     sa_text = (parsing_dir / "font-face-size-adjust.html").read_text(encoding="utf-8")
-    for m in re.finditer(
-        r"\{\s*sizeAdjust:\s*'([^']+)'\s*,\s*valid:\s*(true|false)\s*\}", sa_text
-    ):
+    for m in re.finditer(r"\{\s*sizeAdjust:\s*'([^']+)'\s*,\s*valid:\s*(true|false)\s*\}", sa_text):
         val, is_val = m.group(1), m.group(2) == "true"
         if is_val:
             valid.append(("size-adjust", val, val))
@@ -206,7 +199,11 @@ def extract_font_face_descriptor_suite(
                 invalid.append((desc, val))
 
     # 4. font-face-src-local.html, font-face-src-format.html, font-face-src-tech.html
-    for fname in ("font-face-src-local.html", "font-face-src-format.html", "font-face-src-tech.html"):
+    for fname in (
+        "font-face-src-local.html",
+        "font-face-src-format.html",
+        "font-face-src-tech.html",
+    ):
         src_text = (parsing_dir / fname).read_text(encoding="utf-8")
         for m in re.finditer(
             r"\{\s*src:\s*'([^']+)'\s*,\s*(?:dontcomparetech:\s*true\s*,\s*)?valid:\s*(true|false)\s*\}",
@@ -447,7 +444,9 @@ def _render_urange_test_file(
     lines.append("def test_wpt_urange_valid(raw_css: str, expected: str) -> None:")
     lines.append("    assert format_urange(raw_css) == expected")
     lines.append('    assert canonicalize("<urange>", raw_css) == expected')
-    lines.append('    assert canonicalize("unicode-range", raw_css, at_rule="@font-face") == expected')
+    lines.append(
+        '    assert canonicalize("unicode-range", raw_css, at_rule="@font-face") == expected'
+    )
     lines.append("    # Round-trip idempotence")
     lines.append("    assert format_urange(parse_urange(expected)) == expected")
     lines.append("")
@@ -481,7 +480,9 @@ def _render_font_family_test_file(cases: list[tuple[str, str]]) -> str:
     lines.append(")")
     lines.append("")
     lines.append("")
-    lines.append('@pytest.mark.parametrize(("raw_css", "expected"), FONT_FAMILY_SERIALIZATION_CASES)')
+    lines.append(
+        '@pytest.mark.parametrize(("raw_css", "expected"), FONT_FAMILY_SERIALIZATION_CASES)'
+    )
     lines.append("def test_wpt_font_family_serialization(raw_css: str, expected: str) -> None:")
     lines.append('    got = canonicalize("font-family", raw_css, options=CSSOM_OPTS)')
     lines.append("    assert got == expected")
@@ -531,25 +532,37 @@ def _render_font_face_test_file(
     lines.append(
         "def test_wpt_font_face_descriptor_valid(descriptor: str, raw_css: str, expected: str | None) -> None:"
     )
-    lines.append('    got = canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)')
+    lines.append(
+        '    got = canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)'
+    )
     lines.append("    if expected is not None:")
     lines.append("        assert got == expected")
     lines.append("    # Round-trip idempotence and eager FontFace node construction")
-    lines.append('    assert canonicalize(descriptor, got, at_rule="@font-face", options=CSSOM_OPTS) == got')
+    lines.append(
+        '    assert canonicalize(descriptor, got, at_rule="@font-face", options=CSSOM_OPTS) == got'
+    )
     lines.append("    rule = FontFace({descriptor: raw_css}, options=CSSOM_OPTS)")
     lines.append("    assert got in str(rule)")
     lines.append("")
     lines.append("")
-    lines.append('@pytest.mark.parametrize(("descriptor", "raw_css"), INVALID_FONT_FACE_DESCRIPTOR_CASES)')
-    lines.append("def test_wpt_font_face_descriptor_invalid(descriptor: str, raw_css: str) -> None:")
+    lines.append(
+        '@pytest.mark.parametrize(("descriptor", "raw_css"), INVALID_FONT_FACE_DESCRIPTOR_CASES)'
+    )
+    lines.append(
+        "def test_wpt_font_face_descriptor_invalid(descriptor: str, raw_css: str) -> None:"
+    )
     lines.append("    with pytest.raises(StixisError):")
-    lines.append('        canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)')
+    lines.append(
+        '        canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)'
+    )
     if xfail_v:
         lines.append("")
         lines.append("")
         lines.append("def test_wpt_font_face_descriptor_valid_xfail() -> None:")
         lines.append("    unexpected_passes: list[tuple[str, str]] = []")
-        lines.append("    for descriptor, raw_css, _reason in XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES:")
+        lines.append(
+            "    for descriptor, raw_css, _reason in XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES:"
+        )
         lines.append("        try:")
         lines.append(
             '            canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)'
@@ -723,9 +736,7 @@ def build_expected_wpt_test_files(
         out_dir / "test_wpt_urange.py": _render_urange_test_file(
             suites.urange_valid, suites.urange_invalid
         ),
-        out_dir / "test_wpt_font_family.py": _render_font_family_test_file(
-            suites.font_family
-        ),
+        out_dir / "test_wpt_font_family.py": _render_font_family_test_file(suites.font_family),
         out_dir / "test_wpt_font_face.py": _render_font_face_test_file(
             suites.font_face.valid,
             suites.font_face.invalid,
@@ -819,9 +830,8 @@ def main(argv: list[str] | None = None) -> int:
         + len(broad_suite.xfail_valid)
         + len(broad_suite.xfail_invalid)
     )
-    total_skipped = (
-        sum(fonts_suite.skipped_counts.values())
-        + sum(broad_suite.skipped_counts.values())
+    total_skipped = sum(fonts_suite.skipped_counts.values()) + sum(
+        broad_suite.skipped_counts.values()
     )
 
     if args.check:

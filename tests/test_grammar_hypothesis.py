@@ -104,7 +104,9 @@ def strategy_from_value_node(
         if kind in ("<family-name>", "<font-family-name>"):
             return st.sampled_from(['"Noto Sans JP"', '"Inter"', '"34J"'])
         if kind in ("<generic-family>", "<generic-font-family>"):
-            return st.sampled_from(["serif", "sans-serif", "monospace", "system-ui", "generic(kai)"])
+            return st.sampled_from(
+                ["serif", "sans-serif", "monospace", "system-ui", "generic(kai)"]
+            )
         if kind == "<hex-color>":
             return st.sampled_from(["#ff00aa", "#123456"])
         return st.nothing()
@@ -113,7 +115,9 @@ def strategy_from_value_node(
         ref = lookup_value_node(node.name, node.is_property)
         if ref is None:
             return st.nothing()
-        if (node.min_val is not None or node.max_val is not None) and isinstance(ref, PrimitiveNode):
+        if (node.min_val is not None or node.max_val is not None) and isinstance(
+            ref, PrimitiveNode
+        ):
             ref = PrimitiveNode(
                 ref.kind,
                 min_val=node.min_val if node.min_val is not None else ref.min_val,
@@ -261,7 +265,13 @@ def test_hypothesis_font_style_oblique_out_of_bounds_rejected(bad_deg: int) -> N
     neg_pct=st.floats(min_value=-10000.0, max_value=-0.01, allow_nan=False, allow_infinity=False)
 )
 def test_hypothesis_non_negative_percentage_bounds_rejected(neg_pct: float) -> None:
-    for desc in ("size-adjust", "ascent-override", "descent-override", "line-gap-override", "font-width"):
+    for desc in (
+        "size-adjust",
+        "ascent-override",
+        "descent-override",
+        "line-gap-override",
+        "font-width",
+    ):
         with pytest.raises(StixisValidationError):
             serialize_value(desc, Pct(neg_pct), at_rule="@font-face")
 
@@ -328,7 +338,9 @@ _TOKEN_STREAM_ATOMS: st.SearchStrategy[str] = st.sampled_from(
 )
 
 
-def _semantic_tokens(css_text: str) -> list[tuple[str, str, float | int | None, str | None, str | None]]:
+def _semantic_tokens(
+    css_text: str,
+) -> list[tuple[str, str, float | int | None, str | None, str | None]]:
     from stixis.syntax import tokenize_css
 
     return [
@@ -352,4 +364,3 @@ def test_hypothesis_canonicalize_token_roundtrip(parts: list[str]) -> None:
     canon = canonicalize("--x", raw)
     assert _semantic_tokens(canon) == _semantic_tokens(raw)
     assert canonicalize("--x", canon) == canon
-

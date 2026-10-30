@@ -61,8 +61,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Lint with Ruff
-        run: uv run ruff check
+      - name: Lint and check formatting with Ruff
+        run: |
+          uv run ruff check
+          uv run ruff format --check
 
       - name: Verify generated files are current against baseline upstream commits
         run: |
