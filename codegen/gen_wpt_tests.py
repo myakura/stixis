@@ -47,7 +47,7 @@ class FontFaceSuiteExtraction:
 class PropertySuiteExtraction:
     valid: list[tuple[str, str, str]]
     invalid: list[tuple[str, str]]
-    xfail_valid: list[tuple[str, str, str, str]]
+    xfail_valid: list[tuple[str, str, str | tuple[str, ...], str]]
     xfail_invalid: list[tuple[str, str, str]]
     skipped_counts: dict[str, int]
 
@@ -264,7 +264,7 @@ def _evaluate_property_html_files(
     opts = SerializationOptions.cssom(min_engines=min_engines)
     valid: list[tuple[str, str, str]] = []
     invalid: list[tuple[str, str]] = []
-    xfail_valid: list[tuple[str, str, str, str]] = []
+    xfail_valid: list[tuple[str, str, str | tuple[str, ...], str]] = []
     xfail_invalid: list[tuple[str, str, str]] = []
     skipped_counts: dict[str, int] = {
         "disabled_min_engines": 0,
@@ -293,6 +293,9 @@ def _evaluate_property_html_files(
                     candidates = [val]
             else:
                 candidates = [val]
+            expected_entry: str | tuple[str, ...] = (
+                candidates[0] if len(candidates) == 1 else tuple(candidates)
+            )
 
             try:
                 got = canonicalize(prop, val, options=opts)
@@ -301,7 +304,7 @@ def _evaluate_property_html_files(
                     (
                         prop,
                         val,
-                        candidates[0],
+                        expected_entry,
                         _classify_valid_xfail_reason(val, error=exc, got=None),
                     )
                 )
@@ -315,7 +318,7 @@ def _evaluate_property_html_files(
                         (
                             prop,
                             val,
-                            got,
+                            expected_entry,
                             _classify_valid_xfail_reason(val, error=exc, got=got),
                         )
                     )
@@ -323,13 +326,15 @@ def _evaluate_property_html_files(
                 if roundtrip == got:
                     valid.append((prop, val, got))
                 else:
-                    xfail_valid.append((prop, val, got, "non-idempotent-canonicalization"))
+                    xfail_valid.append(
+                        (prop, val, expected_entry, "non-idempotent-canonicalization")
+                    )
             else:
                 xfail_valid.append(
                     (
                         prop,
                         val,
-                        candidates[0],
+                        expected_entry,
                         _classify_valid_xfail_reason(val, error=None, got=got),
                     )
                 )
@@ -559,7 +564,7 @@ def _render_property_test_file(
     func_suffix: str,
     *,
     min_engines: int | None = None,
-    xfail_valid: list[tuple[str, str, str, str]] | None = None,
+    xfail_valid: list[tuple[str, str, str | tuple[str, ...], str]] | None = None,
     xfail_invalid: list[tuple[str, str, str]] | None = None,
     skipped_counts: dict[str, int] | None = None,
 ) -> str:
@@ -593,7 +598,9 @@ def _render_property_test_file(
         lines.append(f"    ({prop!r}, {val!r}),")
     lines.append(")")
     lines.append("")
-    lines.append("XFAIL_VALID_PROPERTY_CASES: tuple[tuple[str, str, str, str], ...] = (")
+    lines.append(
+        "XFAIL_VALID_PROPERTY_CASES: tuple[tuple[str, str, str | tuple[str, ...], str], ...] = ("
+    )
     for prop, val, exp, reason in xfail_v:
         lines.append(f"    ({prop!r}, {val!r}, {exp!r}, {reason!r}),")
     lines.append(")")
@@ -632,13 +639,16 @@ def _render_property_test_file(
         lines.append("            got = canonicalize(prop, raw_css, options=CSSOM_OPTS)")
         lines.append("        except StixisError:")
         lines.append("            continue")
-        lines.append("        if got == expected:")
+        lines.append(
+            "        matches = got == expected if isinstance(expected, str) else got in expected"
+        )
+        lines.append("        if matches:")
         lines.append("            try:")
         lines.append("                roundtrip = canonicalize(prop, got, options=CSSOM_OPTS)")
         lines.append("            except StixisError:")
         lines.append("                continue")
-        lines.append("            if roundtrip == expected:")
-        lines.append("                unexpected_passes.append((prop, raw_css, expected))")
+        lines.append("            if roundtrip == got:")
+        lines.append("                unexpected_passes.append((prop, raw_css, got))")
         lines.append("    if unexpected_passes:")
         lines.append(
             '        pytest.fail(f"XPASS: {len(unexpected_passes)} valid xfail case(s) now pass ({unexpected_passes[0]!r}); regenerate WPT tests")'

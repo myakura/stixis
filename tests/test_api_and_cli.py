@@ -1076,6 +1076,7 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
         'test_valid_value("width", "var(--w)");\n'
         'test_valid_value("transform-origin", "top center", ["center top 0px", "center top"]);\n'
         'test_valid_value("width", "1px", "2px");\n'
+        'test_valid_value("width", "3px", ["4px", "5px"]);\n'
         'test_valid_value("hanging-punctuation", "first");\n',
         encoding="utf-8",
     )
@@ -1097,6 +1098,7 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
 
     suite = gen_wpt_tests.extract_broad_css_property_suite(wpt_css, min_engines=2)
     assert any(prop == "width" and raw == "1px" and exp == "2px" and reason for prop, raw, exp, reason in suite.xfail_valid)
+    assert any(prop == "width" and raw == "3px" and exp == ("4px", "5px") and reason for prop, raw, exp, reason in suite.xfail_valid)
     assert any(prop == "width" and raw == "calc(1 / 2px)" and reason for prop, raw, reason in suite.xfail_invalid)
     assert suite.skipped_counts["disabled_min_engines"] == 1
     assert suite.skipped_counts["unknown_property"] == 1

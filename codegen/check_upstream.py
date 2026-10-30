@@ -283,13 +283,14 @@ def _check_wpt_cases(
     for prop, raw_css, expected, _reason in fonts_suite.xfail_valid:
         if (prop, raw_css, expected) in known_fonts_xfail_v:
             continue
+        exp_str = expected if isinstance(expected, str) else expected[0]
         try:
             got = canonicalize(prop, raw_css, options=opts)
             failures.append(
-                WptFailure("css-fonts", prop, raw_css, expected, f"got {got!r}")
+                WptFailure("css-fonts", prop, raw_css, exp_str, f"got {got!r}")
             )
         except StixisError as exc:
-            failures.append(WptFailure("css-fonts", prop, raw_css, expected, f"raised {exc}"))
+            failures.append(WptFailure("css-fonts", prop, raw_css, exp_str, f"raised {exc}"))
     for prop, raw_css, _reason in fonts_suite.xfail_invalid:
         if (prop, raw_css) in known_fonts_xfail_i:
             continue
@@ -315,15 +316,16 @@ def _check_wpt_cases(
     for prop, raw_css, expected, _reason in broad_suite.xfail_valid:
         if (prop, raw_css, expected) in known_broad_xfail_v:
             continue
-        reported_broad_v.add((prop, raw_css, expected))
+        exp_str = expected if isinstance(expected, str) else expected[0]
+        reported_broad_v.add((prop, raw_css, exp_str))
         try:
             got = canonicalize(prop, raw_css, options=opts)
             failures.append(
-                WptFailure("css-properties", prop, raw_css, expected, f"got {got!r}")
+                WptFailure("css-properties", prop, raw_css, exp_str, f"got {got!r}")
             )
         except StixisError as exc:
             failures.append(
-                WptFailure("css-properties", prop, raw_css, expected, f"raised {exc}")
+                WptFailure("css-properties", prop, raw_css, exp_str, f"raised {exc}")
             )
     for prop, raw_css, _reason in broad_suite.xfail_invalid:
         if (prop, raw_css) in known_broad_xfail_i:

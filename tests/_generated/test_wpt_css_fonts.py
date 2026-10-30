@@ -476,7 +476,7 @@ INVALID_PROPERTY_CASES: tuple[tuple[str, str], ...] = (
     ('font-weight', 'bold 900'),
 )
 
-XFAIL_VALID_PROPERTY_CASES: tuple[tuple[str, str, str, str], ...] = (
+XFAIL_VALID_PROPERTY_CASES: tuple[tuple[str, str, str | tuple[str, ...], str], ...] = (
     ('font-size-adjust', 'cap-height calc(0.5 + 1)', 'cap-height calc(1.5)', 'math-expression-simplification-or-canonical-order'),
     ('font-size-adjust', 'cap-height calc(10 + (sign(20cqw - 10px) * 5))', 'cap-height calc(10 + (5 * sign(20cqw - 10px)))', 'math-expression-simplification-or-canonical-order'),
     ('font-style', 'oblique calc(10deg - 10deg)', 'oblique calc(0deg)', 'math-expression-simplification-or-canonical-order'),
@@ -517,13 +517,14 @@ def test_wpt_css_fonts_valid_xfail() -> None:
             got = canonicalize(prop, raw_css, options=CSSOM_OPTS)
         except StixisError:
             continue
-        if got == expected:
+        matches = got == expected if isinstance(expected, str) else got in expected
+        if matches:
             try:
                 roundtrip = canonicalize(prop, got, options=CSSOM_OPTS)
             except StixisError:
                 continue
-            if roundtrip == expected:
-                unexpected_passes.append((prop, raw_css, expected))
+            if roundtrip == got:
+                unexpected_passes.append((prop, raw_css, got))
     if unexpected_passes:
         pytest.fail(f"XPASS: {len(unexpected_passes)} valid xfail case(s) now pass ({unexpected_passes[0]!r}); regenerate WPT tests")
     pytest.xfail(f"{len(XFAIL_VALID_PROPERTY_CASES)} known WPT valid xfail cases")
