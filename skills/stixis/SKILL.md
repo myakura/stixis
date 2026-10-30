@@ -54,7 +54,7 @@ from stixis import (
 * `AtRule(name, prelude=None, *, descriptors=None, rules=(), comment=None, statement=False, options=None)`
 * `CommentNode(text, *, leading_newline: bool = False, options: SerializationOptions | None = None)`: Standalone CSS comment node. Emits a leading blank line in non-minified output when `leading_newline=True` or when `text` starts with `\n`.
 * `StyleSheet(rules, *, header_comment=None, options=None)`
-* `using_options(options: SerializationOptions)` (or `options.activate()`): Context manager that sets default `SerializationOptions` for AST nodes and `serialize_value` or `canonicalize` calls inside the `with` block.
+* `using_options(options: SerializationOptions)`: Context manager that sets default `SerializationOptions` for AST nodes and `serialize_value` or `canonicalize` calls inside the `with` block.
 * `serialize_value(target: str, value: Any, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Validate and serialize a Python value or PEP 750 `Template`.
 * `canonicalize(target: str, css_text: str, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Tokenize, validate, and normalize raw CSS value text.
 

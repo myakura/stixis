@@ -1144,6 +1144,26 @@ def test_math_functions_and_token_formatting_have_no_dead_entries() -> None:
     assert serialize_url("https://example.com/\x01a") == r'url("https://example.com/\1 a")'
 
 
+def test_serialization_options_validates_fields_in_post_init() -> None:
+    with pytest.raises(ValueError, match="quote_char"):
+        SerializationOptions(quote_char="x")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="quote_char"):
+        SerializationOptions(quote_char="")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="font_face_stretch_alias"):
+        SerializationOptions(font_face_stretch_alias="invalid")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="min_engines"):
+        SerializationOptions(min_engines="2")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="min_engines"):
+        SerializationOptions(min_engines=True)
+    with pytest.raises(ValueError, match="min_engines"):
+        SerializationOptions(min_engines=-1)
+    with pytest.raises(ValueError, match="min_engines"):
+        SerializationOptions(min_engines=4)
+    with pytest.raises(ValueError, match="extra_properties"):
+        SerializationOptions(extra_properties={"width"})  # type: ignore[arg-type]
+
+
+
 
 
 
