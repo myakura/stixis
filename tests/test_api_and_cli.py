@@ -958,6 +958,26 @@ def test_url_modifiers_validated_as_ident_or_functional_notation() -> None:
             Url("a.png", modifiers=(bad_mod,))
 
 
+def test_tokenize_css_comment_after_star_cdo_cdc_and_escaped_eof() -> None:
+    from stixis.syntax import tokenize_css
+
+    def kinds(s: str) -> list[tuple[str, str]]:
+        return [(t.kind, t.value) for t in tokenize_css(s)]
+
+    assert canonicalize("width", "calc(2*/**/3px)") == "calc(2 * 3px)"
+    assert canonicalize("width", "calc(2/**/*3px)") == "calc(2 * 3px)"
+    with pytest.raises(StixisSyntaxError, match=r"Unexpected comment close `\*/`"):
+        tokenize_css("2 */ 3")
+
+    assert kinds("-->") == [("CDC", "-->")]
+    assert kinds("<!--") == [("CDO", "<!--")]
+    assert kinds("a\\") == [("ident", "a\ufffd")]
+    assert canonicalize("--x", "<!-- -->") == "<!-- -->"
+    with pytest.raises(StixisValidationError):
+        canonicalize("content", "<!--")
+
+
+
 
 
 
