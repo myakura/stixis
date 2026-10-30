@@ -59,8 +59,17 @@ class Url:
     value: str
     modifiers: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, str):
+            raise StixisValidationError("<url>", "<url>", self.value)
+        if not isinstance(self.modifiers, tuple):
+            raise StixisValidationError("<url-modifier>", "<url-modifier>", self.modifiers)
+        for mod in self.modifiers:
+            serialize_url_modifier(mod)
+
     def __str__(self) -> str:
         return serialize_url(self.value, modifiers=self.modifiers)
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +251,46 @@ def serialize_string(
     return "".join(out)
 
 
+def serialize_url_modifier(
+    modifier: str,
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
+    """Validate and serialize a `<url-modifier>` (`<ident> | <function-token> <any-value> )`)."""
+    if not isinstance(modifier, str):
+        raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
+    from stixis.syntax import format_token_sequence, validate_token_stream_safety
+
+    tokens = validate_token_stream_safety(
+        modifier,
+        forbid_top_level_semicolon=True,
+        forbid_top_level_bang=True,
+        forbid_top_level_braces=True,
+        allow_empty=False,
+        target="<url-modifier>",
+    )
+    non_ws = [t for t in tokens if t.kind != "whitespace"]
+    if len(non_ws) == 1 and non_ws[0].kind == "ident":
+        return serialize_ident(non_ws[0].value)
+    if len(non_ws) >= 2 and non_ws[0].kind == "function" and non_ws[-1].kind == ")":
+        if len(non_ws) == 2:
+            raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
+        depth = 0
+        matching = {"(": ")", "[": "]", "{": "}"}
+        closing = {")", "]", "}"}
+        for idx, tok in enumerate(non_ws):
+            if tok.kind == "function" or tok.kind in matching:
+                depth += 1
+            elif tok.kind in closing:
+                depth -= 1
+                if depth == 0 and idx != len(non_ws) - 1:
+                    raise StixisValidationError(
+                        "<url-modifier>", "<url-modifier>", modifier
+                    )
+        return format_token_sequence(non_ws, options=options)
+    raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
+
+
 def serialize_url(
     value: str | Url,
     *,
@@ -264,7 +313,9 @@ def serialize_url(
         pass
     inner = serialize_string(raw, options=options)
     if mods:
-        mod_str = " ".join(mods)
+        if not isinstance(mods, tuple):
+            raise StixisValidationError("<url-modifier>", "<url-modifier>", mods)
+        mod_str = " ".join(serialize_url_modifier(m, options=options) for m in mods)
         return f"url({inner} {mod_str})"
     return f"url({inner})"
 
