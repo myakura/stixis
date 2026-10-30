@@ -311,6 +311,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-engines",
         dest="min_engines",
         type=int,
+        choices=(0, 1, 2, 3),
         default=DEFAULT_MIN_ENGINES,
         help="Minimum browser engine count required for CSS properties (0..3, default: 2).",
     )
