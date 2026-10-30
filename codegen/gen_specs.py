@@ -77,6 +77,12 @@ def _collect_nested_types(
 
 
 def _is_shipping_unprefixed_statement(stmt: Any) -> bool:
+    """Return True if a BCD support statement describes a shipping, unprefixed, flagless release.
+
+    `partial_implementation: true` is intentionally counted as shipping because BCD uses it for
+    layout or rendering edge cases (such as `overflow-clip-margin` in Blink or `overscroll-behavior`
+    in WebKit) even when the unprefixed CSS property is shipped and parsed in CSSOM.
+    """
     if not isinstance(stmt, dict):
         return False
     ver = stmt.get("version_added")

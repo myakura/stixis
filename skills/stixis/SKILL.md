@@ -90,9 +90,10 @@ Use Python 3.14+ `t"..."` templates when combining static CSS structure with Pyt
 
 ## Presets (`SerializationOptions`)
 
-* `SerializationOptions()` (default): double quotes `"`, `<family-name>` always quoted, `font-width` descriptor name, unquoted `format(woff2)`.
-* `SerializationOptions.cleome()`: single quotes `'`, `@font-face` outputs `font-stretch` instead of `font-width`, and quotes `format('woff2')`.
-* `SerializationOptions.cssom()`: W3C CSSOM shortest serialization. Unquotes valid `<custom-ident>+` family names such as `Noto Sans JP`, while keeping digit-starting or keyword-colliding names quoted.
+* `SerializationOptions()` (default): double quotes `"`, `<family-name>` always quoted, `font-width` descriptor name, unquoted `format(woff2)`, `min_engines=2`.
+* `SerializationOptions.cleome(min_engines=...)`: single quotes `'`, `@font-face` outputs `font-stretch` instead of `font-width`, and quotes `format('woff2')`.
+* `SerializationOptions.cssom(min_engines=...)`: W3C CSSOM shortest serialization. Unquotes valid `<custom-ident>+` family names such as `Noto Sans JP`, while keeping digit-starting or keyword-colliding names quoted.
+* **Engine support threshold (`min_engines` and `extra_properties`).** `min_engines` (default `2`, range `0..3`) gates top-level CSS properties using shipping unprefixed engine counts (Blink, Gecko, WebKit, including `partial_implementation: true`) from `@mdn/browser-compat-data`, plus `ALWAYS_ALLOWED_PROPERTIES`. It does not gate `@at-rule` descriptors, `<type>` targets, or individual functions/keywords inside an enabled property's grammar. Pass `min_engines=1` to allow single-engine properties or `extra_properties=frozenset({"hanging-punctuation"})` to enable specific properties.
 
 ## Read-only CLI (`stixis`)
 
