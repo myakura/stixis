@@ -234,7 +234,7 @@ def _consume_number(text: str, pos: int) -> tuple[str, int | float, bool, int]:
             try:
                 float(int_val)
             except OverflowError:
-                return repr_str, math.copysign(math.inf, int_val), False, pos
+                return repr_str, (-math.inf if int_val < 0 else math.inf), False, pos
             return repr_str, int_val, True, pos
     num_val = float(repr_str)
     return repr_str, num_val, is_int, pos

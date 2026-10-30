@@ -268,11 +268,17 @@ def test_large_number_serialization_and_overflow_rejection(
     assert rc == EXIT_OK
     assert captured.out.strip() == "10000000000000000000000px"
 
-    # Non-finite overflow tokens (`1e400`) in raw CSS are rejected cleanly with StixisValidationError
+    # Non-finite overflow tokens (`1e400`, 309+ digit integers) in raw CSS are rejected cleanly with StixisValidationError
     with pytest.raises(StixisValidationError):
         canonicalize("width", "1e400px")
     with pytest.raises(StixisValidationError):
+        canonicalize("width", "9" * 309 + "px")
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "-" + "9" * 309 + "px")
+    with pytest.raises(StixisValidationError):
         canonicalize("<integer>", "1e400")
+    with pytest.raises(StixisValidationError):
+        canonicalize("<integer>", "9" * 309)
     rc_overflow = cli_main(["check", "width", "1e400px"])
     captured = capsys.readouterr()
     assert rc_overflow == EXIT_VALIDATION_ERROR
