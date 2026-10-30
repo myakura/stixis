@@ -914,3 +914,29 @@ def test_format_token_sequence_preserves_space_after_hyphen_or_hash_delim() -> N
     assert canonicalize("width", "calc(100% - min(10px, 5%))") == "calc(100% - min(10px, 5%))"
     assert canonicalize("--x", "a - b") == "a - b"
     assert canonicalize("--x", "# foo") == "# foo"
+
+
+def test_format_token_sequence_escapes_unrestricted_hash_and_dimension_unit() -> None:
+    from stixis.syntax import tokenize_css
+
+    h = canonicalize("--x", r"#1\;color:red")
+    assert h == r"#1\;color: red"
+    assert [(t.kind, t.value, t.hash_type) for t in tokenize_css(h) if t.kind != "whitespace"] == [
+        ("hash", "1;color", "unrestricted"),
+        ("colon", ":", "unrestricted"),
+        ("ident", "red", "unrestricted"),
+    ]
+
+    d = canonicalize("--x", r"1px\;color:red")
+    assert d == r"1px\;color: red"
+    assert [(t.kind, t.num, t.unit) for t in tokenize_css(d) if t.kind != "whitespace"] == [
+        ("dimension", 1, "px;color"),
+        ("colon", None, ""),
+        ("ident", None, ""),
+    ]
+
+    css = str(StyleRule("a", {"width": r"var(--x, #1\})"}))
+    assert css == "a {\n  width: var(--x, #1\\});\n}"
+
+
+
