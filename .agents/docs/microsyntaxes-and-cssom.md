@@ -8,7 +8,7 @@ All primitive serializers implement W3C CSSOM section 2.1 (`Common Serializing I
   * Replaces `U+0000` with `U+FFFD`.
   * Escapes `U+0001`..`U+001F` and `U+007F` as hex code points (`\1f ` with a trailing space).
   * Escapes leading ASCII digits (`0`..`9`) or a leading hyphen followed by a digit (`-[0-9]`) as hex code points (`\31 `), and escapes a lone `-` as `\-`.
-  * `serialize_custom_ident` rejects CSS-wide keywords (`initial`, `inherit`, `unset`, `default`, `revert`, `revert-layer`, `revert-rule`) and any grammar-specific forbidden keywords.
+  * `serialize_custom_ident` rejects CSS-wide and reserved keywords (`initial`, `inherit`, `unset`, `default`, `revert`, `revert-layer`, `revert-rule`) and any grammar-specific forbidden keywords.
   * `serialize_dashed_ident` requires a leading `--` (`len >= 2`, including `--`).
 * **Strings and URLs (`serialize_string`, `serialize_url`).**
   * Wraps in `options.quote_char` (`"` by default and in `.cssom()`, `'` in `.cleome()`).

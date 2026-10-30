@@ -9,7 +9,7 @@ from typing import Any
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.primitives import (
-    CSS_WIDE_KEYWORDS,
+    RESERVED_CUSTOM_IDENT_KEYWORDS,
     GenericFamily,
     Keyword,
     serialize_ident,
@@ -62,7 +62,7 @@ def is_valid_unquoted_family_name(name: str) -> bool:
 
     if len(words) == 1:
         lower = words[0].lower()
-        if lower in CSS_WIDE_KEYWORDS or lower in GENERIC_FAMILY_KEYWORDS or lower == "default":
+        if lower in RESERVED_CUSTOM_IDENT_KEYWORDS or lower in GENERIC_FAMILY_KEYWORDS:
             return False
     return True
 

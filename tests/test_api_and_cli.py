@@ -977,6 +977,29 @@ def test_tokenize_css_comment_after_star_cdo_cdc_and_escaped_eof() -> None:
         canonicalize("content", "<!--")
 
 
+def test_default_is_rejected_as_css_wide_keyword_but_excluded_from_custom_ident(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for prop in ("width", "color", "font-style", "font-language-override"):
+        with pytest.raises(StixisValidationError):
+            canonicalize(prop, "default")
+        with pytest.raises(StixisValidationError):
+            serialize_value(prop, "default")
+
+    rc = cli_main(["check", "width", "default"])
+    capsys.readouterr()
+    assert rc == EXIT_VALIDATION_ERROR
+
+    assert canonicalize("cursor", "default") == "default"
+    assert serialize_value("cursor", "default") == "default"
+
+    with pytest.raises(StixisValidationError):
+        canonicalize("<custom-ident>", "default")
+    with pytest.raises(StixisValidationError):
+        serialize_value("<custom-ident>", "default")
+
+
+
 
 
 

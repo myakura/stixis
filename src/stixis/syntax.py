@@ -43,6 +43,7 @@ from stixis.microsyntax.urange import format_urange
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.primitives import (
     CSS_WIDE_KEYWORDS,
+    RESERVED_CUSTOM_IDENT_KEYWORDS,
     Dimension,
     GenericFamily,
     Keyword,
@@ -1810,7 +1811,7 @@ class _TokenMatcher:
         if kind == "<custom-ident>":
             if tok.kind == "ident":
                 low = tok.value.lower()
-                if low in CSS_WIDE_KEYWORDS or low in self.forbidden_custom_idents:
+                if low in RESERVED_CUSTOM_IDENT_KEYWORDS or low in self.forbidden_custom_idents:
                     return []
                 return [(pos + 1, serialize_ident(tok.value))]
             return []
@@ -1852,19 +1853,19 @@ class _TokenMatcher:
                     cur += 1
                 if not idents:
                     return []
-                # Single ident cannot be a CSS-wide keyword or a generic-family keyword
+                # Single ident cannot be a CSS-wide/reserved keyword or a generic-family keyword
                 if len(idents) == 1:
                     low = idents[0].lower()
-                    if low in CSS_WIDE_KEYWORDS or low in GENERIC_FAMILY_KEYWORDS:
+                    if low in RESERVED_CUSTOM_IDENT_KEYWORDS or low in GENERIC_FAMILY_KEYWORDS:
                         return []
                 else:
                     # In a multi-word unquoted `<family-name>` (`<custom-ident>+`),
-                    # CSS-wide keywords are never valid `<custom-ident>`s (except inside `local(default A)`),
+                    # CSS-wide/reserved keywords are never valid `<custom-ident>`s (except inside `local(default A)`),
                     # and `<generic-family>` keywords are not valid inside `font-family`.
                     if any(w.lower() in GENERIC_FAMILY_KEYWORDS for w in idents):
                         return []
                     if not self.allow_css_wide_in_multiword_family and any(
-                        w.lower() in CSS_WIDE_KEYWORDS for w in idents
+                        w.lower() in RESERVED_CUSTOM_IDENT_KEYWORDS for w in idents
                     ):
                         return []
                 joined_name = " ".join(idents)
@@ -2589,9 +2590,9 @@ def evaluate_canonicalize(
         at_rule is not None
         and len(non_ws) == 1
         and non_ws[0].kind == "ident"
-        and non_ws[0].value.lower() in CSS_WIDE_KEYWORDS
+        and non_ws[0].value.lower() in RESERVED_CUSTOM_IDENT_KEYWORDS
     ):
-        # CSS-wide keywords (`initial`, `inherit`, `unset`, `revert`, `default`) are NOT valid on @font-face descriptors
+        # CSS-wide and reserved keywords (`initial`, `inherit`, `unset`, `revert`, `default`) are NOT valid on @font-face descriptors
         raise StixisValidationError(target, syntax, css_text)
 
     res = matcher.match_root(node)
