@@ -93,7 +93,7 @@ def is_property_enabled(prop: str, options: SerializationOptions = DEFAULT_OPTIO
     if prop in always_allowed or prop in options.extra_properties:
         return True
     engine_counts: dict[str, int] = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {})
-    return engine_counts.get(prop, 3) >= options.min_engines
+    return engine_counts.get(prop, 0) >= options.min_engines
 
 
 def resolve_target_syntax(

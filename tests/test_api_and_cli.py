@@ -1113,6 +1113,27 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
     assert hasattr(test_wpt_css_fonts, "SKIPPED_PROPERTY_COUNTS")
 
 
+def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stixis._generated import specs as gen_specs_mod
+    from stixis.nodes import is_property_enabled
+
+    monkeypatch.setattr(gen_specs_mod, "PROPERTY_ENGINE_COUNTS", {})
+    assert not is_property_enabled("width", SerializationOptions(min_engines=1))
+    with pytest.raises(StixisValidationError, match=r"0 engine\(s\)"):
+        canonicalize("width", "10px", options=SerializationOptions(min_engines=1))
+
+    repo_root = Path(__file__).resolve().parent.parent
+    readme_text = (repo_root / "README.md").read_text(encoding="utf-8")
+    skill_text = (repo_root / "skills" / "stixis" / "SKILL.md").read_text(encoding="utf-8")
+    assert "browser-compat-data" in readme_text
+    assert "min_engines" in readme_text
+    assert "partial_implementation" in readme_text
+    assert "min_engines" in skill_text
+
+
+
 
 
 
