@@ -86,6 +86,8 @@ uv run stixis check unicode-range "u+3040-309f" --at-rule @font-face
 
 ## Development and verification
 
+`codegen/gen_wpt_tests.py` extracts 5,102 passing and 687 `xfail` assertions across 5 WPT test modules in `tests/_generated/` (plus 463 assertions skipped for `min_engines < 2` or unknown property names, recorded in `SKIPPED_PROPERTY_COUNTS`). Known `xfail` vectors (such as CSS Values 4 `calc(...)` algebraic simplification/dimensional type-checking and CSSOM shorthand collapsing) are tracked with explicit reason codes and fail on unexpected `XPASS`.
+
 ```bash
 uv sync
 uv run python codegen/gen_specs.py --check

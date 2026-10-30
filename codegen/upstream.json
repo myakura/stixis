@@ -17,8 +17,13 @@
     "urange_cases": 94,
     "font_family_cases": 54,
     "font_face_cases": 130,
-    "css_fonts_cases": 450,
-    "css_properties_cases": 2785
+    "font_face_xfail_cases": 7,
+    "css_fonts_cases": 462,
+    "css_fonts_xfail_cases": 9,
+    "css_properties_cases": 4362,
+    "css_properties_xfail_cases": 671,
+    "css_properties_skipped_disabled": 461,
+    "css_properties_skipped_unknown": 2
   },
   "bcd": {
     "repository": "https://github.com/mdn/browser-compat-data.git",

@@ -63,6 +63,10 @@ VALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (
     ('font-size-adjust', 'ch-width from-font', 'ch-width from-font'),
     ('font-size-adjust', 'ic-width from-font', 'ic-width from-font'),
     ('font-size-adjust', 'ic-height from-font', 'ic-height from-font'),
+    ('font-size-adjust', 'calc(0.5)', 'calc(0.5)'),
+    ('font-size-adjust', 'ex-height calc(0.5)', 'calc(0.5)'),
+    ('font-size-adjust', 'cap-height calc(0.5)', 'cap-height calc(0.5)'),
+    ('font-size-adjust', 'cap-height calc(-0.5)', 'cap-height calc(-0.5)'),
     ('font-size', 'xx-small', 'xx-small'),
     ('font-size', 'x-small', 'x-small'),
     ('font-size', 'small', 'small'),
@@ -75,6 +79,7 @@ VALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (
     ('font-size', 'smaller', 'smaller'),
     ('font-size', '10px', '10px'),
     ('font-size', '20%', '20%'),
+    ('font-size', 'calc(30% - 40px)', 'calc(30% - 40px)'),
     ('font-style', 'normal', 'normal'),
     ('font-style', 'italic', 'italic'),
     ('font-style', 'oblique', 'oblique'),
@@ -86,6 +91,9 @@ VALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (
     ('font-style', 'oblique -90deg', 'oblique -90deg'),
     ('font-style', 'oblique 90deg', 'oblique 90deg'),
     ('font-style', 'oblique 10grad', 'oblique 10grad'),
+    ('font-style', 'oblique calc(90deg)', 'oblique calc(90deg)'),
+    ('font-style', 'oblique calc(100deg)', 'oblique calc(100deg)'),
+    ('font-style', 'oblique calc(-100deg)', 'oblique calc(-100deg)'),
     ('font-synthesis-position', 'auto', 'auto'),
     ('font-synthesis-position', 'none', 'none'),
     ('font-synthesis-small-caps', 'auto', 'auto'),
@@ -237,6 +245,9 @@ VALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (
     ('font-weight', '1000', '1000'),
     ('font-weight', '101', '101'),
     ('font-weight', '150.25', '150.25'),
+    ('font-weight', 'calc(100)', 'calc(100)'),
+    ('font-weight', 'calc(0)', 'calc(0)'),
+    ('font-weight', 'calc(-100)', 'calc(-100)'),
 )
 
 INVALID_PROPERTY_CASES: tuple[tuple[str, str], ...] = (
@@ -263,6 +274,7 @@ INVALID_PROPERTY_CASES: tuple[tuple[str, str], ...] = (
     ('font', 'italic oblique xx-small serif'),
     ('font', 'small-caps small-caps medium/normal sans-serif'),
     ('font', 'bold bolder xx-large/1.2 cursive'),
+    ('font', 'ultra-condensed extra-condensed larger/calc(120% + 1.2em) fantasy'),
     ('font', 'italic small-caps lighter condensed normal smaller monospace'),
     ('font', 'normal 100 semi-condensed oblique small-caps 10px/normal Menu'),
     ('font', 'normal normal normal normal normal 20%/1.2 "FB Armada"'),
@@ -464,6 +476,26 @@ INVALID_PROPERTY_CASES: tuple[tuple[str, str], ...] = (
     ('font-weight', 'bold 900'),
 )
 
+XFAIL_VALID_PROPERTY_CASES: tuple[tuple[str, str, str | tuple[str, ...], str], ...] = (
+    ('font-size-adjust', 'cap-height calc(0.5 + 1)', 'cap-height calc(1.5)', 'math-expression-simplification-or-canonical-order'),
+    ('font-size-adjust', 'cap-height calc(10 + (sign(20cqw - 10px) * 5))', 'cap-height calc(10 + (5 * sign(20cqw - 10px)))', 'math-expression-simplification-or-canonical-order'),
+    ('font-style', 'oblique calc(10deg - 10deg)', 'oblique calc(0deg)', 'math-expression-simplification-or-canonical-order'),
+    ('font-style', 'oblique calc(30deg * 2)', 'oblique calc(60deg)', 'math-expression-simplification-or-canonical-order'),
+    ('font-style', 'oblique calc(30deg + (sign(2cqw - 10px) * 5deg))', 'oblique calc(30deg + (5deg * sign(2cqw - 10px)))', 'math-expression-simplification-or-canonical-order'),
+    ('font-weight', 'calc(100 + 100)', 'calc(200)', 'math-expression-simplification-or-canonical-order'),
+    ('font-weight', 'calc(100 + (sign(20cqw - 10px) * 5))', 'calc(100 + (5 * sign(20cqw - 10px)))', 'math-expression-simplification-or-canonical-order'),
+)
+
+XFAIL_INVALID_PROPERTY_CASES: tuple[tuple[str, str, str], ...] = (
+    ('font-variation-settings', "'wght' calc(100px + 200px)", 'math-expression-dimensional-type-checking'),
+    ('font-variation-settings', "'wght' calc(100%)", 'math-expression-dimensional-type-checking'),
+)
+
+SKIPPED_PROPERTY_COUNTS: dict[str, int] = {
+    'disabled_min_engines': 0,
+    'unknown_property': 0,
+}
+
 
 @pytest.mark.parametrize(("prop", "raw_css", "expected"), VALID_PROPERTY_CASES)
 def test_wpt_css_fonts_valid(prop: str, raw_css: str, expected: str) -> None:
@@ -476,3 +508,35 @@ def test_wpt_css_fonts_valid(prop: str, raw_css: str, expected: str) -> None:
 def test_wpt_css_fonts_invalid(prop: str, raw_css: str) -> None:
     with pytest.raises(StixisError):
         canonicalize(prop, raw_css, options=CSSOM_OPTS)
+
+
+def test_wpt_css_fonts_valid_xfail() -> None:
+    unexpected_passes: list[tuple[str, str, str]] = []
+    for prop, raw_css, expected, _reason in XFAIL_VALID_PROPERTY_CASES:
+        try:
+            got = canonicalize(prop, raw_css, options=CSSOM_OPTS)
+        except StixisError:
+            continue
+        matches = got == expected if isinstance(expected, str) else got in expected
+        if matches:
+            try:
+                roundtrip = canonicalize(prop, got, options=CSSOM_OPTS)
+            except StixisError:
+                continue
+            if roundtrip == got:
+                unexpected_passes.append((prop, raw_css, got))
+    if unexpected_passes:
+        pytest.fail(f"XPASS: {len(unexpected_passes)} valid xfail case(s) now pass ({unexpected_passes[0]!r}); regenerate WPT tests")
+    pytest.xfail(f"{len(XFAIL_VALID_PROPERTY_CASES)} known WPT valid xfail cases")
+
+
+def test_wpt_css_fonts_invalid_xfail() -> None:
+    unexpected_passes: list[tuple[str, str]] = []
+    for prop, raw_css, _reason in XFAIL_INVALID_PROPERTY_CASES:
+        try:
+            canonicalize(prop, raw_css, options=CSSOM_OPTS)
+        except StixisError:
+            unexpected_passes.append((prop, raw_css))
+    if unexpected_passes:
+        pytest.fail(f"XPASS: {len(unexpected_passes)} invalid xfail case(s) now raise StixisError ({unexpected_passes[0]!r}); regenerate WPT tests")
+    pytest.xfail(f"{len(XFAIL_INVALID_PROPERTY_CASES)} known WPT invalid xfail cases")
