@@ -55,18 +55,22 @@ jobs:
 
       - name: Analyze upstream changes and build agent report
         id: check
-        continue-on-error: true
         run: |
+          rc=0
           uv run python codegen/check_upstream.py \
             --webref-dir .upstream/webref/ed/css \
             --wpt-dir .upstream/wpt/css \
             --bcd-dir .upstream/bcd/css \
             --format markdown \
             --output .upstream/report.md \
-            --fail-on-changes
+            --fail-on-changes || rc=$?
+          echo "exit_code=${rc}" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+            exit "$rc"
+          fi
 
       - name: Create or update upstream-sync Issue when changes are detected
-        if: steps.check.outcome == 'failure'
+        if: steps.check.outputs.exit_code == '3'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

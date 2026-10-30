@@ -1033,6 +1033,14 @@ def test_gen_specs_rejects_missing_bcd_dir_and_disallows_fallback_in_check_mode(
     assert "missing bcd_css_dir" in captured.err
 
 
+def test_upstream_watch_workflow_gates_issue_creation_on_exit_code_3() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    wf_text = (repo_root / ".github" / "workflows" / "upstream-watch.yml").read_text(encoding="utf-8")
+    assert "steps.check.outputs.exit_code == '3'" in wf_text
+    assert "continue-on-error: true" not in wf_text
+
+
+
 
 
 
