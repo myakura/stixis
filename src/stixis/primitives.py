@@ -15,12 +15,13 @@ CSS_WIDE_KEYWORDS: frozenset[str] = frozenset(
         "initial",
         "inherit",
         "unset",
-        "default",
         "revert",
         "revert-layer",
         "revert-rule",
     }
 )
+
+RESERVED_CUSTOM_IDENT_KEYWORDS: frozenset[str] = CSS_WIDE_KEYWORDS | frozenset({"default"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,7 +196,7 @@ def serialize_custom_ident(
     if not isinstance(value, str) or value == "":
         raise StixisValidationError("<custom-ident>", "<custom-ident>", value)
     lower = value.lower()
-    if lower in CSS_WIDE_KEYWORDS or lower in forbidden_keywords:
+    if lower in RESERVED_CUSTOM_IDENT_KEYWORDS or lower in forbidden_keywords:
         raise StixisValidationError("<custom-ident>", "<custom-ident>", value)
     return serialize_ident(value)
 
