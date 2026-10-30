@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Context, Decimal
 from typing import Any
 
 from stixis.errors import StixisValidationError
@@ -328,7 +328,9 @@ def serialize_number(
         return str(int(value))
 
     # Round to at most 6 decimal places using Decimal for exact base-10 formatting without scientific notation
-    dec = Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    raw_dec = Decimal(str(value))
+    prec = max(28, raw_dec.adjusted() + 8)
+    dec = Context(prec=prec, rounding=ROUND_HALF_UP).quantize(raw_dec, Decimal("0.000001"))
     if dec == 0:
         return "0"
     formatted = format(dec, "f")

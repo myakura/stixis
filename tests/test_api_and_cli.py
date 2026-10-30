@@ -251,6 +251,40 @@ def test_number_primitive_rejects_bool_and_non_finite() -> None:
         serialize_value("opacity", math.inf)
 
 
+def test_large_number_serialization_and_overflow_rejection(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from stixis.primitives import serialize_number
+
+    assert serialize_number(1e20) == "100000000000000000000"
+    assert serialize_number(1e22) == "10000000000000000000000"
+    assert serialize_number(1e30) == "1" + "0" * 30
+    assert serialize_number(-1e30) == "-1" + "0" * 30
+    assert canonicalize("width", "1e30px") == "1" + "0" * 30 + "px"
+    assert str(StyleRule("a", {"width": t"{1e30}px"})) == f"a {{\n  width: {'1' + '0' * 30}px;\n}}"
+
+    rc = cli_main(["check", "width", "1e22px"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    assert captured.out.strip() == "10000000000000000000000px"
+
+    # Non-finite overflow tokens (`1e400`, 309+ digit integers) in raw CSS are rejected cleanly with StixisValidationError
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "1e400px")
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "9" * 309 + "px")
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "-" + "9" * 309 + "px")
+    with pytest.raises(StixisValidationError):
+        canonicalize("<integer>", "1e400")
+    with pytest.raises(StixisValidationError):
+        canonicalize("<integer>", "9" * 309)
+    rc_overflow = cli_main(["check", "width", "1e400px"])
+    captured = capsys.readouterr()
+    assert rc_overflow == EXIT_VALIDATION_ERROR
+
+
+
 def test_compact_urange_cascade_shadowing() -> None:
     from stixis import format_urange, parse_urange
 
