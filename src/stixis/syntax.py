@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -98,7 +99,7 @@ class CssToken:
 
     kind: str  # "ident", "function", "at-keyword", "hash", "string", "url", "number", "percentage", "dimension", "whitespace", "comma", "colon", "semicolon", "delim", "(", ")", "[", "]", "{", "}"
     value: str
-    num: float | None = None
+    num: int | float | None = None
     is_integer: bool = False
     unit: str = ""
     hash_type: str = "unrestricted"  # "id" or "unrestricted"
@@ -199,7 +200,7 @@ def _starts_a_number(text: str, pos: int) -> bool:
     return "0" <= ch <= "9"
 
 
-def _consume_number(text: str, pos: int) -> tuple[str, float, bool, int]:
+def _consume_number(text: str, pos: int) -> tuple[str, int | float, bool, int]:
     n = len(text)
     start = pos
     is_int = True
@@ -224,6 +225,17 @@ def _consume_number(text: str, pos: int) -> tuple[str, float, bool, int]:
             while pos < n and ("0" <= text[pos] <= "9"):
                 pos += 1
     repr_str = text[start:pos]
+    if is_int:
+        try:
+            int_val = int(repr_str)
+        except ValueError:
+            int_val = None
+        if int_val is not None:
+            try:
+                float(int_val)
+            except OverflowError:
+                return repr_str, math.copysign(math.inf, int_val), False, pos
+            return repr_str, int_val, True, pos
     num_val = float(repr_str)
     return repr_str, num_val, is_int, pos
 
@@ -616,14 +628,17 @@ def format_token_sequence(
             out.append(serialize_url(tok.value, options=options))
         elif tok.kind == "number":
             assert tok.num is not None
-            out.append(serialize_number(int(tok.num) if tok.is_integer else tok.num))
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            out.append(serialize_number(val))
         elif tok.kind == "percentage":
             assert tok.num is not None
-            num_s = serialize_number(int(tok.num) if tok.is_integer else tok.num)
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            num_s = serialize_number(val)
             out.append(f"{num_s}%")
         elif tok.kind == "dimension":
             assert tok.num is not None
-            num_s = serialize_number(int(tok.num) if tok.is_integer else tok.num)
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            num_s = serialize_number(val)
             out.append(f"{num_s}{tok.unit}")
         else:
             out.append(tok.value)
@@ -1636,6 +1651,7 @@ class _TokenMatcher:
                 tok.kind == "number"
                 and tok.is_integer
                 and tok.num is not None
+                and math.isfinite(tok.num)
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -1646,6 +1662,7 @@ class _TokenMatcher:
             if (
                 tok.kind == "number"
                 and tok.num is not None
+                and math.isfinite(tok.num)
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -1657,6 +1674,7 @@ class _TokenMatcher:
             if (
                 tok.kind == "percentage"
                 and tok.num is not None
+                and math.isfinite(tok.num)
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -1671,7 +1689,7 @@ class _TokenMatcher:
                 if (eff_min is None or 0 >= eff_min) and (eff_max is None or 0 <= eff_max):
                     return [(pos + 1, "0px")]
                 return []
-            if tok.kind == "dimension" and tok.num is not None:
+            if tok.kind == "dimension" and tok.num is not None and math.isfinite(tok.num):
                 canon_u = lower_map.get(tok.unit.lower())
                 if canon_u is None or canon_u not in allowed_units:
                     return []
@@ -1690,6 +1708,7 @@ class _TokenMatcher:
             if (
                 tok.kind == "dimension"
                 and tok.num is not None
+                and math.isfinite(tok.num)
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
