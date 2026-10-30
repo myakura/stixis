@@ -143,7 +143,7 @@ def _starts_with_valid_escape(text: str, pos: int) -> bool:
     if pos >= len(text) or text[pos] != "\\":
         return False
     if pos + 1 >= len(text):
-        return False
+        return True
     return text[pos + 1] not in ("\n", "\r", "\f")
 
 
@@ -289,9 +289,24 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             pos = end_comment + 2
             continue
 
-        # Stray closing comment
-        if ch == "*" and pos + 1 < n and normalized[pos + 1] == "/":
+        # Stray closing comment (only when the `/` does not start a `/*` comment)
+        if (
+            ch == "*"
+            and pos + 1 < n
+            and normalized[pos + 1] == "/"
+            and not (pos + 2 < n and normalized[pos + 2] == "*")
+        ):
             raise StixisSyntaxError("Unexpected comment close `*/`")
+
+        # CDO `<!--` and CDC `-->`
+        if normalized.startswith("<!--", pos):
+            tokens.append(CssToken("CDO", "<!--"))
+            pos += 4
+            continue
+        if normalized.startswith("-->", pos):
+            tokens.append(CssToken("CDC", "-->"))
+            pos += 3
+            continue
 
         # Whitespace
         if ch in (" ", "\t", "\n"):
