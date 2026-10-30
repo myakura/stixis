@@ -626,20 +626,35 @@ def main(argv: list[str] | None = None) -> int:
         return 4
 
     bcd_dir: Path | None = None
+    candidate_bcd: Path | None = None
     if args.bcd_dir is not None:
         cand = args.bcd_dir.expanduser()
-        if (cand / "properties").is_dir():
-            bcd_dir = cand
+        if not (cand / "properties").is_dir():
+            print(f"{patches_path}:1: missing bcd_css_dir {cand}", file=sys.stderr)
+            return 4
+        bcd_dir = cand
     elif "bcd_css_dir" in patches.get("meta", {}):
         raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
         candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
         if (candidate_bcd / "properties").is_dir():
             bcd_dir = candidate_bcd
 
+    if bcd_dir is None and args.check:
+        missing_desc = candidate_bcd if candidate_bcd is not None else "bcd_css_dir"
+        print(
+            f"{patches_path}:1: missing bcd_css_dir {missing_desc} (required with --check)",
+            file=sys.stderr,
+        )
+        return 4
+
     units_by_type, properties, values, atrules = load_and_merge_specs(webref_dir, patches)
     if bcd_dir is not None:
         engine_counts = load_bcd_engine_counts(bcd_dir, properties)
     else:
+        print(
+            "Warning: BCD directory not found; reusing existing PROPERTY_ENGINE_COUNTS from src/stixis/_generated/specs.py",
+            file=sys.stderr,
+        )
         from stixis._generated import specs as existing_specs
 
         existing_counts = dict(getattr(existing_specs, "PROPERTY_ENGINE_COUNTS", {}))
