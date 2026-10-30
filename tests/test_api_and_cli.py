@@ -1040,6 +1040,24 @@ def test_upstream_watch_workflow_gates_issue_creation_on_exit_code_3() -> None:
     assert "continue-on-error: true" not in wf_text
 
 
+def test_version_single_source_of_truth_and_publish_tag_check() -> None:
+    import importlib.metadata
+    import tomllib
+
+    import stixis
+
+    repo_root = Path(__file__).resolve().parent.parent
+    pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
+    init_text = (repo_root / "src" / "stixis" / "__init__.py").read_text(encoding="utf-8")
+    publish_wf = (repo_root / ".github" / "workflows" / "publish.yml").read_text(encoding="utf-8")
+
+    assert stixis.__version__ == pyproject["project"]["version"]
+    assert stixis.__version__ == importlib.metadata.version("stixis")
+    assert 'importlib.metadata' in init_text
+    assert "GITHUB_REF_NAME" in publish_wf
+
+
+
 
 
 
