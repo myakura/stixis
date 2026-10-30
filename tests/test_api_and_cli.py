@@ -939,4 +939,25 @@ def test_format_token_sequence_escapes_unrestricted_hash_and_dimension_unit() ->
     assert css == "a {\n  width: var(--x, #1\\});\n}"
 
 
+def test_url_modifiers_validated_as_ident_or_functional_notation() -> None:
+    u_valid = Url("a.png", modifiers=("crossorigin", "integrity(sha256-abc)"))
+    assert str(StyleRule("a", {"background-image": u_valid})) == (
+        'a {\n  background-image: url("a.png" crossorigin integrity(sha256-abc));\n}'
+    )
+
+    for bad_mod in (
+        "x);color:red;b:url(",
+        "",
+        "two idents",
+        "10px",
+        "fn(a) extra",
+        "fn()",
+        "unclosed(",
+    ):
+        with pytest.raises(StixisValidationError):
+            Url("a.png", modifiers=(bad_mod,))
+
+
+
+
 
