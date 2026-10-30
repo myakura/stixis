@@ -198,9 +198,13 @@ def serialize_dashed_ident(value: str) -> str:
     if value == "--":
         return "--"
     # Serialize the identifier after the leading `--`
-    tail = value[2:]
-    out: list[str] = ["--"]
-    for ch in tail:
+    return f"--{serialize_unrestricted_ident(value[2:])}"
+
+
+def serialize_unrestricted_ident(value: str) -> str:
+    """Escape code points inside an unrestricted hash value without leading-digit rules."""
+    out: list[str] = []
+    for ch in value:
         cp = ord(ch)
         if cp == 0x0000:
             out.append("\ufffd")
@@ -211,6 +215,7 @@ def serialize_dashed_ident(value: str) -> str:
         else:
             out.append(escape_char(ch))
     return "".join(out)
+
 
 
 def serialize_string(

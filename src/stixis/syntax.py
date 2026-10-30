@@ -57,6 +57,7 @@ from stixis.primitives import (
     serialize_number,
     serialize_percentage,
     serialize_string,
+    serialize_unrestricted_ident,
     serialize_url,
 )
 
@@ -619,7 +620,7 @@ def format_token_sequence(
             if tok.hash_type == "id":
                 out.append(f"#{serialize_ident(tok.value)}")
             else:
-                out.append(f"#{tok.value}")
+                out.append(f"#{serialize_unrestricted_ident(tok.value)}")
         elif tok.kind == "string":
             out.append(serialize_string(tok.value, options=options))
         elif tok.kind == "url":
@@ -635,9 +636,10 @@ def format_token_sequence(
             out.append(f"{num_s}%")
         elif tok.kind == "dimension":
             assert tok.num is not None
+            assert tok.unit is not None
             val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
             num_s = serialize_number(val)
-            out.append(f"{num_s}{tok.unit}")
+            out.append(f"{num_s}{serialize_ident(tok.unit)}")
         else:
             out.append(tok.value)
 

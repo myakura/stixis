@@ -296,3 +296,60 @@ def test_hypothesis_compact_urange_cascade_shadowing_invariants(
     assert target_cps.issubset(covered)
     assert covered.isdisjoint(disjoint_forbidden)
     assert len(compacted) <= len(format_urange(sorted_target))
+
+
+_TOKEN_STREAM_ATOMS: st.SearchStrategy[str] = st.sampled_from(
+    [
+        "alpha",
+        r"foo\;bar",
+        r"\31 a",
+        r"-a\}b",
+        "--x",
+        "#abc",
+        r"#1\;color:red",
+        r"#\}",
+        "10px",
+        r"1px\;color:red",
+        r"2em\}",
+        "50%",
+        "42",
+        '"a;b}c\\"d"',
+        "-",
+        "+",
+        "*",
+        "/",
+        "#",
+        ",",
+        ":",
+        "var(--x)",
+        "calc(1px - var(--x))",
+        "min(10px, 5%)",
+    ]
+)
+
+
+def _semantic_tokens(css_text: str) -> list[tuple[str, str, float | int | None, str | None, str | None]]:
+    from stixis.syntax import tokenize_css
+
+    return [
+        (
+            t.kind,
+            t.value if t.kind not in ("number", "percentage", "dimension") else "",
+            t.num,
+            t.unit,
+            t.hash_type,
+        )
+        for t in tokenize_css(css_text)
+        if t.kind != "whitespace"
+    ]
+
+
+@settings(max_examples=60)
+@given(parts=st.lists(_TOKEN_STREAM_ATOMS, min_size=1, max_size=8))
+def test_hypothesis_canonicalize_token_roundtrip(parts: list[str]) -> None:
+    """`canonicalize` output must re-tokenize into the same semantic token stream."""
+    raw = " ".join(parts)
+    canon = canonicalize("--x", raw)
+    assert _semantic_tokens(canon) == _semantic_tokens(raw)
+    assert canonicalize("--x", canon) == canon
+
