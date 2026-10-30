@@ -1057,6 +1057,60 @@ def test_version_single_source_of_truth_and_publish_tag_check() -> None:
     assert "GITHUB_REF_NAME" in publish_wf
 
 
+def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_skips(
+    tmp_path: Path,
+) -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import gen_wpt_tests
+
+    from tests._generated import test_wpt_css_fonts, test_wpt_css_properties
+
+    wpt_css = tmp_path / "css"
+    sizing_dir = wpt_css / "css-sizing" / "parsing"
+    sizing_dir.mkdir(parents=True)
+    (sizing_dir / "width-valid.html").write_text(
+        'test_valid_value("width", "10px");\n'
+        'test_valid_value("width", "calc(10px + 20px)");\n'
+        'test_valid_value("width", "var(--w)");\n'
+        'test_valid_value("transform-origin", "top center", ["center top 0px", "center top"]);\n'
+        'test_valid_value("width", "1px", "2px");\n'
+        'test_valid_value("hanging-punctuation", "first");\n',
+        encoding="utf-8",
+    )
+    (sizing_dir / "width-invalid.html").write_text(
+        'test_invalid_value("width", "not-a-width");\n'
+        'test_invalid_value("width", "calc(10px + 20px) extra-invalid");\n'
+        'test_invalid_value("width", "calc(1 / 2px)");\n'
+        'test_invalid_value("nonexistent-prop", "10px");\n',
+        encoding="utf-8",
+    )
+
+    valid, invalid = gen_wpt_tests._extract_broad_css_property_cases(wpt_css, min_engines=2)
+    assert ("width", "10px", "10px") in valid
+    assert ("width", "calc(10px + 20px)", "calc(10px + 20px)") in valid
+    assert ("width", "var(--w)", "var(--w)") in valid
+    assert ("transform-origin", "top center", "center top") in valid
+    assert ("width", "not-a-width") in invalid
+    assert ("width", "calc(10px + 20px) extra-invalid") in invalid
+
+    suite = gen_wpt_tests.extract_broad_css_property_suite(wpt_css, min_engines=2)
+    assert any(prop == "width" and raw == "1px" and exp == "2px" and reason for prop, raw, exp, reason in suite.xfail_valid)
+    assert any(prop == "width" and raw == "calc(1 / 2px)" and reason for prop, raw, reason in suite.xfail_invalid)
+    assert suite.skipped_counts["disabled_min_engines"] == 1
+    assert suite.skipped_counts["unknown_property"] == 1
+
+    # Generated property test modules expose xfail and skipped tables and include calc/var cases
+    assert any("calc(" in raw or "var(" in raw for _, raw, _ in test_wpt_css_properties.VALID_PROPERTY_CASES)
+    assert hasattr(test_wpt_css_properties, "XFAIL_VALID_PROPERTY_CASES")
+    assert hasattr(test_wpt_css_properties, "XFAIL_INVALID_PROPERTY_CASES")
+    assert hasattr(test_wpt_css_properties, "SKIPPED_PROPERTY_COUNTS")
+    assert hasattr(test_wpt_css_fonts, "XFAIL_VALID_PROPERTY_CASES")
+    assert hasattr(test_wpt_css_fonts, "XFAIL_INVALID_PROPERTY_CASES")
+    assert hasattr(test_wpt_css_fonts, "SKIPPED_PROPERTY_COUNTS")
+
+
 
 
 

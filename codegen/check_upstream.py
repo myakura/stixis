@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import tomllib
@@ -242,8 +241,8 @@ def _check_wpt_cases(
                 WptFailure("font-family", "font-family", raw_css, expected, f"raised {exc}")
             )
 
-    ff_desc_v, ff_desc_i = gen_wpt_tests._extract_font_face_descriptor_cases(wpt_dir)
-    for desc, raw_css, expected in ff_desc_v:
+    ff_suite = gen_wpt_tests.extract_font_face_descriptor_suite(wpt_dir)
+    for desc, raw_css, expected in ff_suite.valid:
         try:
             got = canonicalize(desc, raw_css, at_rule="@font-face", options=opts)
             if expected is not None and got != expected:
@@ -258,7 +257,7 @@ def _check_wpt_cases(
                     "@font-face", f"@font-face/{desc}", raw_css, expected, f"raised {exc}"
                 )
             )
-    for desc, raw_css in ff_desc_i:
+    for desc, raw_css in ff_suite.invalid:
         failure = _expect_invalid_raises(
             "@font-face-invalid",
             desc,
@@ -269,45 +268,83 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    fonts_v, fonts_i = gen_wpt_tests._extract_css_fonts_property_cases(
+    fonts_suite = gen_wpt_tests.extract_css_fonts_property_suite(
         wpt_dir, min_engines=min_engines
     )
-    for prop, raw_css, expected in fonts_v:
-        if prop in current_specs.PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+    from tests._generated import test_wpt_css_fonts as committed_fonts
+
+    known_fonts_xfail_v = {
+        (p, v, e)
+        for p, v, e, _r in getattr(committed_fonts, "XFAIL_VALID_PROPERTY_CASES", ())
+    }
+    known_fonts_xfail_i = {
+        (p, v) for p, v, _r in getattr(committed_fonts, "XFAIL_INVALID_PROPERTY_CASES", ())
+    }
+    for prop, raw_css, expected, _reason in fonts_suite.xfail_valid:
+        if (prop, raw_css, expected) in known_fonts_xfail_v:
             continue
         try:
             got = canonicalize(prop, raw_css, options=opts)
-            if got != expected:
-                failures.append(
-                    WptFailure("css-fonts", prop, raw_css, expected, f"got {got!r}")
-                )
+            failures.append(
+                WptFailure("css-fonts", prop, raw_css, expected, f"got {got!r}")
+            )
         except StixisError as exc:
             failures.append(WptFailure("css-fonts", prop, raw_css, expected, f"raised {exc}"))
-    for prop, raw_css in fonts_i:
-        if prop in current_specs.PROPERTY_SYNTAXES and not is_property_enabled(prop, opts):
+    for prop, raw_css, _reason in fonts_suite.xfail_invalid:
+        if (prop, raw_css) in known_fonts_xfail_i:
             continue
         failure = _expect_invalid_raises("css-fonts-invalid", prop, raw_css, options=opts)
         if failure is not None:
             failures.append(failure)
 
-    broad_v, broad_i = gen_wpt_tests._extract_broad_css_property_cases(
+    broad_suite = gen_wpt_tests.extract_broad_css_property_suite(
         wpt_dir, min_engines=min_engines
     )
-
-    # Also verify that all previously committed general CSS property vectors in
-    # `tests/_generated/test_wpt_css_properties.py` still pass and were not silently dropped,
-    # and diagnose any failing vector in WPT `css-*/parsing/*-{valid,invalid}.html` files
-    # when either a previously clean file regresses or `wpt_dir` contains only failing files.
     from tests._generated import test_wpt_css_properties as committed_broad
 
-    new_broad_v_set = set(broad_v)
-    new_broad_i_set = set(broad_i)
-    dropped_props: set[str] = set()
+    known_broad_xfail_v = {
+        (p, v, e)
+        for p, v, e, _r in getattr(committed_broad, "XFAIL_VALID_PROPERTY_CASES", ())
+    }
+    known_broad_xfail_i = {
+        (p, v) for p, v, _r in getattr(committed_broad, "XFAIL_INVALID_PROPERTY_CASES", ())
+    }
+    reported_broad_v: set[tuple[str, str, str]] = set()
+    reported_broad_i: set[tuple[str, str]] = set()
+
+    for prop, raw_css, expected, _reason in broad_suite.xfail_valid:
+        if (prop, raw_css, expected) in known_broad_xfail_v:
+            continue
+        reported_broad_v.add((prop, raw_css, expected))
+        try:
+            got = canonicalize(prop, raw_css, options=opts)
+            failures.append(
+                WptFailure("css-properties", prop, raw_css, expected, f"got {got!r}")
+            )
+        except StixisError as exc:
+            failures.append(
+                WptFailure("css-properties", prop, raw_css, expected, f"raised {exc}")
+            )
+    for prop, raw_css, _reason in broad_suite.xfail_invalid:
+        if (prop, raw_css) in known_broad_xfail_i:
+            continue
+        reported_broad_i.add((prop, raw_css))
+        failure = _expect_invalid_raises("css-properties-invalid", prop, raw_css, options=opts)
+        if failure is not None:
+            failures.append(failure)
+
+    # Also verify that all previously committed general CSS property vectors in
+    # `tests/_generated/test_wpt_css_properties.py` still pass on current Stixis.
+    new_broad_v_set = set(broad_suite.valid)
+    new_broad_i_set = set(broad_suite.invalid)
     for prop, raw_css, expected in committed_broad.VALID_PROPERTY_CASES:
         if not is_property_enabled(prop, opts):
             continue
-        if (prop, raw_css, expected) not in new_broad_v_set:
-            dropped_props.add(prop)
+        if (prop, raw_css, expected) not in new_broad_v_set and (
+            prop,
+            raw_css,
+            expected,
+        ) not in reported_broad_v:
             try:
                 got = canonicalize(prop, raw_css, options=opts)
                 if got != expected:
@@ -321,86 +358,22 @@ def _check_wpt_cases(
     for prop, raw_css in committed_broad.INVALID_PROPERTY_CASES:
         if not is_property_enabled(prop, opts):
             continue
-        if (prop, raw_css) not in new_broad_i_set:
-            dropped_props.add(prop)
+        if (prop, raw_css) not in new_broad_i_set and (prop, raw_css) not in reported_broad_i:
             failure = _expect_invalid_raises("css-properties-invalid", prop, raw_css, options=opts)
             if failure is not None:
                 failures.append(failure)
 
-    # Scan candidate WPT files directly for any failing vector on enabled properties when
-    # either a committed property was dropped or no clean broad cases were extracted.
-    if dropped_props or (not broad_v and not broad_i):
-        for html_file in sorted(wpt_dir.glob("css-*/parsing/*-*.html")):
-            if html_file.parent.parent.name == "css-fonts":
-                continue
-            if not (
-                html_file.name.endswith("-valid.html") or html_file.name.endswith("-invalid.html")
-            ):
-                continue
-            text = html_file.read_text(encoding="utf-8", errors="ignore")
-            for m in gen_wpt_tests._VALID_CALL_RE.finditer(text):
-                prop = m.group(2)
-                if dropped_props and prop not in dropped_props:
-                    continue
-                if prop not in current_specs.PROPERTY_SYNTAXES or not is_property_enabled(
-                    prop, opts
-                ):
-                    continue
-                val = gen_wpt_tests._unescape_js_string(m.group(4))
-                if any(
-                    fn in val.lower() for fn in ("calc(", "var(", "env(", "min(", "max(", "clamp(")
-                ):
-                    continue
-                if m.group(6) is not None:
-                    candidates = [gen_wpt_tests._unescape_js_string(m.group(6))]
-                elif m.group(7) is not None:
-                    candidates = [
-                        gen_wpt_tests._unescape_js_string(cm.group(2))
-                        for cm in re.finditer(r"(['\"])((?:\\.|(?!\1).)*)\1", m.group(7))
-                    ]
-                    if not candidates:
-                        candidates = [val]
-                else:
-                    candidates = [val]
-                try:
-                    got = canonicalize(prop, val, options=opts)
-                    if got not in candidates:
-                        failures.append(
-                            WptFailure(
-                                "css-properties", prop, val, candidates[0], f"got {got!r}"
-                            )
-                        )
-                except StixisError as exc:
-                    failures.append(
-                        WptFailure(
-                            "css-properties", prop, val, candidates[0], f"raised {exc}"
-                        )
-                    )
-            for m in gen_wpt_tests._INVALID_CALL_RE.finditer(text):
-                prop = m.group(2)
-                if dropped_props and prop not in dropped_props:
-                    continue
-                if prop not in current_specs.PROPERTY_SYNTAXES or not is_property_enabled(
-                    prop, opts
-                ):
-                    continue
-                val = gen_wpt_tests._unescape_js_string(m.group(4))
-                if any(
-                    fn in val.lower() for fn in ("calc(", "var(", "env(", "min(", "max(", "clamp(")
-                ):
-                    continue
-                failure = _expect_invalid_raises(
-                    "css-properties-invalid", prop, val, options=opts
-                )
-                if failure is not None:
-                    failures.append(failure)
-
     counts = {
         "urange_cases": len(urange_v) + len(urange_i),
         "font_family_cases": len(ff_ser),
-        "font_face_cases": len(ff_desc_v) + len(ff_desc_i),
-        "css_fonts_cases": len(fonts_v) + len(fonts_i),
-        "css_properties_cases": len(broad_v) + len(broad_i),
+        "font_face_cases": len(ff_suite.valid) + len(ff_suite.invalid),
+        "font_face_xfail_cases": len(ff_suite.xfail_valid),
+        "css_fonts_cases": len(fonts_suite.valid) + len(fonts_suite.invalid),
+        "css_fonts_xfail_cases": len(fonts_suite.xfail_valid) + len(fonts_suite.xfail_invalid),
+        "css_properties_cases": len(broad_suite.valid) + len(broad_suite.invalid),
+        "css_properties_xfail_cases": len(broad_suite.xfail_valid) + len(broad_suite.xfail_invalid),
+        "css_properties_skipped_disabled": broad_suite.skipped_counts["disabled_min_engines"],
+        "css_properties_skipped_unknown": broad_suite.skipped_counts["unknown_property"],
     }
 
     opt_min = None if min_engines == getattr(current_specs, "DEFAULT_MIN_ENGINES", 2) else min_engines
@@ -412,22 +385,30 @@ def _check_wpt_cases(
             gen_wpt_tests._render_font_family_test_file(ff_ser)
         ),
         gen_wpt_tests.OUT_DIR / "test_wpt_font_face.py": gen_wpt_tests._render_font_face_test_file(
-            ff_desc_v, ff_desc_i
+            ff_suite.valid,
+            ff_suite.invalid,
+            xfail_valid=ff_suite.xfail_valid,
         ),
         gen_wpt_tests.OUT_DIR / "test_wpt_css_fonts.py": gen_wpt_tests._render_property_test_file(
             "Auto-generated WPT `css-fonts/parsing/*-{valid,invalid}.html` tests.",
-            fonts_v,
-            fonts_i,
+            fonts_suite.valid,
+            fonts_suite.invalid,
             "css_fonts",
             min_engines=opt_min,
+            xfail_valid=fonts_suite.xfail_valid,
+            xfail_invalid=fonts_suite.xfail_invalid,
+            skipped_counts=fonts_suite.skipped_counts,
         ),
         gen_wpt_tests.OUT_DIR / "test_wpt_css_properties.py": (
             gen_wpt_tests._render_property_test_file(
                 "Auto-generated WPT `css-*/parsing/*-{valid,invalid}.html` property tests.",
-                broad_v,
-                broad_i,
+                broad_suite.valid,
+                broad_suite.invalid,
                 "css_properties",
                 min_engines=opt_min,
+                xfail_valid=broad_suite.xfail_valid,
+                xfail_invalid=broad_suite.xfail_invalid,
+                skipped_counts=broad_suite.skipped_counts,
             )
         ),
     }
@@ -622,13 +603,7 @@ def analyze_upstream(
 
     wpt_counts_old = {
         k: baseline["wpt"][k]
-        for k in (
-            "urange_cases",
-            "font_family_cases",
-            "font_face_cases",
-            "css_fonts_cases",
-            "css_properties_cases",
-        )
+        for k in wpt_counts_new
         if k in baseline.get("wpt", {})
     }
 

@@ -144,6 +144,16 @@ INVALID_FONT_FACE_DESCRIPTOR_CASES: tuple[tuple[str, str], ...] = (
     ('src', 'url("foo.ttf") format(opentype) tech(features-opentype) dummy(something)'),
 )
 
+XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES: tuple[tuple[str, str, str], ...] = (
+    ('src', 'url("foo.ttf") format(xyzz 200px), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") format(xyzz), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") dummy(xyzzy), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") format(), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") format(none), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") format(dummy), url("foo.ttf") tech(variations)', 'font-src-list-per-item-fallback-recovery'),
+    ('src', 'url("foo.ttf") tech(color), url("bar.html")', 'font-src-list-per-item-fallback-recovery'),
+)
+
 
 @pytest.mark.parametrize(("descriptor", "raw_css", "expected"), VALID_FONT_FACE_DESCRIPTOR_CASES)
 def test_wpt_font_face_descriptor_valid(descriptor: str, raw_css: str, expected: str | None) -> None:
@@ -160,3 +170,16 @@ def test_wpt_font_face_descriptor_valid(descriptor: str, raw_css: str, expected:
 def test_wpt_font_face_descriptor_invalid(descriptor: str, raw_css: str) -> None:
     with pytest.raises(StixisError):
         canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)
+
+
+def test_wpt_font_face_descriptor_valid_xfail() -> None:
+    unexpected_passes: list[tuple[str, str]] = []
+    for descriptor, raw_css, _reason in XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES:
+        try:
+            canonicalize(descriptor, raw_css, at_rule="@font-face", options=CSSOM_OPTS)
+        except StixisError:
+            continue
+        unexpected_passes.append((descriptor, raw_css))
+    if unexpected_passes:
+        pytest.fail(f"XPASS: {len(unexpected_passes)} @font-face xfail case(s) now pass ({unexpected_passes[0]!r}); regenerate WPT tests")
+    pytest.xfail(f"{len(XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES)} known @font-face xfail cases")
