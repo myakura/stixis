@@ -308,10 +308,8 @@ def serialize_url(
     else:
         raise StixisValidationError("<url>", "<url>", value)
 
-    if any(ord(c) <= 0x1F or ord(c) == 0x7F for c in raw):
-        # Control characters inside URL strings are still escaped by serialize_string,
-        # which is valid for url("...") string form.
-        pass
+    # Control characters inside URL strings are escaped by serialize_string,
+    # which is valid for url("...") string form.
     inner = serialize_string(raw, options=options)
     if mods:
         if not isinstance(mods, tuple):

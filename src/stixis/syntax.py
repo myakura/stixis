@@ -88,7 +88,6 @@ MATH_FUNCTIONS: frozenset[str] = frozenset(
         "abs",
         "sign",
         "calc-size",
-        " sibling-index",
         "sibling-index",
         "sibling-count",
     }
@@ -587,27 +586,16 @@ def format_token_sequence(
     """Serialize a validated sequence of `CssToken`s into canonical CSSOM string form."""
     out: list[str] = []
     prev: CssToken | None = None
-    in_calc_depth = 0
-    paren_stack: list[bool] = []  # True if the '(' belongs to a calc/math function
 
-    for idx, tok in enumerate(tokens):
+    for tok in tokens:
         if tok.kind == "whitespace":
             continue
 
         # Determine if space is needed before this token
-        need_space = False
-        if prev is not None:
-            if prev.kind in ("function", "(", "[") or tok.kind in (")", "]", "comma", "semicolon", "colon"):
-                need_space = False
-            elif prev.kind == "colon" or prev.kind == "comma":  # noqa: SIM114
-                need_space = True
-            elif in_calc_depth > 0 and (
-                (tok.kind == "delim" and tok.value in ("+", "-", "*", "/"))
-                or (prev.kind == "delim" and prev.value in ("+", "-", "*", "/"))
-            ) or tok.kind == "delim" and tok.value == "/" or prev.kind == "delim" and prev.value == "/":
-                need_space = True
-            else:
-                need_space = True
+        need_space = prev is not None and not (
+            prev.kind in ("function", "(", "[")
+            or tok.kind in (")", "]", "comma", "semicolon", "colon")
+        )
 
         if need_space:
             out.append(" ")
@@ -616,19 +604,10 @@ def format_token_sequence(
             out.append(serialize_ident(tok.value))
         elif tok.kind == "function":
             fn_lower = tok.value.lower()
-            is_math = fn_lower in MATH_FUNCTIONS
-            paren_stack.append(is_math)
-            if is_math:
-                in_calc_depth += 1
             out.append(f"{serialize_ident(fn_lower)}(")
         elif tok.kind == "(":
-            paren_stack.append(False)
             out.append("(")
         elif tok.kind == ")":
-            if paren_stack:
-                was_math = paren_stack.pop()
-                if was_math:
-                    in_calc_depth -= 1
             out.append(")")
         elif tok.kind == "at-keyword":
             out.append(f"@{serialize_ident(tok.value)}")

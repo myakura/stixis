@@ -1133,6 +1133,18 @@ def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_desc
     assert "min_engines" in skill_text
 
 
+def test_math_functions_and_token_formatting_have_no_dead_entries() -> None:
+    from stixis.primitives import serialize_url
+    from stixis.syntax import MATH_FUNCTIONS, format_token_sequence, tokenize_css
+
+    assert all(fn == fn.strip() for fn in MATH_FUNCTIONS)
+    assert "sibling-index" in MATH_FUNCTIONS
+    assert " sibling-index" not in MATH_FUNCTIONS
+    assert format_token_sequence(tokenize_css("calc(10px + 20px / 2)")) == "calc(10px + 20px / 2)"
+    assert serialize_url("https://example.com/\x01a") == r'url("https://example.com/\1 a")'
+
+
+
 
 
 
