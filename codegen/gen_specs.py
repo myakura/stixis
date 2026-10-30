@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from stixis.syntax import (
-     _BUILTIN_PRIMITIVES,
+    _BUILTIN_PRIMITIVES,
     AllOfNode,
     AnyOrderNode,
     DelimNode,
@@ -105,12 +105,7 @@ def load_bcd_engine_counts(
         for jf in sorted((bcd_css_dir / "properties").glob("*.json")):
             pname = jf.stem
             data = json.loads(jf.read_text(encoding="utf-8"))
-            compat = (
-                data.get("css", {})
-                .get("properties", {})
-                .get(pname, {})
-                .get("__compat", {})
-            )
+            compat = data.get("css", {}).get("properties", {}).get(pname, {}).get("__compat", {})
             sup = compat.get("support", {})
             eng = 0
             for browser in ("chrome", "firefox", "safari"):
@@ -144,9 +139,7 @@ def load_and_merge_specs(
         raise FileNotFoundError(f"@webref/css directory not found: {webref_dir}")
 
     excluded_specs: set[str] = set(patches.get("support", {}).get("exclude_specs", []))
-    json_files = [
-        p for p in sorted(webref_dir.glob("*.json")) if p.name not in excluded_specs
-    ]
+    json_files = [p for p in sorted(webref_dir.glob("*.json")) if p.name not in excluded_specs]
     if not json_files:
         raise FileNotFoundError(f"No JSON files found in {webref_dir}")
 
@@ -363,9 +356,14 @@ def infer_python_type_expr(
         types.append(f"Literal[{lit_items}]")
     types.extend(["str", "Template", "Keyword"])
 
-    if any(tok in syntax for tok in ("<number", "<integer", "<length", "<angle", "<percentage", "weight")):
+    if any(
+        tok in syntax
+        for tok in ("<number", "<integer", "<length", "<angle", "<percentage", "weight")
+    ):
         types.extend(["int", "float", "Dimension", "Percentage"])
-    if any(tok in syntax for tok in ("{1,2}", "#", "||", "&&", "override", "src", "family", "settings")):
+    if any(
+        tok in syntax for tok in ("{1,2}", "#", "||", "&&", "override", "src", "family", "settings")
+    ):
         types.append("Sequence[Any]")
     if "urange" in syntax or "unicode-range" in syntax:
         types.extend(["set[int]", "frozenset[int]", "tuple[int, int]"])
@@ -519,7 +517,10 @@ def format_types_py(
     font_face_descs = atrules.get("@font-face", {}).get("descriptors", {})
 
     for alias_name, target_syn in [
-        ("FontDisplayKeyword", font_face_descs.get("font-display", "auto | block | swap | fallback | optional")),
+        (
+            "FontDisplayKeyword",
+            font_face_descs.get("font-display", "auto | block | swap | fallback | optional"),
+        ),
         ("FontWidthKeyword", properties.get("font-width", "normal")),
         ("FontFormatKeyword", values.get("<font-format>", "woff2")),
         ("FontTechKeyword", values.get("<font-tech>", "variations")),
@@ -709,7 +710,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         args.check,
     )
-    ok &= _write_or_check(gen_dir / "types.py", format_types_py(properties, values, atrules), args.check)
+    ok &= _write_or_check(
+        gen_dir / "types.py", format_types_py(properties, values, atrules), args.check
+    )
 
     if not ok:
         return 1

@@ -257,7 +257,9 @@ def _consume_unquoted_url(text: str, pos: int) -> tuple[str, int]:
                 return "".join(chars), pos + 1
             raise StixisSyntaxError("Bad URL token: whitespace inside unquoted url()")
         if ch in ('"', "'", "(") or ord(ch) <= 0x1F or ord(ch) == 0x7F:
-            raise StixisSyntaxError(f"Bad URL token: invalid character {ch!r} inside unquoted url()")
+            raise StixisSyntaxError(
+                f"Bad URL token: invalid character {ch!r} inside unquoted url()"
+            )
         if ch == "\\":
             if _starts_with_valid_escape(text, pos):
                 esc_ch, pos = _consume_escape(text, pos + 1)
@@ -273,7 +275,9 @@ def _consume_unquoted_url(text: str, pos: int) -> tuple[str, int]:
 def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssToken]:
     """Tokenize a CSS string according to W3C CSS Syntax Module Level 3 §4."""
     # Preprocess newlines and NULL characters per §3.3
-    normalized = text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").replace("\x00", "\ufffd")
+    normalized = (
+        text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").replace("\x00", "\ufffd")
+    )
     tokens: list[CssToken] = []
     pos = 0
     n = len(normalized)
@@ -353,7 +357,9 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 _is_ident_code_point(normalized[pos + 1])
                 or _starts_with_valid_escape(normalized, pos + 1)
             ):
-                hash_type = "id" if _starts_an_ident_sequence(normalized, pos + 1) else "unrestricted"
+                hash_type = (
+                    "id" if _starts_an_ident_sequence(normalized, pos + 1) else "unrestricted"
+                )
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
                 tokens.append(CssToken("hash", ident, hash_type=hash_type))
             else:
@@ -508,7 +514,9 @@ def render_css_template(
                 # Render as a quoted string inside url("...")
                 out.append(serialize_string(text, options=options))
                 in_unquoted_url = False
-            elif not item.format_spec and not isinstance(val, bool) and isinstance(val, (int, float)):
+            elif (
+                not item.format_spec and not isinstance(val, bool) and isinstance(val, (int, float))
+            ):
                 out.append(serialize_number(val))
             else:
                 text = format(val, item.format_spec) if item.format_spec else str(val)
@@ -550,9 +558,7 @@ def validate_token_stream_safety(
             stack.append(")")
         elif tok.kind in matching:
             if not stack and tok.kind == "{" and forbid_top_level_braces:
-                raise StixisValidationError(
-                    target, target, text, "Unexpected top-level `{` token"
-                )
+                raise StixisValidationError(target, target, text, "Unexpected top-level `{` token")
             stack.append(matching[tok.kind])
         elif tok.kind in closing:
             if not stack or stack[-1] != tok.kind:
@@ -562,13 +568,9 @@ def validate_token_stream_safety(
             stack.pop()
         elif not stack:
             if forbid_top_level_semicolon and tok.kind == "semicolon":
-                raise StixisValidationError(
-                    target, target, text, "Unexpected top-level `;` token"
-                )
+                raise StixisValidationError(target, target, text, "Unexpected top-level `;` token")
             if forbid_top_level_bang and tok.kind == "delim" and tok.value == "!":
-                raise StixisValidationError(
-                    target, target, text, "Unexpected top-level `!` token"
-                )
+                raise StixisValidationError(target, target, text, "Unexpected top-level `!` token")
 
     if stack:
         raise StixisValidationError(
@@ -818,9 +820,7 @@ _BUILTIN_PRIMITIVES: frozenset[str] = frozenset(
     }
 )
 
-_BOUND_VAL_RE = re.compile(
-    r"^([+-]?(?:∞|infinity|\d+(?:\.\d+)?))([a-zA-Z%]*)$", re.IGNORECASE
-)
+_BOUND_VAL_RE = re.compile(r"^([+-]?(?:∞|infinity|\d+(?:\.\d+)?))([a-zA-Z%]*)$", re.IGNORECASE)
 
 
 def _parse_bound(raw: str) -> tuple[float | None, str]:
@@ -926,27 +926,32 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
 
         # Keyword or function start `fn(`
         start = pos
-        while pos < n and not syntax[pos].isspace() and syntax[pos] not in (
-            "|",
-            "&",
-            "[",
-            "]",
-            "{",
-            "}",
-            "?",
-            "*",
-            "+",
-            "#",
-            "!",
-            ",",
-            "/",
-            ":",
-            ";",
-            "(",
-            ")",
-            "<",
-            ">",
-            "'",
+        while (
+            pos < n
+            and not syntax[pos].isspace()
+            and syntax[pos]
+            not in (
+                "|",
+                "&",
+                "[",
+                "]",
+                "{",
+                "}",
+                "?",
+                "*",
+                "+",
+                "#",
+                "!",
+                ",",
+                "/",
+                ":",
+                ";",
+                "(",
+                ")",
+                "<",
+                ">",
+                "'",
+            )
         ):
             # Allow `+` or `-` inside keywords like `<an+b>` or `-webkit-` or `n-`
             pos += 1
@@ -1343,12 +1348,20 @@ class _TokenMatcher:
 
         if isinstance(node, AllOfNode):
             return self._match_unordered(
-                node.items, pos, require_all=True, min_override=min_override, max_override=max_override
+                node.items,
+                pos,
+                require_all=True,
+                min_override=min_override,
+                max_override=max_override,
             )
 
         if isinstance(node, AnyOrderNode):
             return self._match_unordered(
-                node.items, pos, require_all=False, min_override=min_override, max_override=max_override
+                node.items,
+                pos,
+                require_all=False,
+                min_override=min_override,
+                max_override=max_override,
             )
 
         if isinstance(node, MultiplierNode):
@@ -1425,7 +1438,9 @@ class _TokenMatcher:
             next_states: list[tuple[int, list[str]]] = []
             seen: set[tuple[int, tuple[str, ...]]] = set()
             for cur_pos, parts in states:
-                for nxt_pos, rendered in self.match_node(child, cur_pos, min_override, max_override):
+                for nxt_pos, rendered in self.match_node(
+                    child, cur_pos, min_override, max_override
+                ):
                     new_parts = parts + ([rendered] if rendered != "" else [])
                     key = (nxt_pos, tuple(new_parts))
                     if key not in seen:
@@ -1466,9 +1481,9 @@ class _TokenMatcher:
                 return
             seen_states.add(state_key)
 
-            if (require_all and required_indices.issubset(matched.keys()) and len(matched) >= 1) or (
-                not require_all and len(matched) >= 1
-            ):
+            if (
+                require_all and required_indices.issubset(matched.keys()) and len(matched) >= 1
+            ) or (not require_all and len(matched) >= 1):
                 results.append((cur_pos, dict(matched)))
                 if len(matched) == k:
                     return
@@ -1476,7 +1491,9 @@ class _TokenMatcher:
             for idx, branch in enumerate(items):
                 if idx in matched:
                     continue
-                for nxt_pos, rendered in self.match_node(branch, cur_pos, min_override, max_override):
+                for nxt_pos, rendered in self.match_node(
+                    branch, cur_pos, min_override, max_override
+                ):
                     if nxt_pos > cur_pos and rendered != "":
                         matched[idx] = rendered
                         dfs(nxt_pos, matched)
@@ -1534,7 +1551,9 @@ class _TokenMatcher:
                     continue
                 next_start += 1
 
-            for nxt_pos, rendered in self.match_node(node.child, next_start, min_override, max_override):
+            for nxt_pos, rendered in self.match_node(
+                node.child, next_start, min_override, max_override
+            ):
                 if nxt_pos == next_start:
                     continue
                 new_acc = acc + [rendered]
@@ -1567,13 +1586,11 @@ class _TokenMatcher:
             return [(pos + 1, "auto")]
         if kw == "oblique":
             results: list[tuple[int, str]] = [(pos + 1, "oblique")]
-            angle_prim = PrimitiveNode("<angle>", min_val=-90.0, max_val=90.0, min_unit="deg", max_unit="deg")
+            angle_prim = PrimitiveNode(
+                "<angle>", min_val=-90.0, max_val=90.0, min_unit="deg", max_unit="deg"
+            )
             for p1, a1 in self._match_primitive(angle_prim, pos + 1, -90.0, 90.0):
-                if (
-                    not is_descriptor
-                    and self.options.normalize_zero_oblique
-                    and a1 == "0deg"
-                ):
+                if not is_descriptor and self.options.normalize_zero_oblique and a1 == "0deg":
                     results.insert(0, (p1, "normal"))
                 else:
                     results.insert(0, (p1, f"oblique {a1}"))
@@ -1677,7 +1694,16 @@ class _TokenMatcher:
                 return [(pos + 1, f"{serialize_number(val)}%")]
             return []
 
-        if kind in ("<length>", "<angle>", "<time>", "<frequency>", "<resolution>", "<flex>", "<decibel>", "<semitones>"):
+        if kind in (
+            "<length>",
+            "<angle>",
+            "<time>",
+            "<frequency>",
+            "<resolution>",
+            "<flex>",
+            "<decibel>",
+            "<semitones>",
+        ):
             allowed_units = UNITS_BY_TYPE.get(kind, frozenset())
             lower_map = LOWER_TO_CANONICAL_UNIT.get(kind, {})
             if kind == "<length>" and tok.kind == "number" and tok.num == 0:
@@ -1711,7 +1737,12 @@ class _TokenMatcher:
                 return [(pos + 1, f"{serialize_number(val)}{tok.unit}")]
             return []
 
-        if kind in ("<length-percentage>", "<angle-percentage>", "<time-percentage>", "<frequency-percentage>"):
+        if kind in (
+            "<length-percentage>",
+            "<angle-percentage>",
+            "<time-percentage>",
+            "<frequency-percentage>",
+        ):
             base_kind = f"<{kind[1:].split('-')[0]}>"
             dim_matches = self._match_primitive(
                 PrimitiveNode(base_kind, eff_min, eff_max, node.min_unit, node.max_unit),
@@ -1755,7 +1786,12 @@ class _TokenMatcher:
                             results.insert(0, (pos + 2, tag_s))
                         elif low == "off":
                             results.insert(0, (pos + 2, f"{tag_s} 0"))
-                    elif nxt.kind == "number" and nxt.is_integer and nxt.num is not None and nxt.num >= 0:
+                    elif (
+                        nxt.kind == "number"
+                        and nxt.is_integer
+                        and nxt.num is not None
+                        and nxt.num >= 0
+                    ):
                         iv = int(nxt.num)
                         if iv == 1:
                             results.insert(0, (pos + 2, tag_s))
@@ -1856,9 +1892,7 @@ class _TokenMatcher:
         if kind == "<font-format>":
             if tok.kind == "string":
                 try:
-                    s = serialize_font_format(
-                        tok.value, is_quoted_token=True, options=self.options
-                    )
+                    s = serialize_font_format(tok.value, is_quoted_token=True, options=self.options)
                     # Strip outer `format(` and `)`
                     return [(pos + 1, s[7:-1])]
                 except StixisValidationError:
@@ -1933,7 +1967,11 @@ class _TokenMatcher:
             parts = [url_str]
 
             # Optional `format(<font-format>)`
-            if cur < len(self.tokens) and self.tokens[cur].kind == "function" and self.tokens[cur].value.lower() == "format":
+            if (
+                cur < len(self.tokens)
+                and self.tokens[cur].kind == "function"
+                and self.tokens[cur].value.lower() == "format"
+            ):
                 grouped = _consume_balanced_group(self.tokens, cur + 1, ")")
                 if grouped is None:
                     continue
@@ -1948,7 +1986,11 @@ class _TokenMatcher:
                 cur = after_fmt
 
             # Optional `tech(<font-tech>#)`
-            if cur < len(self.tokens) and self.tokens[cur].kind == "function" and self.tokens[cur].value.lower() == "tech":
+            if (
+                cur < len(self.tokens)
+                and self.tokens[cur].kind == "function"
+                and self.tokens[cur].value.lower() == "tech"
+            ):
                 grouped = _consume_balanced_group(self.tokens, cur + 1, ")")
                 if grouped is None:
                     continue
@@ -1956,7 +1998,9 @@ class _TokenMatcher:
                 if not tech_toks:
                     continue
                 sub = _TokenMatcher(tech_toks, self.specs_lookup, self.options)
-                tech_mult = MultiplierNode(PrimitiveNode("<font-tech>"), 1, None, comma_separated=True)
+                tech_mult = MultiplierNode(
+                    PrimitiveNode("<font-tech>"), 1, None, comma_separated=True
+                )
                 tech_m = sub._match_multiplier(tech_mult, 0, None, None)
                 valid_tech = [s for end_p, s in tech_m if end_p == len(sub.tokens)]
                 if not valid_tech:
@@ -2067,7 +2111,8 @@ def _node_matches_single_value(
         # is `<string>` or `<family-name>` / `<font-family-name>`, check whether it matches a keyword first
         # ONLY when neither `<family-name>` nor `<font-family-name>` is a branch!
         has_family_branch = any(
-            isinstance(b, PrimitiveNode) and b.kind in ("<family-name>", "<font-family-name>")
+            isinstance(b, PrimitiveNode)
+            and b.kind in ("<family-name>", "<font-family-name>")
             or (isinstance(b, RefNode) and b.name in ("<family-name>", "<font-family-name>"))
             for b in node.items
         )
@@ -2533,7 +2578,12 @@ def evaluate_canonicalize(
 
     if target == "font-style":
         matcher = _TokenMatcher(non_ws, specs_lookup, options, raw_text=css_text)
-        if len(non_ws) == 1 and non_ws[0].kind == "ident" and non_ws[0].value.lower() in CSS_WIDE_KEYWORDS and at_rule is None:
+        if (
+            len(non_ws) == 1
+            and non_ws[0].kind == "ident"
+            and non_ws[0].value.lower() in CSS_WIDE_KEYWORDS
+            and at_rule is None
+        ):
             return non_ws[0].value.lower()
         if _contains_global_substitution(non_ws) and at_rule is None:
             return format_token_sequence(non_ws, options=options)
@@ -2614,7 +2664,9 @@ def evaluate_serialize_value(
     if target in ("font-family", "<family-name>", "<font-family-name>"):
         if target in ("<family-name>", "<font-family-name>") or is_font_face:
             if isinstance(value, str):
-                return serialize_family_name(value, options=options, target=target, is_quoted_token=True)
+                return serialize_family_name(
+                    value, options=options, target=target, is_quoted_token=True
+                )
             raise StixisValidationError(target, syntax, value)
         return serialize_font_family_list(value, options=options, target=target)
 
@@ -2622,16 +2674,30 @@ def evaluate_serialize_value(
         return serialize_generic_family(value, target=target)
 
     if target == "font-feature-settings" or target == "<feature-tag-value>":
-        if isinstance(value, str) and ("," in value or " " in value or value.startswith(('"', "'"))):
+        if isinstance(value, str) and (
+            "," in value or " " in value or value.startswith(('"', "'"))
+        ):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_feature_settings(value, options=options, target=target)
 
     if target == "font-variation-settings":
         if isinstance(value, str) and value.strip().lower() != "normal":
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_variation_settings(value, options=options, target=target)
 
@@ -2641,7 +2707,13 @@ def evaluate_serialize_value(
     if target == "font-language-override":
         if isinstance(value, str) and value.strip().startswith(('"', "'")):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         if isinstance(value, str) and value.strip().lower() == "normal":
             return "normal"
@@ -2652,35 +2724,69 @@ def evaluate_serialize_value(
             value.strip().lower().startswith(("url(", "local(")) or "," in value
         ):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_src_list(value, options=options, target=target)
 
     if target == "<font-src>":
         if isinstance(value, str) and value.strip().lower().startswith(("url(", "local(")):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_single_font_src(value, options=options, target=target)
 
     if target == "font-weight":
-        if isinstance(value, str) and (" " in value.strip() or value.strip().lower().startswith("calc(")):
+        if isinstance(value, str) and (
+            " " in value.strip() or value.strip().lower().startswith("calc(")
+        ):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_weight(value, is_descriptor=is_font_face, target=target)
 
     if target in ("font-width", "font-stretch"):
-        if isinstance(value, str) and (" " in value.strip() or value.strip().lower().startswith("calc(")):
+        if isinstance(value, str) and (
+            " " in value.strip() or value.strip().lower().startswith("calc(")
+        ):
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_width(value, is_descriptor=is_font_face, target=target)
 
     if target == "font-style":
         if isinstance(value, str) and "calc(" in value.lower():
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_font_style(
             value, is_descriptor=is_font_face, options=options, target=target
@@ -2689,7 +2795,13 @@ def evaluate_serialize_value(
     if is_font_face and target in ("ascent-override", "descent-override", "line-gap-override"):
         if isinstance(value, str) and " " in value.strip():
             return evaluate_canonicalize(
-                target, syntax, node, value, specs_lookup=specs_lookup, at_rule=at_rule, options=options
+                target,
+                syntax,
+                node,
+                value,
+                specs_lookup=specs_lookup,
+                at_rule=at_rule,
+                options=options,
             )
         return serialize_metric_override(value, allow_from_font=False, min_val=0.0, target=target)
 
@@ -2706,9 +2818,7 @@ def evaluate_serialize_value(
             return raw_kw.strip().lower()
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
-    direct = _node_matches_single_value(
-        node, value, specs_lookup, options, forbidden_idents
-    )
+    direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
     if direct is not None:
         return direct
 
@@ -2726,6 +2836,3 @@ def evaluate_serialize_value(
         )
 
     raise StixisValidationError(target, syntax, value)
-
-
-

@@ -228,7 +228,9 @@ def serialize_font_width(
             return "auto"
         return serialize_one_or_two(
             value,
-            lambda item: _serialize_width_item(item, target=target, expected_syntax=expected_syntax),
+            lambda item: _serialize_width_item(
+                item, target=target, expected_syntax=expected_syntax
+            ),
             target=target,
             expected_syntax=expected_syntax,
         )
@@ -266,7 +268,11 @@ def serialize_font_style(
                 raise StixisValidationError(target, expected_syntax, value)
             angles = [
                 serialize_angle_value(
-                    part, min_deg=-90.0, max_deg=90.0, target=target, expected_syntax=expected_syntax
+                    part,
+                    min_deg=-90.0,
+                    max_deg=90.0,
+                    target=target,
+                    expected_syntax=expected_syntax,
                 )
                 for part in rest
             ]
@@ -288,17 +294,25 @@ def serialize_font_style(
             tail = list(value[1:])
             if not tail:
                 return "oblique"
-            if len(tail) == 1 and isinstance(tail[0], (tuple, list)) and not (
-                len(tail[0]) == 2
-                and isinstance(tail[0][1], str)
-                and tail[0][1].lower() in ANGLE_UNITS_LOWER
+            if (
+                len(tail) == 1
+                and isinstance(tail[0], (tuple, list))
+                and not (
+                    len(tail[0]) == 2
+                    and isinstance(tail[0][1], str)
+                    and tail[0][1].lower() in ANGLE_UNITS_LOWER
+                )
             ):
                 tail = list(tail[0])
             if len(tail) > (2 if is_descriptor else 1):
                 raise StixisValidationError(target, expected_syntax, value)
             angles = [
                 serialize_angle_value(
-                    part, min_deg=-90.0, max_deg=90.0, target=target, expected_syntax=expected_syntax
+                    part,
+                    min_deg=-90.0,
+                    max_deg=90.0,
+                    target=target,
+                    expected_syntax=expected_syntax,
                 )
                 for part in tail
             ]

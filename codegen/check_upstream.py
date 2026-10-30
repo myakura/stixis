@@ -220,9 +220,7 @@ def _check_wpt_cases(
         try:
             got = canonicalize("<urange>", raw_css)
             if got != expected:
-                failures.append(
-                    WptFailure("urange", "<urange>", raw_css, expected, f"got {got!r}")
-                )
+                failures.append(WptFailure("urange", "<urange>", raw_css, expected, f"got {got!r}"))
         except StixisError as exc:
             failures.append(WptFailure("urange", "<urange>", raw_css, expected, f"raised {exc}"))
     for raw_css in urange_i:
@@ -255,9 +253,7 @@ def _check_wpt_cases(
                 )
         except StixisError as exc:
             failures.append(
-                WptFailure(
-                    "@font-face", f"@font-face/{desc}", raw_css, expected, f"raised {exc}"
-                )
+                WptFailure("@font-face", f"@font-face/{desc}", raw_css, expected, f"raised {exc}")
             )
     for desc, raw_css in ff_suite.invalid:
         failure = _expect_invalid_raises(
@@ -274,8 +270,7 @@ def _check_wpt_cases(
     from tests._generated import test_wpt_css_fonts as committed_fonts
 
     known_fonts_xfail_v = {
-        (p, v, e)
-        for p, v, e, _r in getattr(committed_fonts, "XFAIL_VALID_PROPERTY_CASES", ())
+        (p, v, e) for p, v, e, _r in getattr(committed_fonts, "XFAIL_VALID_PROPERTY_CASES", ())
     }
     known_fonts_xfail_i = {
         (p, v) for p, v, _r in getattr(committed_fonts, "XFAIL_INVALID_PROPERTY_CASES", ())
@@ -286,9 +281,7 @@ def _check_wpt_cases(
         exp_str = expected if isinstance(expected, str) else expected[0]
         try:
             got = canonicalize(prop, raw_css, options=opts)
-            failures.append(
-                WptFailure("css-fonts", prop, raw_css, exp_str, f"got {got!r}")
-            )
+            failures.append(WptFailure("css-fonts", prop, raw_css, exp_str, f"got {got!r}"))
         except StixisError as exc:
             failures.append(WptFailure("css-fonts", prop, raw_css, exp_str, f"raised {exc}"))
     for prop, raw_css, _reason in fonts_suite.xfail_invalid:
@@ -302,8 +295,7 @@ def _check_wpt_cases(
     from tests._generated import test_wpt_css_properties as committed_broad
 
     known_broad_xfail_v = {
-        (p, v, e)
-        for p, v, e, _r in getattr(committed_broad, "XFAIL_VALID_PROPERTY_CASES", ())
+        (p, v, e) for p, v, e, _r in getattr(committed_broad, "XFAIL_VALID_PROPERTY_CASES", ())
     }
     known_broad_xfail_i = {
         (p, v) for p, v, _r in getattr(committed_broad, "XFAIL_INVALID_PROPERTY_CASES", ())
@@ -318,13 +310,9 @@ def _check_wpt_cases(
         reported_broad_v.add((prop, raw_css, exp_str))
         try:
             got = canonicalize(prop, raw_css, options=opts)
-            failures.append(
-                WptFailure("css-properties", prop, raw_css, exp_str, f"got {got!r}")
-            )
+            failures.append(WptFailure("css-properties", prop, raw_css, exp_str, f"got {got!r}"))
         except StixisError as exc:
-            failures.append(
-                WptFailure("css-properties", prop, raw_css, exp_str, f"raised {exc}")
-            )
+            failures.append(WptFailure("css-properties", prop, raw_css, exp_str, f"raised {exc}"))
     for prop, raw_css, _reason in broad_suite.xfail_invalid:
         if (prop, raw_css) in known_broad_xfail_i:
             continue
@@ -431,10 +419,13 @@ def analyze_upstream(
             return True
         if pname in allow_props:
             return True
-        return max(
-            engine_counts.get(pname, 0),
-            old_engine_counts.get(pname, 0),
-        ) >= min_engines
+        return (
+            max(
+                engine_counts.get(pname, 0),
+                old_engine_counts.get(pname, 0),
+            )
+            >= min_engines
+        )
 
     # Compare units
     unit_changes: dict[str, dict[str, list[str]]] = {}
@@ -487,9 +478,7 @@ def analyze_upstream(
                 compile_err = str(exc)
 
         change_type = (
-            "added"
-            if old_syn is None
-            else ("modified" if old_syn != new_syn else "unchanged")
+            "added" if old_syn is None else ("modified" if old_syn != new_syn else "unchanged")
         )
         entry = SyntaxChange(
             target=target,
@@ -548,7 +537,8 @@ def analyze_upstream(
 
     gen_dir = REPO_ROOT / "src" / "stixis" / "_generated"
     specs_changed = (
-        (gen_dir / "units.py").read_text(encoding="utf-8") != gen_specs.format_units_py(units_by_type)
+        (gen_dir / "units.py").read_text(encoding="utf-8")
+        != gen_specs.format_units_py(units_by_type)
         or (gen_dir / "specs.py").read_text(encoding="utf-8")
         != gen_specs.format_specs_py(
             properties,
@@ -570,11 +560,7 @@ def analyze_upstream(
     finally:
         current_specs.PROPERTY_ENGINE_COUNTS = saved_counts
 
-    wpt_counts_old = {
-        k: baseline["wpt"][k]
-        for k in wpt_counts_new
-        if k in baseline.get("wpt", {})
-    }
+    wpt_counts_old = {k: baseline["wpt"][k] for k in wpt_counts_new if k in baseline.get("wpt", {})}
 
     return UpstreamReport(
         webref_old_commit=baseline["webref"]["commit"],
@@ -628,7 +614,11 @@ def format_markdown_issue(report: UpstreamReport) -> str:
         and not report.support_changes
         and not report.wpt_files_changed
     ):
-        lines.append("* No syntax, unit, engine-support, or WPT test vector changes detected for enabled targets (`min_engines >= " + str(report.min_engines) + "`).")
+        lines.append(
+            "* No syntax, unit, engine-support, or WPT test vector changes detected for enabled targets (`min_engines >= "
+            + str(report.min_engines)
+            + "`)."
+        )
         if report.experimental_syntax_changes:
             lines.append(
                 f"* ({len(report.experimental_syntax_changes)} experimental `< {report.min_engines}`-engine property change(s) ignored; run with `--min-engines 1` or `--min-engines 0` to inspect.)"
@@ -646,9 +636,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             lines.append("### Unit Table Changes (`src/stixis/_generated/units.py`)")
             lines.append("")
             for utype, diff in report.unit_changes.items():
-                lines.append(
-                    f"* `{utype}`: added `{diff['added']}`, removed `{diff['removed']}`"
-                )
+                lines.append(f"* `{utype}`: added `{diff['added']}`, removed `{diff['removed']}`")
             lines.append("")
 
         if report.syntax_changes:
@@ -722,7 +710,11 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             )
             lines.append("")
             for wf in report.wpt_failures[:50]:
-                exp_str = f"expected `{wf.expected}`" if wf.expected is not None else "expected `StixisError`"
+                exp_str = (
+                    f"expected `{wf.expected}`"
+                    if wf.expected is not None
+                    else "expected `StixisError`"
+                )
                 lines.append(
                     f"* `[{wf.suite}]` `{wf.target}` input `{wf.raw_css}`: {exp_str}, {wf.actual_or_error}"
                 )

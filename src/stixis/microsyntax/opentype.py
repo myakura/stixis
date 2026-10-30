@@ -154,7 +154,11 @@ def serialize_font_feature_settings(
         and len(value) == 2
         and isinstance(value[0], str)
         and not isinstance(value[1], (tuple, list, dict))
-        and not (isinstance(value[1], str) and len(value[1]) == 4 and value[1].lower() not in ("on", "off"))
+        and not (
+            isinstance(value[1], str)
+            and len(value[1]) == 4
+            and value[1].lower() not in ("on", "off")
+        )
     ):
         return _format_single_feature_tag_value(
             value[0], value[1], options=options, target=target, expected_syntax=expected_syntax
@@ -251,14 +255,14 @@ def serialize_font_variation_settings(
             raise StixisValidationError(target, expected_syntax, value)
         parts = []
         for item in value:
-            if (
-                isinstance(item, tuple)
-                and len(item) == 2
-                and isinstance(item[0], str)
-            ):
+            if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str):
                 parts.append(
                     _format_single_variation_tag_value(
-                        item[0], item[1], options=options, target=target, expected_syntax=expected_syntax
+                        item[0],
+                        item[1],
+                        options=options,
+                        target=target,
+                        expected_syntax=expected_syntax,
                     )
                 )
             else:

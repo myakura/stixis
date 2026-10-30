@@ -45,7 +45,9 @@ def _describe_python_inputs(target_kind: str, name: str, syntax: str) -> list[st
     elif name in ("font-width", "font-stretch", "<font-width-css3>"):
         hints.append("Percentage | tuple[Percentage | str, Percentage | str] (range)")
     elif name == "font-style":
-        hints.append("tuple[str, str | Dimension] | tuple[str, Dimension, Dimension] ('oblique' range)")
+        hints.append(
+            "tuple[str, str | Dimension] | tuple[str, Dimension, Dimension] ('oblique' range)"
+        )
     elif name in ("ascent-override", "descent-override", "line-gap-override"):
         hints.append("Percentage | tuple[Percentage | str, Percentage | str] (1..2 items)")
     elif name in ("font-feature-settings", "<feature-tag-value>"):
@@ -55,8 +57,15 @@ def _describe_python_inputs(target_kind: str, name: str, syntax: str) -> list[st
     elif name in ("src", "<font-src-list>", "<font-src>"):
         hints.append("FontSrc | Url | LocalFont | Sequence[FontSrc | Url | LocalFont | str]")
     elif name in ("font-family", "<family-name>"):
-        hints.append("str (always quoted as <family-name>) | GenericFamily | Keyword | Sequence[...]")
-    elif "<number" in syntax or "<integer" in syntax or "<length" in syntax or "<percentage" in syntax:
+        hints.append(
+            "str (always quoted as <family-name>) | GenericFamily | Keyword | Sequence[...]"
+        )
+    elif (
+        "<number" in syntax
+        or "<integer" in syntax
+        or "<length" in syntax
+        or "<percentage" in syntax
+    ):
         hints.append("int | float | Dimension | Percentage")
     if "#" in syntax or "+" in syntax:
         hints.append("list[...] | tuple[...]")
@@ -205,7 +214,11 @@ def _run_inspect(args: argparse.Namespace) -> int:
     if info.get("python_key"):
         sys.stdout.write(f"  python_key: {info['python_key']}\n")
     if "engines" in info:
-        status_note = "enabled" if info["enabled_by_default"] else f"disabled by default (requires min_engines<={info['engines']})"
+        status_note = (
+            "enabled"
+            if info["enabled_by_default"]
+            else f"disabled by default (requires min_engines<={info['engines']})"
+        )
         sys.stdout.write(f"  engines: {info['engines']}/3 ({status_note})\n")
     if info.get("also_descriptor_in"):
         sys.stdout.write(f"  also_descriptor_in: {', '.join(info['also_descriptor_in'])}\n")
