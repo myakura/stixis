@@ -1002,32 +1002,36 @@ def test_default_is_rejected_as_css_wide_keyword_but_excluded_from_custom_ident(
 def test_gen_specs_rejects_missing_bcd_dir_and_disallows_fallback_in_check_mode(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    import tomllib
-
     repo_root = Path(__file__).resolve().parent.parent
     sys.path.insert(0, str(repo_root / "codegen"))
     import gen_specs
 
-    rc_explicit = gen_specs.main(["--check", "--bcd-dir", str(tmp_path / "nonexistent")])
+    fake_webref = tmp_path / "webref"
+    fake_webref.mkdir(parents=True)
+
+    rc_explicit = gen_specs.main(
+        [
+            "--check",
+            "--webref-dir",
+            str(fake_webref),
+            "--bcd-dir",
+            str(tmp_path / "nonexistent"),
+        ]
+    )
     captured = capsys.readouterr()
     assert rc_explicit == 4
     assert "missing bcd_css_dir" in captured.err
 
-    patches = tomllib.loads((repo_root / "codegen" / "spec_patches.toml").read_text(encoding="utf-8"))
-    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-    webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
-    if not webref_dir.is_dir():
-        pytest.skip(f"Local @webref/css directory not available: {webref_dir}")
-
     custom_patches = tmp_path / "spec_patches.toml"
     custom_patches.write_text(
-        f'[meta]\nwebref_css_dir = "{webref_dir}"\nbcd_css_dir = "{tmp_path / "missing_bcd"}"\n',
+        f'[meta]\nwebref_css_dir = "{fake_webref}"\nbcd_css_dir = "{tmp_path / "missing_bcd"}"\n',
         encoding="utf-8",
     )
     rc_check_no_bcd = gen_specs.main(["--check", "--patches", str(custom_patches)])
     captured = capsys.readouterr()
     assert rc_check_no_bcd == 4
     assert "missing bcd_css_dir" in captured.err
+
 
 
 

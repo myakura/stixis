@@ -639,17 +639,18 @@ def main(argv: list[str] | None = None) -> int:
         if (candidate_bcd / "properties").is_dir():
             bcd_dir = candidate_bcd
 
+    if bcd_dir is None and args.check:
+        missing_desc = candidate_bcd if candidate_bcd is not None else "bcd_css_dir"
+        print(
+            f"{patches_path}:1: missing bcd_css_dir {missing_desc} (required with --check)",
+            file=sys.stderr,
+        )
+        return 4
+
     units_by_type, properties, values, atrules = load_and_merge_specs(webref_dir, patches)
     if bcd_dir is not None:
         engine_counts = load_bcd_engine_counts(bcd_dir, properties)
     else:
-        if args.check:
-            missing_desc = candidate_bcd if candidate_bcd is not None else "bcd_css_dir"
-            print(
-                f"{patches_path}:1: missing bcd_css_dir {missing_desc} (required with --check)",
-                file=sys.stderr,
-            )
-            return 4
         print(
             "Warning: BCD directory not found; reusing existing PROPERTY_ENGINE_COUNTS from src/stixis/_generated/specs.py",
             file=sys.stderr,
