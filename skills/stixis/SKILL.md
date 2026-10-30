@@ -46,6 +46,10 @@ from stixis import (
     serialize_value,
     using_options,
 )
+from stixis.primitives import (
+    CSS_WIDE_KEYWORDS,
+    RESERVED_CUSTOM_IDENT_KEYWORDS,
+)
 ```
 
 * `dumps(node_or_nodes, *, minify: bool = False, options: SerializationOptions | None = None) -> str` (alias: `serialize`): Render a `StyleSheet`, a single `Rule`, or an iterable of `Rule` nodes.
@@ -54,9 +58,10 @@ from stixis import (
 * `AtRule(name, prelude=None, *, descriptors=None, rules=(), comment=None, statement=False, options=None)`
 * `CommentNode(text, *, leading_newline: bool = False, options: SerializationOptions | None = None)`: Standalone CSS comment node. Emits a leading blank line in non-minified output when `leading_newline=True` or when `text` starts with `\n`.
 * `StyleSheet(rules, *, header_comment=None, options=None)`
+* `Url(value: str, modifiers: tuple[str, ...] = ())`: Structured `<url>` value. Validates each entry in `modifiers` against the `<url-modifier>` grammar (`<ident> | <function-token> <any-value> )`) in `__post_init__`, raising `StixisValidationError` on invalid modifiers.
 * `using_options(options: SerializationOptions)`: Context manager that sets default `SerializationOptions` for AST nodes and `serialize_value` or `canonicalize` calls inside the `with` block.
-* `serialize_value(target: str, value: Any, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Validate and serialize a Python value or PEP 750 `Template`.
-* `canonicalize(target: str, css_text: str, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Tokenize, validate, and normalize raw CSS value text.
+* `serialize_value(target: str, value: Any, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Validate and serialize a Python value or PEP 750 `Template`. Standard CSS properties accept `CSS_WIDE_KEYWORDS` (`initial`, `inherit`, `unset`, `revert`, `revert-layer`, `revert-rule`). `default` is not a CSS-wide keyword and is accepted only where a property's grammar includes it (such as `cursor`), while `RESERVED_CUSTOM_IDENT_KEYWORDS` (`CSS_WIDE_KEYWORDS | {"default"}`) remains excluded from `<custom-ident>` and unquoted `<family-name>`.
+* `canonicalize(target: str, css_text: str, *, at_rule: str | None = None, options: SerializationOptions | None = None) -> str`: Tokenize, validate, and normalize raw CSS value text. `<!--` (`<CDO-token>`) and `-->` (`<CDC-token>`) are tokenized as distinct tokens rather than delimiters or identifiers, so typed CSS properties reject them with `StixisValidationError` whereas custom properties (`--*`, `<any-value>`) allow them.
 
 ## Mapping Python values to CSS
 
@@ -90,6 +95,8 @@ Use Python 3.14+ `t"..."` templates when combining static CSS structure with Pyt
 
 ## Presets (`SerializationOptions`)
 
+`SerializationOptions` validates all fields in `__post_init__` and raises `ValueError` on invalid `quote_char`, `font_face_stretch_alias`, boolean flags, `min_engines` outside `0..3` (or `bool`), or non-`frozenset[str]` `extra_properties`.
+
 * `SerializationOptions()` (default): double quotes `"`, `<family-name>` always quoted, `font-width` descriptor name, unquoted `format(woff2)`, `min_engines=2`.
 * `SerializationOptions.cleome(min_engines=...)`: single quotes `'`, `@font-face` outputs `font-stretch` instead of `font-width`, and quotes `format('woff2')`.
 * `SerializationOptions.cssom(min_engines=...)`: W3C CSSOM shortest serialization. Unquotes valid `<custom-ident>+` family names such as `Noto Sans JP`, while keeping digit-starting or keyword-colliding names quoted.
@@ -103,9 +110,10 @@ Run the `stixis` CLI to inspect grammars or validate CSS values:
   * `uv run stixis inspect @font-face`
   * `uv run stixis inspect font-style --json`
   * `uv run stixis inspect <font-src>`
-* Validate and canonicalize a CSS value (exits `0` with canonical CSS on `stdout`, `1` on invalid CSS, `2` on bad CLI usage, `4` on unknown target):
+* Validate and canonicalize a CSS value (`--min-engines {0,1,2,3}` sets the browser engine threshold; exits `0` with canonical CSS on `stdout`, `1` on invalid CSS, `2` on bad CLI usage, `4` on unknown target):
   * `uv run stixis check font-weight "100 900" --at-rule @font-face`
   * `uv run stixis check unicode-range "u+3040-309f" --at-rule @font-face`
+  * `uv run stixis check hanging-punctuation "first" --min-engines 1`
 
 ## Filing Issues from consumer projects
 
