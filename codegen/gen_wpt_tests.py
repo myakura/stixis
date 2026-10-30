@@ -52,6 +52,17 @@ class PropertySuiteExtraction:
     skipped_counts: dict[str, int]
 
 
+@dataclass(frozen=True, slots=True)
+class WptSuitesExtraction:
+    urange_valid: list[tuple[str, str]]
+    urange_invalid: list[str]
+    font_family: list[tuple[str, str]]
+    font_face: FontFaceSuiteExtraction
+    css_fonts: PropertySuiteExtraction
+    broad_css: PropertySuiteExtraction
+
+
+
 def _unescape_js_string(raw: str) -> str:
     """Unescape a JavaScript single- or double-quoted string literal body."""
     out: list[str] = []
@@ -677,6 +688,72 @@ def _render_property_test_file(
     return "\n".join(lines)
 
 
+def extract_all_wpt_suites(
+    wpt_dir: Path,
+    *,
+    min_engines: int = 2,
+) -> WptSuitesExtraction:
+    """Extract all WPT test suites for `<urange>`, `font-family`, `@font-face`, `css-fonts`, and general CSS properties."""
+    urange_v, urange_i = _extract_urange_cases(wpt_dir)
+    ff_ser_cases = _extract_font_family_serialization_cases(wpt_dir)
+    ff_suite = extract_font_face_descriptor_suite(wpt_dir)
+    fonts_suite = extract_css_fonts_property_suite(wpt_dir, min_engines=min_engines)
+    broad_suite = extract_broad_css_property_suite(wpt_dir, min_engines=min_engines)
+    return WptSuitesExtraction(
+        urange_valid=urange_v,
+        urange_invalid=urange_i,
+        font_family=ff_ser_cases,
+        font_face=ff_suite,
+        css_fonts=fonts_suite,
+        broad_css=broad_suite,
+    )
+
+
+def build_expected_wpt_test_files(
+    suites: WptSuitesExtraction,
+    *,
+    min_engines: int = 2,
+    default_min_engines: int = 2,
+    out_dir: Path = OUT_DIR,
+) -> dict[Path, str]:
+    """Render the full set of generated WPT test files, including `tests/_generated/__init__.py`."""
+    opt_min = None if min_engines == default_min_engines else min_engines
+    return {
+        out_dir / "__init__.py": '"""Auto-generated WPT test suites."""\n',
+        out_dir / "test_wpt_urange.py": _render_urange_test_file(
+            suites.urange_valid, suites.urange_invalid
+        ),
+        out_dir / "test_wpt_font_family.py": _render_font_family_test_file(
+            suites.font_family
+        ),
+        out_dir / "test_wpt_font_face.py": _render_font_face_test_file(
+            suites.font_face.valid,
+            suites.font_face.invalid,
+            xfail_valid=suites.font_face.xfail_valid,
+        ),
+        out_dir / "test_wpt_css_fonts.py": _render_property_test_file(
+            "Auto-generated WPT `css-fonts/parsing/*-{valid,invalid}.html` tests.",
+            suites.css_fonts.valid,
+            suites.css_fonts.invalid,
+            "css_fonts",
+            min_engines=opt_min,
+            xfail_valid=suites.css_fonts.xfail_valid,
+            xfail_invalid=suites.css_fonts.xfail_invalid,
+            skipped_counts=suites.css_fonts.skipped_counts,
+        ),
+        out_dir / "test_wpt_css_properties.py": _render_property_test_file(
+            "Auto-generated WPT `css-*/parsing/*-{valid,invalid}.html` property tests.",
+            suites.broad_css.valid,
+            suites.broad_css.invalid,
+            "css_properties",
+            min_engines=opt_min,
+            xfail_valid=suites.broad_css.xfail_valid,
+            xfail_invalid=suites.broad_css.xfail_invalid,
+            skipped_counts=suites.broad_css.skipped_counts,
+        ),
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Generate pytest suites from local Web Platform Tests (WPT)."
@@ -704,49 +781,25 @@ def main(argv: list[str] | None = None) -> int:
 
     default_min = getattr(_gen_specs, "DEFAULT_MIN_ENGINES", 2)
     eff_min = default_min if args.min_engines is None else args.min_engines
-    opt_min = None if eff_min == default_min else eff_min
 
     wpt_dir: Path = args.wpt_dir
     if not wpt_dir.is_dir():
         print(f"Error: WPT directory not found at {wpt_dir}", file=sys.stderr)
         return 1
 
-    urange_v, urange_i = _extract_urange_cases(wpt_dir)
-    ff_ser_cases = _extract_font_family_serialization_cases(wpt_dir)
-    ff_suite = extract_font_face_descriptor_suite(wpt_dir)
-    fonts_suite = extract_css_fonts_property_suite(wpt_dir, min_engines=eff_min)
-    broad_suite = extract_broad_css_property_suite(wpt_dir, min_engines=eff_min)
+    suites = extract_all_wpt_suites(wpt_dir, min_engines=eff_min)
+    urange_v = suites.urange_valid
+    urange_i = suites.urange_invalid
+    ff_ser_cases = suites.font_family
+    ff_suite = suites.font_face
+    fonts_suite = suites.css_fonts
+    broad_suite = suites.broad_css
 
-    files_to_write = {
-        OUT_DIR / "__init__.py": '"""Auto-generated WPT test suites."""\n',
-        OUT_DIR / "test_wpt_urange.py": _render_urange_test_file(urange_v, urange_i),
-        OUT_DIR / "test_wpt_font_family.py": _render_font_family_test_file(ff_ser_cases),
-        OUT_DIR / "test_wpt_font_face.py": _render_font_face_test_file(
-            ff_suite.valid,
-            ff_suite.invalid,
-            xfail_valid=ff_suite.xfail_valid,
-        ),
-        OUT_DIR / "test_wpt_css_fonts.py": _render_property_test_file(
-            "Auto-generated WPT `css-fonts/parsing/*-{valid,invalid}.html` tests.",
-            fonts_suite.valid,
-            fonts_suite.invalid,
-            "css_fonts",
-            min_engines=opt_min,
-            xfail_valid=fonts_suite.xfail_valid,
-            xfail_invalid=fonts_suite.xfail_invalid,
-            skipped_counts=fonts_suite.skipped_counts,
-        ),
-        OUT_DIR / "test_wpt_css_properties.py": _render_property_test_file(
-            "Auto-generated WPT `css-*/parsing/*-{valid,invalid}.html` property tests.",
-            broad_suite.valid,
-            broad_suite.invalid,
-            "css_properties",
-            min_engines=opt_min,
-            xfail_valid=broad_suite.xfail_valid,
-            xfail_invalid=broad_suite.xfail_invalid,
-            skipped_counts=broad_suite.skipped_counts,
-        ),
-    }
+    files_to_write = build_expected_wpt_test_files(
+        suites,
+        min_engines=eff_min,
+        default_min_engines=default_min,
+    )
 
     total_pass = (
         len(urange_v)

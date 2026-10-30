@@ -1163,15 +1163,57 @@ def test_serialization_options_validates_fields_in_post_init() -> None:
         SerializationOptions(extra_properties={"width"})  # type: ignore[arg-type]
 
 
+def test_check_upstream_shares_wpt_extraction_and_expected_files_with_gen_wpt_tests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root))
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import check_upstream
+    import gen_wpt_tests
 
+    assert hasattr(gen_wpt_tests, "extract_all_wpt_suites")
+    assert hasattr(gen_wpt_tests, "build_expected_wpt_test_files")
 
+    fake_suites = gen_wpt_tests.WptSuitesExtraction(
+        urange_valid=[],
+        urange_invalid=[],
+        font_family=[],
+        font_face=gen_wpt_tests.FontFaceSuiteExtraction(valid=[], invalid=[], xfail_valid=[]),
+        css_fonts=gen_wpt_tests.PropertySuiteExtraction(
+            valid=[],
+            invalid=[],
+            xfail_valid=[],
+            xfail_invalid=[],
+            skipped_counts={"disabled_min_engines": 0, "unknown_property": 0},
+        ),
+        broad_css=gen_wpt_tests.PropertySuiteExtraction(
+            valid=[],
+            invalid=[],
+            xfail_valid=[],
+            xfail_invalid=[],
+            skipped_counts={"disabled_min_engines": 0, "unknown_property": 0},
+        ),
+    )
+    expected_map = gen_wpt_tests.build_expected_wpt_test_files(fake_suites)
+    assert (gen_wpt_tests.OUT_DIR / "__init__.py") in expected_map
 
-
-
-
-
-
-
-
-
+    monkeypatch.setattr(
+        gen_wpt_tests,
+        "extract_all_wpt_suites",
+        lambda _wpt_dir, *, min_engines=2: fake_suites,
+    )
+    # Matching current files on disk when build_expected_wpt_test_files returns only __init__.py
+    init_path = gen_wpt_tests.OUT_DIR / "__init__.py"
+    monkeypatch.setattr(
+        gen_wpt_tests,
+        "build_expected_wpt_test_files",
+        lambda _suites, *, min_engines=2, default_min_engines=2, out_dir=gen_wpt_tests.OUT_DIR: {
+            init_path: init_path.read_text(encoding="utf-8") + "# modified\n"
+        },
+    )
+    _counts, _failures, wpt_changed = check_upstream._check_wpt_cases(
+        Path("/unused"), min_engines=2
+    )
+    assert wpt_changed is True
 

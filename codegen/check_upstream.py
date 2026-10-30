@@ -213,7 +213,9 @@ def _check_wpt_cases(
     failures: list[WptFailure] = []
     opts = SerializationOptions.cssom(min_engines=min_engines)
 
-    urange_v, urange_i = gen_wpt_tests._extract_urange_cases(wpt_dir)
+    suites = gen_wpt_tests.extract_all_wpt_suites(wpt_dir, min_engines=min_engines)
+    urange_v = suites.urange_valid
+    urange_i = suites.urange_invalid
     for raw_css, expected in urange_v:
         try:
             got = canonicalize("<urange>", raw_css)
@@ -228,7 +230,7 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    ff_ser = gen_wpt_tests._extract_font_family_serialization_cases(wpt_dir)
+    ff_ser = suites.font_family
     for raw_css, expected in ff_ser:
         try:
             got = canonicalize("font-family", raw_css, options=opts)
@@ -241,7 +243,7 @@ def _check_wpt_cases(
                 WptFailure("font-family", "font-family", raw_css, expected, f"raised {exc}")
             )
 
-    ff_suite = gen_wpt_tests.extract_font_face_descriptor_suite(wpt_dir)
+    ff_suite = suites.font_face
     for desc, raw_css, expected in ff_suite.valid:
         try:
             got = canonicalize(desc, raw_css, at_rule="@font-face", options=opts)
@@ -268,9 +270,7 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    fonts_suite = gen_wpt_tests.extract_css_fonts_property_suite(
-        wpt_dir, min_engines=min_engines
-    )
+    fonts_suite = suites.css_fonts
     from tests._generated import test_wpt_css_fonts as committed_fonts
 
     known_fonts_xfail_v = {
@@ -298,9 +298,7 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    broad_suite = gen_wpt_tests.extract_broad_css_property_suite(
-        wpt_dir, min_engines=min_engines
-    )
+    broad_suite = suites.broad_css
     from tests._generated import test_wpt_css_properties as committed_broad
 
     known_broad_xfail_v = {
@@ -378,42 +376,11 @@ def _check_wpt_cases(
         "css_properties_skipped_unknown": broad_suite.skipped_counts["unknown_property"],
     }
 
-    opt_min = None if min_engines == getattr(current_specs, "DEFAULT_MIN_ENGINES", 2) else min_engines
-    expected_files = {
-        gen_wpt_tests.OUT_DIR / "test_wpt_urange.py": gen_wpt_tests._render_urange_test_file(
-            urange_v, urange_i
-        ),
-        gen_wpt_tests.OUT_DIR / "test_wpt_font_family.py": (
-            gen_wpt_tests._render_font_family_test_file(ff_ser)
-        ),
-        gen_wpt_tests.OUT_DIR / "test_wpt_font_face.py": gen_wpt_tests._render_font_face_test_file(
-            ff_suite.valid,
-            ff_suite.invalid,
-            xfail_valid=ff_suite.xfail_valid,
-        ),
-        gen_wpt_tests.OUT_DIR / "test_wpt_css_fonts.py": gen_wpt_tests._render_property_test_file(
-            "Auto-generated WPT `css-fonts/parsing/*-{valid,invalid}.html` tests.",
-            fonts_suite.valid,
-            fonts_suite.invalid,
-            "css_fonts",
-            min_engines=opt_min,
-            xfail_valid=fonts_suite.xfail_valid,
-            xfail_invalid=fonts_suite.xfail_invalid,
-            skipped_counts=fonts_suite.skipped_counts,
-        ),
-        gen_wpt_tests.OUT_DIR / "test_wpt_css_properties.py": (
-            gen_wpt_tests._render_property_test_file(
-                "Auto-generated WPT `css-*/parsing/*-{valid,invalid}.html` property tests.",
-                broad_suite.valid,
-                broad_suite.invalid,
-                "css_properties",
-                min_engines=opt_min,
-                xfail_valid=broad_suite.xfail_valid,
-                xfail_invalid=broad_suite.xfail_invalid,
-                skipped_counts=broad_suite.skipped_counts,
-            )
-        ),
-    }
+    expected_files = gen_wpt_tests.build_expected_wpt_test_files(
+        suites,
+        min_engines=min_engines,
+        default_min_engines=getattr(current_specs, "DEFAULT_MIN_ENGINES", 2),
+    )
     wpt_changed = any(
         not p.is_file() or p.read_text(encoding="utf-8") != content
         for p, content in expected_files.items()
