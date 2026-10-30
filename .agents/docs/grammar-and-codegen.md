@@ -53,10 +53,26 @@ uv run python codegen/gen_specs.py --check
 `codegen/gen_wpt_tests.py` extracts test cases from local WPT HTML files into `tests/_generated/`:
 
 * `test_wpt_urange.py`: all 94 valid and invalid `<urange>` cases from `css-syntax/urange-parsing.html`.
-* `test_wpt_font_family.py`: `<family-name>` and `<generic-family>` quoting and normalization cases from `cssom/font-family-serialization-001.html` and `css-fonts/support/font-family-keywords.js`.
-* `test_wpt_font_face.py`: `@font-face` descriptor tests from `css-fonts/parsing/font-face-*.html`.
-* `test_wpt_css_fonts.py`: property parsing cases from `css-fonts/parsing/*-{valid,invalid}.html`.
-* `test_wpt_css_properties.py`: general CSS property cases from `css-*/parsing/*-{valid,invalid}.html`.
+* `test_wpt_font_family.py`: 54 `<family-name>` and `<generic-family>` quoting and normalization cases from `cssom/font-family-serialization-001.html` and `css-fonts/support/font-family-keywords.js`.
+* `test_wpt_font_face.py`: 130 passing and 7 `xfail` `@font-face` descriptor cases from `css-fonts/parsing/font-face-*.html`. The 7 `xfail` cases (`XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES`, reason `font-src-list-per-item-fallback-recovery`) test browser list-item fallback recovery where an invalid `format(...)` or `tech(...)` item is dropped from a comma-separated `src` list, whereas Stixis validates every `<font-src>` item strictly.
+* `test_wpt_css_fonts.py`: 462 passing (`239` valid, `223` invalid) and 9 `xfail` (`7` valid, `2` invalid) property parsing cases from `css-fonts/parsing/*-{valid,invalid}.html`, including `calc(...)` and `var(...)` cases.
+* `test_wpt_css_properties.py`: 4,362 passing (`2,251` valid, `2,111` invalid) and 671 `xfail` (`614` valid, `57` invalid) general CSS property cases across 543 `css-*/parsing/*-{valid,invalid}.html` files, plus `SKIPPED_PROPERTY_COUNTS` (`461` assertions on properties below `min_engines=2` and `2` assertions on nonexistent property names `margin-bottom-left` and `padding-bottom-left`).
+
+### WPT filtering and `xfail` classification
+
+`codegen/gen_wpt_tests.py` evaluates every `test_valid_value` and `test_invalid_value` assertion individually (including multi-candidate expected arrays `[cand1, cand2]` and `calc(`/`min(`/`max(`/`clamp(`/`var(`/`env(` expressions) rather than dropping entire HTML files when a single case fails:
+
+* **Skipped assertions (`SKIPPED_PROPERTY_COUNTS`)**:
+  * `disabled_min_engines`: properties whose shipping engine count in `@mdn/browser-compat-data` is below `min_engines` (default `2`) and not listed in `allow_properties`.
+  * `unknown_property`: property names not present in `@webref/css` (`margin-bottom-left`, `padding-bottom-left`).
+* **Expected failures (`XFAIL_VALID_PROPERTY_CASES`, `XFAIL_INVALID_PROPERTY_CASES`)**:
+  * `cssom-shortest-or-computed-serialization-diff`: WPT expects shorthand collapsing (such as `gap: 10px 10px` -> `10px`) or computed-value normalization beyond grammar-order token canonicalization.
+  * `spec-grammar-mismatch-or-prose-syntax`: WPT tests syntax from a newer draft or prose rule not reflected in the merged `@webref/css` formal grammar.
+  * `math-expression-simplification-or-canonical-order`: WPT expects CSS Values 4 §10.10 algebraic folding (`calc(100 + 100)` -> `calc(200)`) or unit term sorting (`calc(10px - 0.5em)` -> `calc(-0.5em + 10px)`).
+  * `math-function-in-unsupported-grammar-position`: math function used in a grammar position not matched by `_CALC_ELIGIBLE_PRIMITIVES`.
+  * `prose-parse-constraint-not-in-formal-grammar`: invalid combinations prohibited by specification prose rather than the formal Value Definition Syntax grammar.
+  * `math-expression-dimensional-type-checking`: invalid dimensional arithmetic inside `calc(...)` (such as `calc(1 / 2px)`), which Stixis validates syntactically as a balanced token stream without evaluating unit algebra.
+  * Both `test_wpt_*_valid_xfail` and `test_wpt_*_invalid_xfail` fail with `XPASS` if any `xfail` vector starts passing, prompting test regeneration.
 
 Before committing, verify that generated files are current:
 
