@@ -582,10 +582,8 @@ def format_token_sequence(
         if prev is not None:
             if prev.kind in ("function", "(", "[") or tok.kind in (")", "]", "comma", "semicolon", "colon"):
                 need_space = False
-            elif prev.kind == "colon" or prev.kind == "comma":
+            elif prev.kind == "colon" or prev.kind == "comma":  # noqa: SIM114
                 need_space = True
-            elif prev.kind == "delim" and prev.value in ("#", "-") and tok.kind in ("ident", "function"):
-                need_space = False
             elif in_calc_depth > 0 and (
                 (tok.kind == "delim" and tok.value in ("+", "-", "*", "/"))
                 or (prev.kind == "delim" and prev.value in ("+", "-", "*", "/"))

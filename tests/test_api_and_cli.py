@@ -899,4 +899,18 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
             assert res.returncode == 0, f"{doc_name}#block-{idx} failed: {res.stderr}"
 
 
+def test_format_token_sequence_preserves_space_after_hyphen_or_hash_delim() -> None:
+    from stixis.syntax import tokenize_css
 
+    out = canonicalize("width", "calc(1px - var(--x))")
+    assert out == "calc(1px - var(--x))"
+    assert [(t.kind, t.value) for t in tokenize_css(out) if t.kind != "whitespace"][:4] == [
+        ("function", "calc"),
+        ("dimension", "1"),
+        ("delim", "-"),
+        ("function", "var"),
+    ]
+
+    assert canonicalize("width", "calc(100% - min(10px, 5%))") == "calc(100% - min(10px, 5%))"
+    assert canonicalize("--x", "a - b") == "a - b"
+    assert canonicalize("--x", "# foo") == "# foo"
