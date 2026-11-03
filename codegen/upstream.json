@@ -2,17 +2,17 @@
   "webref": {
     "repository": "https://github.com/w3c/webref.git",
     "branch": "main",
-    "commit": "3d7a70d83200b28be46292852d68fc13d9a3b970",
+    "commit": "f7a4146d99d78630a0c70bc5c2c84816cc82aa15",
     "subpath": "ed/css",
     "json_files": 125,
     "properties": 814,
     "descriptors": 103,
-    "values": 792
+    "values": 793
   },
   "wpt": {
     "repository": "https://github.com/web-platform-tests/wpt.git",
     "branch": "master",
-    "commit": "ed5926bf7261f8fcd1716f1831c9480958784a5a",
+    "commit": "ad65e3da226065fbc12c9fe4f61bea408f5bbf1d",
     "subpath": "css",
     "urange_cases": 94,
     "font_family_cases": 54,
@@ -20,15 +20,15 @@
     "font_face_xfail_cases": 7,
     "css_fonts_cases": 462,
     "css_fonts_xfail_cases": 9,
-    "css_properties_cases": 4362,
-    "css_properties_xfail_cases": 671,
-    "css_properties_skipped_disabled": 461,
+    "css_properties_cases": 4454,
+    "css_properties_xfail_cases": 608,
+    "css_properties_skipped_disabled": 527,
     "css_properties_skipped_unknown": 2
   },
   "bcd": {
     "repository": "https://github.com/mdn/browser-compat-data.git",
     "branch": "main",
-    "commit": "dfccdeb611e3bcc4db697b614a71180bdd6cb3b6",
+    "commit": "29768a4caa9a88722ef6ba4bad772eb4c3667218",
     "subpath": "css"
   }
 }

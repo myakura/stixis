@@ -80,6 +80,7 @@ order = [
 
 # Extend `<font-features-tech>` with `avar2` from `css-fonts-5.json`
 "<font-features-tech>" = "[ features-opentype | features-aat | features-graphite | avar2 ]"
+"<baseline-position>" = "[ first | last ]? baseline"
 
 # At-rule prelude grammars (`ValueNode` validated when present; `"<condition>"` uses token safety)
 [atrule_preludes]
@@ -104,3 +105,8 @@ order = [
 [properties]
 "font-stretch" = "<'font-width'>"
 "font-synthesis" = "none | [ weight || [ style | oblique-only ] || small-caps || position ]"
+"align-content" = "normal | <baseline-position> | <content-distribution> | <overflow-position>? <content-position>"
+"justify-content" = "normal | <content-distribution> | <overflow-position>? [ <content-position> | left | right ]"
+"align-items" = "<overflow-position>? [ normal | <self-position> ] | stretch | <baseline-position>"
+"align-self" = "auto | <overflow-position>? [ normal | <self-position> ] | stretch | <baseline-position> | anchor-center"
+"justify-items" = "<overflow-position>? [ normal | <self-position> | left | right ] | stretch | <baseline-position> | legacy | legacy && [ left | right | center ]"
