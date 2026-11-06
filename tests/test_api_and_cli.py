@@ -1377,3 +1377,37 @@ def test_empty_custom_property_values_accepted_regular_properties_rejected(
     rc_err = cli_main(["check", "width", ""])
     captured = capsys.readouterr()
     assert rc_err == EXIT_VALIDATION_ERROR
+
+
+def test_math_function_calc_sum_structural_validation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for invalid_expr in (
+        "calc(1px + )",
+        "calc(foo bar)",
+        "calc(1px+2px)",
+        "calc(1px +2px)",
+        "calc(1px+ 2px)",
+        "calc(1px-2px)",
+        "calc(1px -2px)",
+        "calc(1px * )",
+        "min(1px, )",
+        "clamp(1px, 2px)",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("width", invalid_expr)
+        with pytest.raises(StixisValidationError):
+            serialize_value("width", invalid_expr)
+
+    assert canonicalize("width", "calc(1px + 2px)") == "calc(1px + 2px)"
+    assert canonicalize("width", "calc((1px + 2px) * 2)") == "calc((1px + 2px) * 2)"
+    assert canonicalize("width", "min(1px, 2em)") == "min(1px, 2em)"
+
+    rc_bad = cli_main(["check", "width", "calc(1px + )"])
+    captured = capsys.readouterr()
+    assert rc_bad == EXIT_VALIDATION_ERROR
+
+    rc_good = cli_main(["check", "width", "calc((1px + 2px) * 2)"])
+    captured = capsys.readouterr()
+    assert rc_good == EXIT_OK
+    assert captured.out.strip() == "calc((1px + 2px) * 2)"
