@@ -65,6 +65,8 @@ class FontSrc:
                 self,
                 "local() font sources cannot have format() or tech() modifiers.",
             )
+        if isinstance(self.tech, Sequence) and not isinstance(self.tech, (str, bytes, tuple)):
+            object.__setattr__(self, "tech", tuple(self.tech))
 
 
 def serialize_font_format(
@@ -206,6 +208,19 @@ def serialize_single_font_src(
             tech=item.get("tech"),
         )
         return serialize_single_font_src(src_obj, options=options, target=target)
+
+    if (
+        isinstance(item, tuple)
+        and item
+        and all(
+            isinstance(pair, tuple)
+            and len(pair) == 2
+            and isinstance(pair[0], str)
+            and pair[0] in {"url", "local", "format", "tech"}
+            for pair in item
+        )
+    ):
+        return serialize_single_font_src(dict(item), options=options, target=target)
 
     if isinstance(item, tuple) and 1 <= len(item) <= 3:
         url_val = item[0]

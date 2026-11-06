@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
-from string.templatelib import Template
+from string.templatelib import Interpolation, Template
 from typing import Any, Unpack
 
 from stixis._generated.specs import (
@@ -264,6 +264,8 @@ class CommentNode:
         opts = current_options(self.options)
         has_nl = bool(self.leading_newline) or _has_leading_newline(self.text)
         rendered = _validate_and_render_comment(self.text, options=opts)
+        if isinstance(self.text, Template):
+            object.__setattr__(self, "text", _freeze_value(self.text))
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_has_leading_nl", has_nl)
         object.__setattr__(self, "_rendered", rendered)
@@ -334,6 +336,52 @@ def _validate_and_render_comment(
         return f"/* {comment} */"
 
     raise StixisValidationError("comment", "str | Template", comment)
+
+
+def _freeze_value(val: Any) -> Any:
+    """Recursively convert mutable containers inside AST inputs into immutable, hashable tuples."""
+    if isinstance(val, Template):
+        frozen_parts: list[str | Interpolation] = []
+        for item in val:
+            if isinstance(item, Interpolation):
+                frozen_parts.append(
+                    Interpolation(
+                        _freeze_value(item.value),
+                        item.expression,
+                        item.conversion,
+                        item.format_spec,
+                    )
+                )
+            else:
+                frozen_parts.append(item)
+        return Template(*frozen_parts)
+    if isinstance(val, Mapping):
+        return tuple((k, _freeze_value(v)) for k, v in val.items())
+    if isinstance(val, (set, frozenset)):
+        elems = [_freeze_value(x) for x in val]
+        try:
+            return tuple(sorted(elems))
+        except TypeError:
+            return tuple(elems)
+    if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+        return tuple(_freeze_value(x) for x in val)
+    return val
+
+
+def _freeze_declarations(
+    declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] | None,
+) -> tuple[tuple[str, Any] | RawDeclaration, ...]:
+    if not declarations:
+        return ()
+    items = list(declarations.items()) if isinstance(declarations, Mapping) else list(declarations)
+    out: list[tuple[str, Any] | RawDeclaration] = []
+    for item in items:
+        if isinstance(item, RawDeclaration):
+            out.append(item)
+        else:
+            k, v = item
+            out.append((k, _freeze_value(v)))
+    return tuple(out)
 
 
 def _validate_and_normalize_declarations(
@@ -627,9 +675,7 @@ class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
 
     selector: str | Sequence[str] | Template
-    declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] = field(
-        default_factory=dict
-    )
+    declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] = ()
     rules: Sequence[Rule] = ()
     comment: str | Template | None = None
     options: SerializationOptions | None = None
@@ -649,6 +695,23 @@ class StyleRule:
             if self.comment is not None
             else None
         )
+        frozen_sel = (
+            _freeze_value(self.selector)
+            if isinstance(self.selector, Template)
+            else (
+                self.selector
+                if isinstance(self.selector, str)
+                else tuple(s.strip() for s in self.selector)
+            )
+        )
+        frozen_decls = _freeze_declarations(self.declarations)
+        frozen_comm = (
+            _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
+        )
+        object.__setattr__(self, "selector", frozen_sel)
+        object.__setattr__(self, "declarations", frozen_decls)
+        object.__setattr__(self, "rules", rules_t)
+        object.__setattr__(self, "comment", frozen_comm)
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_selector_str", sel_s)
         object.__setattr__(self, "_decl_pairs", decls)
@@ -758,7 +821,15 @@ class AtRule:
             if self.comment is not None
             else None
         )
+        frozen_decls = None if self.descriptors is None else _freeze_declarations(self.descriptors)
+        frozen_comm = (
+            _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
+        )
 
+        object.__setattr__(self, "prelude", _freeze_value(self.prelude))
+        object.__setattr__(self, "descriptors", frozen_decls)
+        object.__setattr__(self, "rules", rules_t)
+        object.__setattr__(self, "comment", frozen_comm)
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_at_name", at_name)
         object.__setattr__(self, "_prelude_str", prelude_s)
@@ -893,6 +964,13 @@ class StyleSheet:
             if self.header_comment is not None
             else None
         )
+        frozen_hdr = (
+            _freeze_value(self.header_comment)
+            if isinstance(self.header_comment, Template)
+            else self.header_comment
+        )
+        object.__setattr__(self, "rules", rules_t)
+        object.__setattr__(self, "header_comment", frozen_hdr)
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_header_str", hdr_s)
