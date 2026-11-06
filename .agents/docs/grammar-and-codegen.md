@@ -50,13 +50,13 @@ uv run python codegen/gen_specs.py --check
 
 ## WPT test generation (`codegen/gen_wpt_tests.py`)
 
-`codegen/gen_wpt_tests.py` extracts test cases from local WPT HTML files into `tests/_generated/`:
+`codegen/gen_wpt_tests.py` extracts test cases from local WPT HTML files into `tests/_generated/` (run `uv run python codegen/gen_wpt_tests.py --check` to print the current passing, `xfail`, and skipped counts):
 
-* `test_wpt_urange.py`: all 94 valid and invalid `<urange>` cases from `css-syntax/urange-parsing.html`.
-* `test_wpt_font_family.py`: 54 `<family-name>` and `<generic-family>` quoting and normalization cases from `cssom/font-family-serialization-001.html` and `css-fonts/support/font-family-keywords.js`.
-* `test_wpt_font_face.py`: 130 passing and 7 `xfail` `@font-face` descriptor cases from `css-fonts/parsing/font-face-*.html`. The 7 `xfail` cases (`XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES`, reason `font-src-list-per-item-fallback-recovery`) test browser list-item fallback recovery where an invalid `format(...)` or `tech(...)` item is dropped from a comma-separated `src` list, whereas Stixis validates every `<font-src>` item strictly.
-* `test_wpt_css_fonts.py`: 462 passing (`239` valid, `223` invalid) and 9 `xfail` (`7` valid, `2` invalid) property parsing cases from `css-fonts/parsing/*-{valid,invalid}.html`, including `calc(...)` and `var(...)` cases.
-* `test_wpt_css_properties.py`: 4,454 passing (`2,329` valid, `2,125` invalid) and 608 `xfail` (`553` valid, `55` invalid) general CSS property cases across `css-*/parsing/*-{valid,invalid}.html` files, plus `SKIPPED_PROPERTY_COUNTS` (`527` assertions on properties below `min_engines=2` and `2` assertions on nonexistent property names `margin-bottom-left` and `padding-bottom-left`).
+* `test_wpt_urange.py`: valid and invalid `<urange>` cases from `css-syntax/urange-parsing.html`.
+* `test_wpt_font_family.py`: `<family-name>` and `<generic-family>` quoting and normalization cases from `cssom/font-family-serialization-001.html` and `css-fonts/support/font-family-keywords.js`.
+* `test_wpt_font_face.py`: passing and `xfail` `@font-face` descriptor cases from `css-fonts/parsing/font-face-*.html`. The `xfail` cases (`XFAIL_VALID_FONT_FACE_DESCRIPTOR_CASES`, reason `font-src-list-per-item-fallback-recovery`) test browser list-item fallback recovery where an invalid `format(...)` or `tech(...)` item is dropped from a comma-separated `src` list, whereas Stixis validates every `<font-src>` item strictly.
+* `test_wpt_css_fonts.py`: passing and `xfail` property parsing cases from `css-fonts/parsing/*-{valid,invalid}.html`, including `calc(...)` and `var(...)` cases.
+* `test_wpt_css_properties.py`: passing and `xfail` general CSS property cases across `css-*/parsing/*-{valid,invalid}.html` files, plus `SKIPPED_PROPERTY_COUNTS` (assertions on properties below `min_engines=2` and on nonexistent property names `margin-bottom-left` and `padding-bottom-left`).
 
 ### WPT filtering and `xfail` classification
 
