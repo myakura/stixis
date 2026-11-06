@@ -1328,3 +1328,12 @@ def test_stylerule_format_minify_visits_nested_rules_once(
 def test_local_font_and_generic_family_str_do_not_raise() -> None:
     assert str(LocalFont("")) == 'local("")'
     assert str(GenericFamily("not-a-generic")) == "not-a-generic"
+
+
+def test_comma_separated_multiplier_scales_linearly() -> None:
+    import time
+
+    value = ", ".join(["1s ease-in 2s infinite alternate both running foo"] * 40)
+    t0 = time.perf_counter()
+    canonicalize("animation", value)
+    assert time.perf_counter() - t0 < 1.0
