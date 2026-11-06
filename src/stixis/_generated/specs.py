@@ -822,6 +822,23 @@ PROPERTY_ENGINE_COUNTS: dict[str, int] = {
     'zoom': 3,
 }
 
+RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {
+    'alpha': frozenset({'alpha'}),
+    'color': frozenset({'alpha', 'b', 'g', 'r', 'x', 'y', 'z'}),
+    'hsl': frozenset({'alpha', 'h', 'l', 's'}),
+    'hsla': frozenset({'alpha', 'h', 'l', 's'}),
+    'hwb': frozenset({'alpha', 'b', 'h', 'w'}),
+    'ictcp': frozenset({'alpha', 'cp', 'ct', 'i'}),
+    'jzazbz': frozenset({'a', 'alpha', 'b', 'j'}),
+    'jzczhz': frozenset({'alpha', 'c', 'h', 'j'}),
+    'lab': frozenset({'a', 'alpha', 'b', 'l'}),
+    'lch': frozenset({'alpha', 'c', 'h', 'l'}),
+    'oklab': frozenset({'a', 'alpha', 'b', 'l'}),
+    'oklch': frozenset({'alpha', 'c', 'h', 'l'}),
+    'rgb': frozenset({'alpha', 'b', 'g', 'r'}),
+    'rgba': frozenset({'alpha', 'b', 'g', 'r'}),
+}
+
 VALUE_SYNTAXES: dict[str, str] = {
     '<a-n-plus-b>': "odd | even | <integer> | <n-dimension> | '+'? n | -n | <ndashdigit-dimension> | '+'? <ndashdigit-ident> | <dashndashdigit-ident> | <n-dimension> <signed-integer> | '+'? n <signed-integer> | -n <signed-integer> | <ndash-dimension> <signless-integer> | '+'? n- <signless-integer> | -n- <signless-integer> | <n-dimension> ['+' | '-'] <signless-integer> | '+'? n ['+' | '-'] <signless-integer> | -n ['+' | '-'] <signless-integer>",
     '<abs()>': 'abs( <calc-sum> )',

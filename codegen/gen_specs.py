@@ -143,6 +143,7 @@ def load_and_merge_specs(
     dict[str, str],
     dict[str, str],
     dict[str, dict[str, Any]],
+    dict[str, set[str]],
 ]:
     if not webref_dir.is_dir():
         raise FileNotFoundError(f"@webref/css directory not found: {webref_dir}")
@@ -174,6 +175,7 @@ def load_and_merge_specs(
     values: dict[str, str] = {}
     value_new_values: dict[str, list[str]] = {}
     atrules: dict[str, dict[str, Any]] = {}
+    relative_color_channels: dict[str, set[str]] = {}
 
     for jf in json_files:
         data = json.loads(jf.read_text(encoding="utf-8"))
@@ -186,6 +188,20 @@ def load_and_merge_specs(
                     uval = sv.get("value", "")
                     if uval and " " not in uval and not uval.startswith("<"):
                         units_by_type[vname].add(uval)
+
+            if (
+                v.get("type") == "function"
+                and vname.endswith("()")
+                and "from <color>" in (v.get("value") or "")
+            ):
+                fn_name = vname[:-2].lower()
+                ch_kws = [
+                    kw.lower()
+                    for kw in _extract_subvalue_keywords(v.get("values", []))
+                    if kw.isascii() and kw.isalpha()
+                ]
+                if ch_kws:
+                    relative_color_channels[fn_name] = set(ch_kws)
 
             if v.get("value"):
                 values[vname] = v["value"]
@@ -271,7 +287,11 @@ def load_and_merge_specs(
         for dname, dsyn in desc_map.items():
             entry["descriptors"][dname] = dsyn
 
-    return units_by_type, properties, values, atrules
+    for fn_name, ch_list in patches.get("relative_color_channels", {}).items():
+        clean_fn = fn_name[:-2].lower() if fn_name.endswith("()") else fn_name.lower()
+        relative_color_channels[clean_fn] = {str(ch).lower() for ch in ch_list}
+
+    return units_by_type, properties, values, atrules, relative_color_channels
 
 
 def is_node_resolvable(
@@ -438,6 +458,7 @@ def format_specs_py(
     atrules: dict[str, dict[str, Any]],
     engine_counts: dict[str, int] | None = None,
     support_cfg: dict[str, Any] | None = None,
+    relative_color_channels: dict[str, set[str]] | None = None,
 ) -> str:
     if engine_counts is None:
         from stixis._generated import specs as existing_specs
@@ -445,6 +466,13 @@ def format_specs_py(
         engine_counts = dict(getattr(existing_specs, "PROPERTY_ENGINE_COUNTS", {}))
     if support_cfg is None:
         support_cfg = {}
+    if relative_color_channels is None:
+        from stixis._generated import specs as existing_specs
+
+        relative_color_channels = {
+            k: set(v)
+            for k, v in getattr(existing_specs, "RELATIVE_COLOR_CHANNEL_KEYWORDS", {}).items()
+        }
 
     default_min_engines = int(support_cfg.get("default_min_engines", 2))
     allow_props = sorted(set(support_cfg.get("allow_properties", [])))
@@ -461,6 +489,17 @@ def format_specs_py(
     ]
     for k in sorted(properties):
         lines.append(f"    {k!r}: {engine_counts.get(k, 0)},")
+    lines.extend(
+        [
+            "}",
+            "",
+            "RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {",
+        ]
+    )
+    for k in sorted(relative_color_channels):
+        sorted_chs = sorted(relative_color_channels[k])
+        chs_str = ", ".join(repr(ch) for ch in sorted_chs)
+        lines.append(f"    {k!r}: frozenset({{{chs_str}}}),")
     lines.extend(
         [
             "}",
@@ -664,7 +703,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 4
 
-    units_by_type, properties, values, atrules = load_and_merge_specs(webref_dir, patches)
+    (
+        units_by_type,
+        properties,
+        values,
+        atrules,
+        relative_color_channels,
+    ) = load_and_merge_specs(webref_dir, patches)
     if bcd_dir is not None:
         engine_counts = load_bcd_engine_counts(bcd_dir, properties)
     else:
@@ -717,6 +762,7 @@ def main(argv: list[str] | None = None) -> int:
             atrules,
             engine_counts=engine_counts,
             support_cfg=patches.get("support", {}),
+            relative_color_channels=relative_color_channels,
         ),
         args.check,
     )

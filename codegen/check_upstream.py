@@ -389,7 +389,13 @@ def analyze_upstream(
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
     patches = tomllib.loads(patches_path.read_text(encoding="utf-8"))
 
-    units_by_type, properties, values, atrules = gen_specs.load_and_merge_specs(webref_dir, patches)
+    (
+        units_by_type,
+        properties,
+        values,
+        atrules,
+        relative_color_channels,
+    ) = gen_specs.load_and_merge_specs(webref_dir, patches)
     old_engine_counts = dict(getattr(current_specs, "PROPERTY_ENGINE_COUNTS", {}))
     if bcd_dir is not None and (bcd_dir / "properties").is_dir():
         engine_counts = gen_specs.load_bcd_engine_counts(bcd_dir, properties)
@@ -546,6 +552,7 @@ def analyze_upstream(
             atrules,
             engine_counts=engine_counts,
             support_cfg=patches.get("support", {}),
+            relative_color_channels=relative_color_channels,
         )
         or (gen_dir / "types.py").read_text(encoding="utf-8")
         != gen_specs.format_types_py(properties, values, atrules)

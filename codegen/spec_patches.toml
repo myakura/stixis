@@ -118,3 +118,11 @@ order = [
 "inset-inline-start" = "<'top'>"
 "inset-inline-end" = "<'top'>"
 "flex-basis" = "content | auto | <box-size>"
+
+# Relative color channel keywords not listed in `@webref/css` function `values` arrays
+# (`rgb()` and `rgba()`: CSS Color 5 §4.2.1; `hsl()` and `hsla()`: CSS Color 5 §4.2.2)
+[relative_color_channels]
+"rgb" = ["r", "g", "b", "alpha"]
+"rgba" = ["r", "g", "b", "alpha"]
+"hsl" = ["h", "s", "l", "alpha"]
+"hsla" = ["h", "s", "l", "alpha"]

@@ -1422,12 +1422,29 @@ def test_math_function_calc_sum_structural_validation(
     assert canonicalize("color", "ictcp(from red calc(i) calc(ct) calc(cp))") == (
         "ictcp(from red calc(i) calc(ct) calc(cp))"
     )
-    assert canonicalize("color", "jzazbz(from red calc(jz) calc(az) calc(bz))") == (
-        "jzazbz(from red calc(jz) calc(az) calc(bz))"
+    assert canonicalize("color", "jzazbz(from red calc(j) calc(a) calc(b))") == (
+        "jzazbz(from red calc(j) calc(a) calc(b))"
     )
-    assert canonicalize("color", "jzczhz(from red calc(jz) calc(cz) calc(hz))") == (
-        "jzczhz(from red calc(jz) calc(cz) calc(hz))"
+    assert canonicalize("color", "jzczhz(from red calc(j) calc(c) calc(h))") == (
+        "jzczhz(from red calc(j) calc(c) calc(h))"
     )
+    assert canonicalize("color", "lab(from red calc(l) calc(a) calc(b))") == (
+        "lab(from red calc(l) calc(a) calc(b))"
+    )
+    for invalid_color in (
+        "jzazbz(from red calc(jz) calc(az) calc(bz))",
+        "jzczhz(from red calc(jz) calc(cz) calc(hz))",
+        "jzazbz(from red calc(jz) calc(a) calc(b))",
+        "jzazbz(from red calc(j) calc(az) calc(b))",
+        "jzazbz(from red calc(j) calc(a) calc(bz))",
+        "jzczhz(from red calc(jz) calc(c) calc(h))",
+        "jzczhz(from red calc(j) calc(cz) calc(h))",
+        "jzczhz(from red calc(j) calc(c) calc(hz))",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("color", invalid_color)
+        with pytest.raises(StixisValidationError):
+            serialize_value("color", invalid_color)
     with pytest.raises(StixisValidationError):
         canonicalize("color", "alpha(from red / calc(r * 0.5))")
     with pytest.raises(StixisValidationError):

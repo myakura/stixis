@@ -41,6 +41,7 @@ W3C `@webref/css` (`ed/css/*.json`) includes prose-defined aliases and delta spe
 * `[atrule_preludes]`: prelude grammars validated by `AtRule` (`@font-palette-values = "<dashed-ident>"`, `@property = "<custom-property-name>#"`, `@layer = "<layer-name>? | <layer-name>#"`).
 * `[atrule_descriptors."@font-face"]`: prose-defined descriptor aliases (`font-stretch = "auto | <'font-width'>{1,2}"`).
 * `[properties]`: property syntax overrides where a draft omits prose keywords (`font-synthesis` with `oblique-only`, `font-stretch = "<'font-width'>"`).
+* `[relative_color_channels]`: relative color channel keywords (`rgb`, `rgba`, `hsl`, `hsla`) not listed in `@webref/css` function `values` arrays, merged into `RELATIVE_COLOR_CHANNEL_KEYWORDS` in `src/stixis/_generated/specs.py`.
 
 After editing `codegen/spec_patches.toml`, run:
 
