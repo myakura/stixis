@@ -1091,7 +1091,8 @@ def test_version_single_source_of_truth_and_publish_tag_check() -> None:
     assert stixis.__version__ == pyproject["project"]["version"]
     assert stixis.__version__ == importlib.metadata.version("stixis")
     assert "importlib.metadata" in init_text
-    assert "GITHUB_REF_NAME" in publish_wf
+    assert "Verify release tag matches pyproject.toml version" in publish_wf
+    assert "tomllib" in publish_wf
 
 
 def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_skips(

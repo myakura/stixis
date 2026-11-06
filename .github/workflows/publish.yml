@@ -21,21 +21,25 @@ jobs:
       - name: Set up Python 3.14
         run: uv python install 3.14
 
+      - name: Verify release tag matches pyproject.toml version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          uv run --no-project python -c '
+          import os, pathlib, sys, tomllib
+          tag = os.environ["TAG_NAME"]
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text("utf-8"))["project"]["version"]
+          expected_tag = f"v{version}"
+          if tag != expected_tag:
+              sys.exit(f"Release tag {tag!r} does not match pyproject.toml version {expected_tag!r}")
+          '
+
       - name: Install dependencies and verify test suite
         run: |
           uv sync --frozen
           uv run ruff check
           uv run ruff format --check
           uv run pytest
-
-      - name: Verify pushed tag matches package version
-        run: |
-          tag_version="${GITHUB_REF_NAME#v}"
-          pkg_version=$(uv run python -c "import stixis; print(stixis.__version__)")
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "Tag version ($tag_version) does not match stixis.__version__ ($pkg_version)" >&2
-            exit 1
-          fi
 
       - name: Build wheel and sdist
         run: uv build
