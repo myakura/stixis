@@ -50,6 +50,7 @@ from stixis.primitives import (
     LocalFont,
     Percentage,
     Url,
+    escape_code_point,
     serialize_custom_ident,
     serialize_dashed_ident,
     serialize_dimension,
@@ -580,6 +581,16 @@ def validate_token_stream_safety(
     return tokens
 
 
+def _serialize_dimension_unit(unit: str) -> str:
+    """Serialize a dimension unit identifier, escaping a leading `e`/`E` when followed by a digit or `-[0-9]`."""
+    if len(unit) >= 2 and unit[0] in ("e", "E"):
+        if "0" <= unit[1] <= "9" or (
+            len(unit) >= 3 and unit[1] == "-" and "0" <= unit[2] <= "9"
+        ):
+            return f"{escape_code_point(ord(unit[0]))}{serialize_unrestricted_ident(unit[1:])}"
+    return serialize_ident(unit)
+
+
 def format_token_sequence(
     tokens: Sequence[CssToken],
     *,
@@ -636,7 +647,7 @@ def format_token_sequence(
             assert tok.unit is not None
             val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
             num_s = serialize_number(val)
-            out.append(f"{num_s}{serialize_ident(tok.unit)}")
+            out.append(f"{num_s}{_serialize_dimension_unit(tok.unit)}")
         else:
             out.append(tok.value)
 
@@ -1734,7 +1745,7 @@ class _TokenMatcher:
                 and (eff_max is None or tok.num <= eff_max)
             ):
                 val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, f"{serialize_number(val)}{tok.unit}")]
+                return [(pos + 1, f"{serialize_number(val)}{_serialize_dimension_unit(tok.unit)}")]
             return []
 
         if kind in (

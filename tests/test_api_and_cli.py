@@ -1265,3 +1265,32 @@ def test_check_upstream_shares_wpt_extraction_and_expected_files_with_gen_wpt_te
         Path("/unused"), min_engines=2
     )
     assert wpt_changed is True
+
+
+def test_dimension_unit_starting_with_exponent_is_escaped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from stixis.syntax import tokenize_css
+
+    for target in ("--x", "<dimension>"):
+        for raw_css, expected_unit in (
+            (r"1\65 3", "e3"),
+            (r"1\45 3", "E3"),
+            (r"1\65 -3", "e-3"),
+            (r"1\45 -3", "E-3"),
+        ):
+            out = canonicalize(target, raw_css)
+            toks = [t for t in tokenize_css(out) if t.kind != "whitespace"]
+            assert len(toks) == 1
+            assert toks[0].kind == "dimension"
+            assert toks[0].num == 1
+            assert toks[0].unit == expected_unit
+
+    rc = cli_main(["check", "--", "--x", r"1\65 3"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    cli_toks = [t for t in tokenize_css(captured.out.strip()) if t.kind != "whitespace"]
+    assert len(cli_toks) == 1
+    assert cli_toks[0].kind == "dimension"
+    assert cli_toks[0].num == 1
+    assert cli_toks[0].unit == "e3"
