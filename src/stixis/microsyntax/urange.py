@@ -111,6 +111,18 @@ def _coalesce_codepoint_set(cps: list[int]) -> list[tuple[int, int]]:
     return ranges
 
 
+def _merge_intervals(intervals: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    sorted_iv = sorted(intervals)
+    merged: list[tuple[int, int]] = [sorted_iv[0]]
+    for s, e in sorted_iv[1:]:
+        prev_s, prev_e = merged[-1]
+        if s <= prev_e + 1:
+            merged[-1] = (prev_s, max(prev_e, e))
+        else:
+            merged.append((s, e))
+    return merged
+
+
 def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]:
     """Parse a CSS `unicode-range` string or structured Python value into a list of `(start, end)` intervals."""
     if isinstance(value, str):
@@ -123,15 +135,7 @@ def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]
             raise StixisValidationError("unicode-range", "<urange>#", value)
         parsed = [parse_single_urange(part) for part in parts]
         if coalesce and parsed:
-            sorted_iv = sorted(parsed)
-            merged: list[tuple[int, int]] = [sorted_iv[0]]
-            for s, e in sorted_iv[1:]:
-                prev_s, prev_e = merged[-1]
-                if s <= prev_e + 1:
-                    merged[-1] = (prev_s, max(prev_e, e))
-                else:
-                    merged.append((s, e))
-            return merged
+            return _merge_intervals(parsed)
         return parsed
 
     if isinstance(value, bool):
@@ -204,15 +208,7 @@ def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]
             if all_plain_ints:
                 return _coalesce_codepoint_set(int_cps)
             # Merge overlapping/adjacent intervals when coalesce=True on mixed sequences
-            sorted_iv = sorted(out)
-            merged: list[tuple[int, int]] = [sorted_iv[0]]
-            for s, e in sorted_iv[1:]:
-                prev_s, prev_e = merged[-1]
-                if s <= prev_e + 1:
-                    merged[-1] = (prev_s, max(prev_e, e))
-                else:
-                    merged.append((s, e))
-            return merged
+            return _merge_intervals(out)
         if all_plain_ints:
             return _coalesce_codepoint_set(int_cps)
         return out

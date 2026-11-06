@@ -1165,10 +1165,10 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
 def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from stixis._generated import specs as gen_specs_mod
+    import stixis.nodes as nodes_mod
     from stixis.nodes import is_property_enabled
 
-    monkeypatch.setattr(gen_specs_mod, "PROPERTY_ENGINE_COUNTS", {})
+    monkeypatch.setattr(nodes_mod, "PROPERTY_ENGINE_COUNTS", {})
     assert not is_property_enabled("width", SerializationOptions(min_engines=1))
     with pytest.raises(StixisValidationError, match=r"0 engine\(s\)"):
         canonicalize("width", "10px", options=SerializationOptions(min_engines=1))
@@ -1265,3 +1265,66 @@ def test_check_upstream_shares_wpt_extraction_and_expected_files_with_gen_wpt_te
         Path("/unused"), min_engines=2
     )
     assert wpt_changed is True
+
+
+def test_dimension_unit_starting_with_exponent_is_escaped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from stixis.syntax import tokenize_css
+
+    for target in ("--x", "<dimension>"):
+        for raw_css, expected_unit in (
+            (r"1\65 3", "e3"),
+            (r"1\45 3", "E3"),
+            (r"1\65 -3", "e-3"),
+            (r"1\45 -3", "E-3"),
+        ):
+            out = canonicalize(target, raw_css)
+            toks = [t for t in tokenize_css(out) if t.kind != "whitespace"]
+            assert len(toks) == 1
+            assert toks[0].kind == "dimension"
+            assert toks[0].num == 1
+            assert toks[0].unit == expected_unit
+
+    rc = cli_main(["check", "--", "--x", r"1\65 3"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    cli_toks = [t for t in tokenize_css(captured.out.strip()) if t.kind != "whitespace"]
+    assert len(cli_toks) == 1
+    assert cli_toks[0].kind == "dimension"
+    assert cli_toks[0].num == 1
+    assert cli_toks[0].unit == "e3"
+
+
+def test_stylerule_format_minify_visits_nested_rules_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    import stixis.nodes as nodes_mod
+
+    node = StyleRule("a", {"color": "red"})
+    for _ in range(17):
+        node = StyleRule("a", {"color": "red"}, rules=[node])
+
+    calls = 0
+    orig_format_rule_node = nodes_mod._format_rule_node
+
+    def _counting_format_rule_node(*args: object, **kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        return orig_format_rule_node(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(nodes_mod, "_format_rule_node", _counting_format_rule_node)
+    t0 = time.perf_counter()
+    minified = node.format(minify=True)
+    elapsed = time.perf_counter() - t0
+
+    assert calls == 17
+    assert elapsed < 0.1
+    assert minified == "a{color:red;" * 17 + "a{color:red}" + "}" * 17
+
+
+def test_local_font_and_generic_family_str_do_not_raise() -> None:
+    assert str(LocalFont("")) == 'local("")'
+    assert str(GenericFamily("not-a-generic")) == "not-a-generic"

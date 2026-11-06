@@ -25,6 +25,7 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * **Value and raw CSS boundary.**
   * `serialize_value(target, value)` serializes structured Python values (`int`, `float`, `tuple`, `list`, `dict`, `set`, `Dimension`, `Pct`, `Deg`, `Url`, `LocalFont`, `FontSrc`, `Keyword`, `GenericFamily`, and PEP 750 `Template`). A plain Python `str` passed to `<family-name>` or `font-family` is always treated as a font family name and quoted by default. Generic families require `generic("serif")` or `Keyword("serif")`.
   * `canonicalize(target, css_text)` tokenizes and validates raw CSS value text against the compiled `ValueNode` grammar and returns canonical CSSOM text.
+* **Error contract.** Public functions and AST nodes raise `StixisError` subclasses (`StixisValidationError`, `StixisSyntaxError`, which subclass `ValueError`) for invalid CSS or inputs (`SerializationOptions` raises `ValueError`), and the CLI reports errors on `stderr` without a traceback.
 * **Entrypoint guard.** Wrap top-level execution in `if __name__ == "__main__":` in any runnable Python snippet in `README.md` or any script that uses `multiprocessing`.
 * **CLI contract.** `src/stixis/cli.py` is read-only, never branches on agent-detection environment variables, never mixes `nargs="*"` or `"+"` optional flags with positional arguments, and exits with `0` (valid), `1` (validation error), `2` (usage error), or `4` (unknown target).
 
@@ -36,7 +37,8 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
   * Use a dedicated branch per Issue, keep behavior changes (`feat`, `fix`) and behavior-preserving refactors (`refactor`) in separate commits even within the same PR, include `Closes #<n>` in the PR body, and run `uv run python codegen/gen_specs.py --check`, `uv run python codegen/gen_wpt_tests.py --check`, `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`, and `codex review` before creating or merging a PR.
 * **Keep the consumer skill and releases in sync.**
   * Treat rejecting previously accepted input, changing a public function or constant's name, parameters, or return value, or changing a public keyword or default value as a breaking change: mark the commit type with `!` (`fix!:`, `feat!:`), state the breaking change at the top of the PR body, and update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`. Also update both files whenever you add or change public APIs, options, or microsyntax behavior.
-  * To cut a release, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
+  * Do not copy generated counts (WPT cases, properties, descriptors) into docs; point to the `--check` output instead.
+  * To cut a release, create branch `chore/release-X.Y.Z`, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, open and merge a PR, tag `vX.Y.Z` on the merge commit, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
 
 ## Domain guides
 

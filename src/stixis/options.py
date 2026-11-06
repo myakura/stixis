@@ -8,9 +8,9 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal
 
-from stixis._generated import specs as _gen_specs
+from stixis._generated.specs import DEFAULT_MIN_ENGINES
 
-_DEFAULT_MIN_ENGINES: int = getattr(_gen_specs, "DEFAULT_MIN_ENGINES", 2)
+_DEFAULT_MIN_ENGINES: int = DEFAULT_MIN_ENGINES
 
 
 @dataclass(frozen=True, slots=True)
