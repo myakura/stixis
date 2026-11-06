@@ -10,6 +10,7 @@ from functools import lru_cache
 from string.templatelib import Interpolation, Template, convert
 from typing import Any
 
+from stixis._generated.specs import RELATIVE_COLOR_CHANNEL_KEYWORDS
 from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis.errors import StixisSyntaxError, StixisValidationError
 from stixis.microsyntax.family_name import (
@@ -105,22 +106,6 @@ CALC_VALUE_FUNCTIONS: frozenset[str] = frozenset(
 )
 CALC_KEYWORDS: frozenset[str] = frozenset({"e", "pi", "infinity", "-infinity", "nan"})
 ROUNDING_STRATEGY_KEYWORDS: frozenset[str] = frozenset({"nearest", "up", "down", "to-zero"})
-RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {
-    "alpha": frozenset({"alpha"}),
-    "rgb": frozenset({"r", "g", "b", "alpha"}),
-    "rgba": frozenset({"r", "g", "b", "alpha"}),
-    "hsl": frozenset({"h", "s", "l", "alpha"}),
-    "hsla": frozenset({"h", "s", "l", "alpha"}),
-    "hwb": frozenset({"h", "w", "b", "alpha"}),
-    "lab": frozenset({"l", "a", "b", "alpha"}),
-    "oklab": frozenset({"l", "a", "b", "alpha"}),
-    "lch": frozenset({"l", "c", "h", "alpha"}),
-    "oklch": frozenset({"l", "c", "h", "alpha"}),
-    "ictcp": frozenset({"i", "ct", "cp", "alpha"}),
-    "jzazbz": frozenset({"jz", "az", "bz", "alpha"}),
-    "jzczhz": frozenset({"jz", "cz", "hz", "alpha"}),
-    "color": frozenset({"r", "g", "b", "x", "y", "z", "alpha"}),
-}
 ALL_LOWER_TO_CANONICAL_UNIT: dict[str, str] = {
     u_low: u_canon
     for unit_map in LOWER_TO_CANONICAL_UNIT.values()
