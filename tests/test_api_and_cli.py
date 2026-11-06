@@ -1323,3 +1323,8 @@ def test_stylerule_format_minify_visits_nested_rules_once(
     assert calls == 17
     assert elapsed < 0.1
     assert minified == "a{color:red;" * 17 + "a{color:red}" + "}" * 17
+
+
+def test_local_font_and_generic_family_str_do_not_raise() -> None:
+    assert str(LocalFont("")) == 'local("")'
+    assert str(GenericFamily("not-a-generic")) == "not-a-generic"
