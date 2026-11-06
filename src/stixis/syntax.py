@@ -1547,6 +1547,7 @@ class _TokenMatcher:
         # BFS/DFS over occurrences
         queue: list[tuple[int, list[str]]] = [(pos, [])]
         seen: set[tuple[int, tuple[str, ...]]] = set()
+        seen_comma: set[tuple[int, int]] = set()
 
         while queue:
             cur_pos, acc = queue.pop()
@@ -1560,16 +1561,25 @@ class _TokenMatcher:
                     continue
                 next_start += 1
 
-            for nxt_pos, rendered in self.match_node(
-                node.child, next_start, min_override, max_override
-            ):
+            child_matches = self.match_node(node.child, next_start, min_override, max_override)
+            seen_nxt_pos: set[int] = set()
+            for nxt_pos, rendered in child_matches:
                 if nxt_pos == next_start:
                     continue
+                if node.comma_separated and count > 0:
+                    if nxt_pos in seen_nxt_pos:
+                        continue
+                    seen_nxt_pos.add(nxt_pos)
+                    ckey = (nxt_pos, count + 1)
+                    if ckey in seen_comma:
+                        continue
+                    seen_comma.add(ckey)
+                else:
+                    key = (nxt_pos, tuple(acc + [rendered]))
+                    if key in seen:
+                        continue
+                    seen.add(key)
                 new_acc = acc + [rendered]
-                key = (nxt_pos, tuple(new_acc))
-                if key in seen:
-                    continue
-                seen.add(key)
                 if len(new_acc) >= node.min_count:
                     results.append((nxt_pos, new_acc))
                 queue.append((nxt_pos, new_acc))
