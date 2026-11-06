@@ -1814,6 +1814,14 @@ def test_context_free_math_expression_simplification(
         canonicalize("width", "calc((10000000px + 100%) / 10000000)")
         == "calc((100% + 10000000px) / 10000000)"
     )
+    assert (
+        canonicalize("width", "calc((1000000px + 100%) / 600000)")
+        == "calc((100% + 1000000px) / 600000)"
+    )
+    assert (
+        canonicalize("width", "calc(0.0001 * 0.0001 * (1000000px + 100%))")
+        == "calc(0.0001 * 0.0001 * (100% + 1000000px))"
+    )
     assert canonicalize("width", "calc(10000000px / 10000000)") == "calc(1px)"
 
     # 5. CLI check

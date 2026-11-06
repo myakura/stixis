@@ -1376,6 +1376,21 @@ def _negate_calc_node(node: _CalcNode) -> _CalcNode:
     return _CalcProduct((_CalcNumeric(-1.0, ""), node))
 
 
+def _is_lossless_css_number(val: float) -> bool:
+    if not math.isfinite(val):
+        return False
+    if val == 0.0:
+        return True
+    try:
+        ser = serialize_number(val)
+    except StixisValidationError:
+        return False
+    parsed = float(ser)
+    if parsed == 0.0:
+        return False
+    return abs(parsed - val) <= 1e-12 * max(1.0, abs(val))
+
+
 def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
     # Step 1-2: flatten nested _CalcProduct nodes
     flat: list[_CalcNode] = []
@@ -1385,22 +1400,14 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
         else:
             flat.append(f)
 
-    # Fold pure numbers and Invert(number) when finite and non-zero.
-    # Keep Invert(number) factors separate first so we only convert division into multiplication
-    # when either every remaining factor is a single numeric/dimension/percentage term (where
-    # the divisor multiplies directly into that term) or the resulting scalar multiplier does
-    # not underflow to "0" under CSSOM 6-decimal serialization.
-    num_acc = 1.0
-    has_num = False
+    # Fold pure numbers and Invert(number) when finite, non-zero, and lossless in 6-decimal CSSOM serialization.
+    num_factors: list[_CalcNumeric] = []
     inv_num_factors: list[_CalcInvert] = []
     remaining: list[_CalcNode] = []
     for f in flat:
         if isinstance(f, _CalcNumeric) and f.unit == "":
-            cand = num_acc * f.value
-            if math.isfinite(cand):
-                num_acc = cand
-                has_num = True
-                continue
+            num_factors.append(f)
+            continue
         if (
             isinstance(f, _CalcInvert)
             and isinstance(f.child, _CalcNumeric)
@@ -1411,43 +1418,69 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
             continue
         remaining.append(f)
 
-    # Try combining inv_num_factors into num_acc
-    combined_acc = num_acc
-    combined_ok = True
-    for inv_f in inv_num_factors:
-        assert isinstance(inv_f.child, _CalcNumeric)
-        cand = combined_acc * (1.0 / inv_f.child.value)
-        if not math.isfinite(cand):
-            combined_ok = False
+    num_acc = 1.0
+    num_ok = True
+    for nf in num_factors:
+        cand = num_acc * nf.value
+        if not math.isfinite(cand) or (cand == 0.0 and nf.value != 0.0 and num_acc != 0.0):
+            num_ok = False
             break
-        combined_acc = cand
+        num_acc = cand
 
-    if not remaining:
-        if not inv_num_factors:
-            return _CalcNumeric(num_acc, "")
-        if combined_ok and (combined_acc == 0.0 or serialize_number(combined_acc) != "0"):
-            return _CalcNumeric(combined_acc, "")
-        remaining.extend(inv_num_factors)
-    elif len(remaining) == 1 and isinstance(remaining[0], _CalcNumeric):
+    combined_acc = num_acc
+    combined_ok = num_ok
+    if combined_ok:
+        for inv_f in inv_num_factors:
+            assert isinstance(inv_f.child, _CalcNumeric)
+            cand = combined_acc * (1.0 / inv_f.child.value)
+            if not math.isfinite(cand) or (cand == 0.0 and combined_acc != 0.0):
+                combined_ok = False
+                break
+            combined_acc = cand
+
+    if not remaining and len(num_factors) + len(inv_num_factors) == 1:
+        if num_factors:
+            return num_factors[0]
+        return inv_num_factors[0]
+
+    # Single percentage or dimension with scalar factors/divisors: try multiplying directly into the dimension
+    if len(remaining) == 1 and isinstance(remaining[0], _CalcNumeric):
         dim_node = remaining[0]
         if combined_ok:
             cand = combined_acc * dim_node.value
-            if math.isfinite(cand) and (
-                cand == 0.0 or dim_node.value == 0.0 or serialize_number(cand) != "0"
+            if _is_lossless_css_number(cand) and (
+                cand != 0.0 or dim_node.value == 0.0 or combined_acc == 0.0
             ):
                 return _CalcNumeric(cand, dim_node.unit)
-        remaining.extend(inv_num_factors)
-    else:
-        if inv_num_factors:
-            if combined_ok and (
-                combined_acc == 0.0 or num_acc == 0.0 or serialize_number(combined_acc) != "0"
+        if num_factors and num_ok and not inv_num_factors:
+            cand = num_acc * dim_node.value
+            if _is_lossless_css_number(cand) and (
+                cand != 0.0 or dim_node.value == 0.0 or num_acc == 0.0
             ):
-                num_acc = combined_acc
-                has_num = True
-            else:
-                remaining.extend(inv_num_factors)
+                return _CalcNumeric(cand, dim_node.unit)
 
-    # Otherwise, if has_num and there is at least one percentage/dimension in remaining (and at most one),
+    has_num = False
+    if inv_num_factors:
+        if combined_ok and _is_lossless_css_number(combined_acc):
+            num_acc = combined_acc
+            has_num = True
+        else:
+            if num_factors:
+                if len(num_factors) == 1 or (num_ok and _is_lossless_css_number(num_acc)):
+                    has_num = True
+                else:
+                    remaining = [*num_factors, *remaining]
+            remaining.extend(inv_num_factors)
+    elif num_factors:
+        if len(num_factors) == 1 or (num_ok and _is_lossless_css_number(num_acc)):
+            has_num = True
+        else:
+            remaining = [*num_factors, *remaining]
+
+    if not remaining:
+        return _CalcNumeric(num_acc, "")
+
+    # If remaining contains a single percentage or dimension and has_num is True,
     # multiply num_acc into that percentage/dimension and move it to the front!
     dim_indices = [
         idx
@@ -1458,15 +1491,21 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
         d_idx = dim_indices[0]
         d_node = remaining[d_idx]
         assert isinstance(d_node, _CalcNumeric)
-        scaled_val = d_node.value * num_acc if has_num else d_node.value
-        if math.isfinite(scaled_val) and (
-            scaled_val == 0.0 or d_node.value == 0.0 or serialize_number(scaled_val) != "0"
-        ):
-            leading_dim = _CalcNumeric(scaled_val, d_node.unit)
+        if has_num:
+            scaled_val = d_node.value * num_acc
+            if _is_lossless_css_number(scaled_val) and (
+                scaled_val != 0.0 or d_node.value == 0.0 or num_acc == 0.0
+            ):
+                leading_dim = _CalcNumeric(scaled_val, d_node.unit)
+                others = [item for idx, item in enumerate(remaining) if idx != d_idx]
+                if not others:
+                    return leading_dim
+                return _CalcProduct((leading_dim, *others))
+        else:
             others = [item for idx, item in enumerate(remaining) if idx != d_idx]
             if not others:
-                return leading_dim
-            return _CalcProduct((leading_dim, *others))
+                return d_node
+            return _CalcProduct((d_node, *others))
 
     if has_num:
         if abs(num_acc - 1.0) < 1e-12 and len(remaining) == 1:
@@ -1488,34 +1527,51 @@ def _simplify_calc_sum(terms: Sequence[_CalcNode]) -> _CalcNode:
             flat.append(t)
 
     # Combine identical numeric units ("" for number, "%" for percentage, canonical unit for dimension)
-    unit_totals: dict[str, float] = {}
+    # when the combined sum can be serialized without loss of precision under 6-decimal CSSOM rules.
+    unit_terms: dict[str, list[_CalcNumeric]] = {}
     unit_order: list[str] = []
     other_terms: list[_CalcNode] = []
 
     for t in flat:
         if isinstance(t, _CalcNumeric):
-            prev = unit_totals.get(t.unit, 0.0)
-            cand = prev + t.value
-            if math.isfinite(cand):
-                if t.unit not in unit_totals:
-                    unit_order.append(t.unit)
-                unit_totals[t.unit] = cand
-                continue
-        other_terms.append(t)
+            if t.unit not in unit_terms:
+                unit_terms[t.unit] = []
+                unit_order.append(t.unit)
+            unit_terms[t.unit].append(t)
+        else:
+            other_terms.append(t)
 
     # Sort numeric terms per CSS Values 4 §10.10: number ("") first, percentage ("%") second,
     # dimensions ordered alphabetically by canonical ASCII-lowercase unit
-    sorted_numeric: list[_CalcNumeric] = []
-    if "" in unit_totals:
-        sorted_numeric.append(_CalcNumeric(unit_totals[""], ""))
-    if "%" in unit_totals:
-        sorted_numeric.append(_CalcNumeric(unit_totals["%"], "%"))
+    ordered_units: list[str] = []
+    if "" in unit_terms:
+        ordered_units.append("")
+    if "%" in unit_terms:
+        ordered_units.append("%")
     dim_units = sorted(
         (u for u in unit_order if u not in ("", "%")),
         key=lambda u: (u.lower(), u),
     )
-    for u in dim_units:
-        sorted_numeric.append(_CalcNumeric(unit_totals[u], u))
+    ordered_units.extend(dim_units)
+
+    sorted_numeric: list[_CalcNumeric] = []
+    for u in ordered_units:
+        t_list = unit_terms[u]
+        if len(t_list) == 1:
+            sorted_numeric.append(t_list[0])
+            continue
+        acc = 0.0
+        ok = True
+        for item in t_list:
+            cand = acc + item.value
+            if not math.isfinite(cand):
+                ok = False
+                break
+            acc = cand
+        if ok and _is_lossless_css_number(acc):
+            sorted_numeric.append(_CalcNumeric(acc, u))
+        else:
+            sorted_numeric.extend(t_list)
 
     all_terms: list[_CalcNode] = [*sorted_numeric, *other_terms]
     if len(all_terms) == 1:
