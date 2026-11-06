@@ -1473,6 +1473,7 @@ def test_anchor_and_anchor_size_on_inset_and_in_math_functions(
         "min(100px, 10%, anchor(--foo top), anchor(--bar bottom))",
         "calc(anchor(--foo left, 1px) + 10%)",
         "anchor(--foo top, calc(0.5 * anchor(--bar bottom)))",
+        "anchor-size(width, anchor(top))",
     ):
         out = canonicalize("top", value, options=opts)
         assert out
@@ -1500,6 +1501,8 @@ def test_anchor_and_anchor_size_on_inset_and_in_math_functions(
         )
         with pytest.raises(StixisValidationError):
             canonicalize(size_prop, "anchor(--foo top)", options=opts)
+        with pytest.raises(StixisValidationError):
+            canonicalize(size_prop, "anchor-size(width, anchor(top))", options=opts)
         with pytest.raises(StixisValidationError):
             canonicalize(size_prop, "calc(anchor(--foo top) + 10px)", options=opts)
 

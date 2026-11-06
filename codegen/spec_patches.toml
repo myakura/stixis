@@ -78,8 +78,8 @@ order = [
 "<uri>" = "<url>"
 "<view-transition-type>" = "<custom-ident>"
 "random()" = "random( [ <random-key> , ]? <calc-sum> , <calc-sum> [ , <calc-sum> ]? )"
-"anchor()" = "anchor( [ <anchor-name>? && <anchor-side> ] [ , [ <length-percentage> | <anchor()> | <anchor-size()> ] ]? )"
-"anchor-size()" = "anchor-size() | anchor-size( [ <anchor-name> || <anchor-size> ] [ , [ <length-percentage> | <anchor-size()> ] ]? ) | anchor-size( <length-percentage> | <anchor-size()> )"
+"anchor()" = "anchor( [ <anchor-name>? && <anchor-side> ] [ , <length-percentage> ]? )"
+"anchor-size()" = "anchor-size() | anchor-size( [ <anchor-name> || <anchor-size> ] [ , <length-percentage> ]? ) | anchor-size( <length-percentage> )"
 
 # Extend `<font-features-tech>` with `avar2` from `css-fonts-5.json`
 "<font-features-tech>" = "[ features-opentype | features-aat | features-graphite | avar2 ]"

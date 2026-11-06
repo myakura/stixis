@@ -2192,6 +2192,16 @@ class _TokenMatcher:
             if math_res is not None:
                 rendered_math, next_pos = math_res
                 return [(next_pos, rendered_math)]
+            if (
+                kind in ("<length>", "<length-percentage>")
+                and tok.kind == "function"
+                and tok.value.lower() in self.calc_context_functions
+                and self.specs_lookup is not None
+            ):
+                fn_low = tok.value.lower()
+                fn_node = self.specs_lookup(f"<{fn_low}()>", False)
+                if fn_node is not None:
+                    return self.match_node(fn_node, pos)
 
         if kind == "<zero>":
             if tok.kind == "number" and tok.num == 0:
