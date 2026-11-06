@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.primitives import (
@@ -18,8 +19,8 @@ from stixis.primitives import (
     serialize_percentage,
 )
 
-ANGLE_UNITS: frozenset[str] = frozenset({"deg", "grad", "rad", "turn"})
-ANGLE_UNITS_LOWER: dict[str, str] = {u.lower(): u for u in ANGLE_UNITS}
+ANGLE_UNITS: frozenset[str] = UNITS_BY_TYPE["<angle>"]
+ANGLE_UNITS_LOWER: dict[str, str] = LOWER_TO_CANONICAL_UNIT["<angle>"]
 
 FONT_WIDTH_KEYWORDS: frozenset[str] = frozenset(
     {
@@ -238,6 +239,37 @@ def serialize_font_width(
     return _serialize_width_item(value, target=target, expected_syntax=expected_syntax)
 
 
+def _format_oblique_angles(
+    parts: Sequence[Any],
+    *,
+    is_descriptor: bool,
+    options: SerializationOptions,
+    target: str,
+    expected_syntax: str,
+    raw_value: Any,
+) -> str:
+    if not parts or len(parts) > (2 if is_descriptor else 1):
+        raise StixisValidationError(target, expected_syntax, raw_value)
+    angles = [
+        serialize_angle_value(
+            part,
+            min_deg=-90.0,
+            max_deg=90.0,
+            target=target,
+            expected_syntax=expected_syntax,
+        )
+        for part in parts
+    ]
+    if (
+        not is_descriptor
+        and len(angles) == 1
+        and angles[0][1] == 0.0
+        and options.normalize_zero_oblique
+    ):
+        return "normal"
+    return "oblique " + " ".join(a[0] for a in angles)
+
+
 def serialize_font_style(
     value: Any,
     *,
@@ -264,26 +296,14 @@ def serialize_font_style(
             return "auto"
         if lower.startswith("oblique") and len(lower) > 7 and lower[7].isspace():
             rest = raw[7:].strip().split()
-            if not rest or len(rest) > (2 if is_descriptor else 1):
-                raise StixisValidationError(target, expected_syntax, value)
-            angles = [
-                serialize_angle_value(
-                    part,
-                    min_deg=-90.0,
-                    max_deg=90.0,
-                    target=target,
-                    expected_syntax=expected_syntax,
-                )
-                for part in rest
-            ]
-            if (
-                not is_descriptor
-                and len(angles) == 1
-                and angles[0][1] == 0.0
-                and options.normalize_zero_oblique
-            ):
-                return "normal"
-            return "oblique " + " ".join(a[0] for a in angles)
+            return _format_oblique_angles(
+                rest,
+                is_descriptor=is_descriptor,
+                options=options,
+                target=target,
+                expected_syntax=expected_syntax,
+                raw_value=value,
+            )
         raise StixisValidationError(target, expected_syntax, value)
 
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
@@ -304,39 +324,24 @@ def serialize_font_style(
                 )
             ):
                 tail = list(tail[0])
-            if len(tail) > (2 if is_descriptor else 1):
-                raise StixisValidationError(target, expected_syntax, value)
-            angles = [
-                serialize_angle_value(
-                    part,
-                    min_deg=-90.0,
-                    max_deg=90.0,
-                    target=target,
-                    expected_syntax=expected_syntax,
-                )
-                for part in tail
-            ]
-            if (
-                not is_descriptor
-                and len(angles) == 1
-                and angles[0][1] == 0.0
-                and options.normalize_zero_oblique
-            ):
-                return "normal"
-            return "oblique " + " ".join(a[0] for a in angles)
+            return _format_oblique_angles(
+                tail,
+                is_descriptor=is_descriptor,
+                options=options,
+                target=target,
+                expected_syntax=expected_syntax,
+                raw_value=value,
+            )
         # Or a 2-tuple of angles `(lo, hi)` directly for `@font-face` oblique range
         if is_descriptor and 1 <= len(value) <= 2:
-            angles = [
-                serialize_angle_value(
-                    part,
-                    min_deg=-90.0,
-                    max_deg=90.0,
-                    target=target,
-                    expected_syntax=expected_syntax,
-                )
-                for part in value
-            ]
-            return "oblique " + " ".join(a[0] for a in angles)
+            return _format_oblique_angles(
+                value,
+                is_descriptor=is_descriptor,
+                options=options,
+                target=target,
+                expected_syntax=expected_syntax,
+                raw_value=value,
+            )
 
     raise StixisValidationError(target, expected_syntax, value)
 
