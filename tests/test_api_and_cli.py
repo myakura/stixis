@@ -999,8 +999,8 @@ def test_tokenize_css_comment_after_star_cdo_cdc_and_escaped_eof() -> None:
     def kinds(s: str) -> list[tuple[str, str]]:
         return [(t.kind, t.value) for t in tokenize_css(s)]
 
-    assert canonicalize("width", "calc(2*/**/3px)") == "calc(2 * 3px)"
-    assert canonicalize("width", "calc(2/**/*3px)") == "calc(2 * 3px)"
+    assert canonicalize("width", "calc(2*/**/3px)") == "calc(6px)"
+    assert canonicalize("width", "calc(2/**/*3px)") == "calc(6px)"
     with pytest.raises(StixisSyntaxError, match=r"Unexpected comment close `\*/`"):
         tokenize_css("2 */ 3")
 
@@ -1109,7 +1109,7 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
     sizing_dir.mkdir(parents=True)
     (sizing_dir / "width-valid.html").write_text(
         'test_valid_value("width", "10px");\n'
-        'test_valid_value("width", "calc(10px + 20px)");\n'
+        'test_valid_value("width", "calc(10px + 20px)", "calc(30px)");\n'
         'test_valid_value("width", "var(--w)");\n'
         'test_valid_value("transform-origin", "top center", ["center top 0px", "center top"]);\n'
         'test_valid_value("width", "1px", "2px");\n'
@@ -1127,7 +1127,7 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
 
     valid, invalid = gen_wpt_tests._extract_broad_css_property_cases(wpt_css, min_engines=2)
     assert ("width", "10px", "10px") in valid
-    assert ("width", "calc(10px + 20px)", "calc(10px + 20px)") in valid
+    assert ("width", "calc(10px + 20px)", "calc(30px)") in valid
     assert ("width", "var(--w)", "var(--w)") in valid
     assert ("transform-origin", "top center", "center top") in valid
     assert ("width", "not-a-width") in invalid
@@ -1399,8 +1399,8 @@ def test_math_function_calc_sum_structural_validation(
         with pytest.raises(StixisValidationError):
             serialize_value("width", invalid_expr)
 
-    assert canonicalize("width", "calc(1px + 2px)") == "calc(1px + 2px)"
-    assert canonicalize("width", "calc((1px + 2px) * 2)") == "calc((1px + 2px) * 2)"
+    assert canonicalize("width", "calc(1px + 2px)") == "calc(3px)"
+    assert canonicalize("width", "calc((1px + 2px) * 2)") == "calc(6px)"
     assert canonicalize("width", "min(1px, 2em)") == "min(1px, 2em)"
     assert canonicalize("opacity", "round(1.5)") == "round(1.5)"
     assert canonicalize("opacity", "round(up, 1.5)") == "round(up, 1.5)"
@@ -1416,7 +1416,7 @@ def test_math_function_calc_sum_structural_validation(
     assert canonicalize("width", "calc(2 * random(0px, 100px))") == ("calc(2 * random(0px, 100px))")
     assert canonicalize("left", "calc(inherit(--x) + 1px)") == "calc(inherit(--x) + 1px)"
     assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))") == (
-        "alpha(from currentcolor / calc(alpha * 0.5))"
+        "alpha(from currentcolor / calc(0.5 * alpha))"
     )
     assert canonicalize("color", "ictcp(from red calc(i) calc(ct) calc(cp))") == (
         "ictcp(from red calc(i) calc(ct) calc(cp))"
@@ -1439,7 +1439,7 @@ def test_math_function_calc_sum_structural_validation(
     rc_good = cli_main(["check", "width", "calc((1px + 2px) * 2)"])
     captured = capsys.readouterr()
     assert rc_good == EXIT_OK
-    assert captured.out.strip() == "calc((1px + 2px) * 2)"
+    assert captured.out.strip() == "calc(6px)"
 
 
 def test_anchor_and_anchor_size_on_inset_and_in_math_functions(
@@ -1731,3 +1731,88 @@ def test_shared_type_target_resolution_between_library_and_cli(
         captured = capsys.readouterr()
         assert rc_inspect_bad == EXIT_NOT_FOUND
         assert "unknown CSS target" in captured.err
+
+
+def test_context_free_math_expression_simplification(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    opts = SerializationOptions(min_engines=0)
+
+    # 1. Folding numbers and same-unit terms
+    assert canonicalize("font-weight", "calc(100 + 100)") == "calc(200)"
+    assert canonicalize("width", "calc(1px + 2px)") == "calc(3px)"
+    assert canonicalize("width", "calc(100px + 100px)") == "calc(200px)"
+    assert canonicalize("opacity", "calc(-50% - 50%)") == "calc(-100%)"
+    assert canonicalize("font-style", "oblique calc(10deg - 10deg)") == "oblique calc(0deg)"
+    assert canonicalize("left", "calc(20px + calc(80px))") == "calc(100px)"
+    assert canonicalize("left", "calc(calc(2 * calc(calc(3)) + 4) * 10px)") == "calc(100px)"
+
+    # 2. Sorting terms of a sum (numbers, percentages, dimensions alphabetically, then other sub-expressions)
+    assert canonicalize("animation-range-end", "contain calc(10px + 10%)") == (
+        "contain calc(10% + 10px)"
+    )
+    assert canonicalize("background-position-x", "calc(10px - 0.5em)") == "calc(-0.5em + 10px)"
+    assert canonicalize("padding-right", "calc(2em + 3%)") == "calc(3% + 2em)"
+    assert canonicalize("letter-spacing", "calc(2ch - 30%)") == "calc(-30% + 2ch)"
+    assert canonicalize("color", "alpha(from currentcolor / calc(alpha + 0.1))", options=opts) == (
+        "alpha(from currentcolor / calc(0.1 + alpha))"
+    )
+    assert canonicalize("grid-column-start", "span calc(sibling-index() - 2)") == (
+        "span calc(-2 + sibling-index())"
+    )
+    assert canonicalize("top", "calc(anchor(--foo left, 1px) + 10%)", options=opts) == (
+        "calc(10% + anchor(--foo left, 1px))"
+    )
+
+    # 3. Division by a number rewritten as multiplication and numeric factor placed first
+    assert (
+        canonicalize(
+            "top",
+            "calc((anchor(--foo top) + anchor(--bar bottom)) / 2)",
+            options=opts,
+        )
+        == "calc(0.5 * (anchor(--foo top) + anchor(--bar bottom)))"
+    )
+    assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))", options=opts) == (
+        "alpha(from currentcolor / calc(0.5 * alpha))"
+    )
+    assert (
+        canonicalize(
+            "color",
+            "alpha(from green / calc(sibling-index() * 0.2))",
+            options=opts,
+        )
+        == "alpha(from green / calc(0.2 * sibling-index()))"
+    )
+    assert canonicalize("text-decoration-inset", "calc(1em / 4) calc(-1ch)", options=opts) == (
+        "calc(0.25em) calc(-1ch)"
+    )
+    assert canonicalize("animation-range-start", "cover calc(sign(100em - 1px) * 1%)") == (
+        "cover calc(1% * sign(100em - 1px))"
+    )
+    assert (
+        canonicalize(
+            "flex",
+            "1 1 calc(10px + (sign(20cqw - 10px) * 5px))",
+        )
+        == "1 1 calc(10px + (5px * sign(20cqw - 10px)))"
+    )
+    assert canonicalize("height", "calc-size(min-content, size * 2)") == (
+        "calc-size(min-content, 2 * size)"
+    )
+    assert canonicalize("max-width", "calc-size(max-content, size / 2)") == (
+        "calc-size(max-content, 0.5 * size)"
+    )
+    assert canonicalize("max-height", "calc-size(fit-content, 30px + size / 2)") == (
+        "calc-size(fit-content, 30px + (0.5 * size))"
+    )
+
+    # 4. Preserving `-` when already in canonical order and keeping out-of-scope units untouched
+    assert canonicalize("width", "calc(10% - 0.5em)") == "calc(10% - 0.5em)"
+    assert canonicalize("width", "calc(1in + 1px)") == "calc(1in + 1px)"
+
+    # 5. CLI check
+    rc = cli_main(["check", "background-position-x", "calc(10px - 0.5em)"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    assert captured.out.strip() == "calc(-0.5em + 10px)"
