@@ -2643,7 +2643,12 @@ def evaluate_canonicalize(
         # CSS-wide and reserved keywords (`initial`, `inherit`, `unset`, `revert`, `default`) are NOT valid on @font-face descriptors
         raise StixisValidationError(target, syntax, css_text)
 
-    res = matcher.match_root(node)
+    try:
+        res = matcher.match_root(node)
+    except RecursionError as exc:
+        raise StixisValidationError(
+            target, syntax, css_text, "Maximum nesting depth exceeded"
+        ) from exc
     if res is None:
         raise StixisValidationError(target, syntax, css_text)
     if target == "font-size-adjust" and res.startswith("ex-height "):
@@ -2837,7 +2842,12 @@ def evaluate_serialize_value(
             return raw_kw.strip().lower()
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
-    direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
+    try:
+        direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
+    except RecursionError as exc:
+        raise StixisValidationError(
+            target, syntax, value, "Maximum nesting depth exceeded"
+        ) from exc
     if direct is not None:
         return direct
 
