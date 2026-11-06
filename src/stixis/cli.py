@@ -15,10 +15,9 @@ from stixis._generated.specs import (
     DEFAULT_MIN_ENGINES,
     PROPERTY_ENGINE_COUNTS,
     PROPERTY_SYNTAXES,
-    VALUE_SYNTAXES,
 )
 from stixis.errors import StixisError
-from stixis.nodes import canonicalize, normalize_identifier_key
+from stixis.nodes import canonicalize, normalize_identifier_key, resolve_target_syntax
 from stixis.options import SerializationOptions
 
 EXIT_OK = 0
@@ -77,34 +76,7 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
     if not target:
         return None
 
-    if at_rule is not None:
-        norm_at = at_rule.strip().lower()
-        if not norm_at.startswith("@"):
-            norm_at = f"@{norm_at}"
-        descs = ATRULE_DESCRIPTORS.get(norm_at)
-        if descs is None:
-            return None
-        try:
-            norm_desc = normalize_identifier_key(target)
-        except StixisError:
-            return None
-        syn = descs.get(norm_desc)
-        if syn is None:
-            return None
-        return {
-            "kind": "descriptor",
-            "name": norm_desc,
-            "at_rule": norm_at,
-            "python_key": norm_desc.replace("-", "_"),
-            "syntax": syn,
-            "python_inputs": _describe_python_inputs("descriptor", norm_desc, syn),
-        }
-
-    if target.startswith("@") and "/" in target:
-        at_part, desc_part = target.split("/", 1)
-        return _inspect_target(desc_part, at_rule=at_part)
-
-    if target.startswith("@"):
+    if at_rule is None and target.startswith("@") and "/" not in target:
         norm_at = target.lower()
         if norm_at not in ATRULE_DESCRIPTORS and norm_at not in ATRULE_PRELUDE_SYNTAXES:
             return None
@@ -117,64 +89,88 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
             "descriptors": dict(sorted(descs.items())),
         }
 
-    if target.startswith("<") and target.endswith(">"):
-        syn = VALUE_SYNTAXES.get(target)
-        if syn is None:
-            return None
+    try:
+        norm_name, norm_at, syn, _ = resolve_target_syntax(
+            target,
+            at_rule=at_rule,
+            options=SerializationOptions(min_engines=0),
+        )
+    except StixisError:
+        if at_rule is None and not target.startswith(("<", "@")):
+            try:
+                norm = normalize_identifier_key(target)
+            except StixisError:
+                return None
+            matching_at = [
+                (at_name, descs[norm])
+                for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
+                if norm in descs
+            ]
+            if matching_at:
+                at_name, desc_syn = matching_at[0]
+                return {
+                    "kind": "descriptor",
+                    "name": norm,
+                    "at_rule": at_name,
+                    "all_at_rules": [a for a, _ in matching_at],
+                    "python_key": norm.replace("-", "_"),
+                    "syntax": desc_syn,
+                    "python_inputs": _describe_python_inputs("descriptor", norm, desc_syn),
+                }
+        return None
+
+    if norm_at is not None:
         return {
-            "kind": "type",
-            "name": target,
+            "kind": "descriptor",
+            "name": norm_name,
+            "at_rule": norm_at,
+            "python_key": norm_name.replace("-", "_"),
             "syntax": syn,
-            "python_inputs": _describe_python_inputs("type", target, syn),
+            "python_inputs": _describe_python_inputs("descriptor", norm_name, syn),
         }
 
-    try:
-        norm = normalize_identifier_key(target)
-    except StixisError:
-        return None
-    if norm in PROPERTY_SYNTAXES:
-        syn = PROPERTY_SYNTAXES[norm]
-        eng = PROPERTY_ENGINE_COUNTS.get(norm, 0)
+    if norm_name.startswith("<") and norm_name.endswith(">"):
+        # If bare identifier matched both a descriptor-only name and a `<type>`, check if `target` was bare
+        if not target.startswith("<") and norm_name[1:-1] not in PROPERTY_SYNTAXES:
+            bare_norm = norm_name[1:-1]
+            matching_at = [
+                (at_name, descs[bare_norm])
+                for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
+                if bare_norm in descs
+            ]
+            if matching_at:
+                at_name, desc_syn = matching_at[0]
+                return {
+                    "kind": "descriptor",
+                    "name": bare_norm,
+                    "at_rule": at_name,
+                    "all_at_rules": [a for a, _ in matching_at],
+                    "python_key": bare_norm.replace("-", "_"),
+                    "syntax": desc_syn,
+                    "python_inputs": _describe_python_inputs("descriptor", bare_norm, desc_syn),
+                }
+        return {
+            "kind": "type",
+            "name": norm_name,
+            "syntax": syn,
+            "python_inputs": _describe_python_inputs("type", norm_name, syn),
+        }
+
+    if norm_name in PROPERTY_SYNTAXES:
+        eng = PROPERTY_ENGINE_COUNTS.get(norm_name, 0)
         also_in_at_rules = sorted(
-            at_name for at_name, descs in ATRULE_DESCRIPTORS.items() if norm in descs
+            at_name for at_name, descs in ATRULE_DESCRIPTORS.items() if norm_name in descs
         )
         return {
             "kind": "property",
-            "name": norm,
-            "python_key": norm.replace("-", "_"),
+            "name": norm_name,
+            "python_key": norm_name.replace("-", "_"),
             "syntax": syn,
             "engines": eng,
-            "enabled_by_default": eng >= DEFAULT_MIN_ENGINES or norm in ALWAYS_ALLOWED_PROPERTIES,
+            "enabled_by_default": eng >= DEFAULT_MIN_ENGINES
+            or norm_name in ALWAYS_ALLOWED_PROPERTIES,
             "also_descriptor_in": also_in_at_rules,
-            "python_inputs": _describe_python_inputs("property", norm, syn),
-        }
-
-    # Check if it's an at-rule descriptor only (e.g. `ascent-override` or `src`)
-    matching_at = [
-        (at_name, descs[norm])
-        for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
-        if norm in descs
-    ]
-    if matching_at:
-        at_name, syn = matching_at[0]
-        return {
-            "kind": "descriptor",
-            "name": norm,
-            "at_rule": at_name,
-            "all_at_rules": [a for a, _ in matching_at],
-            "python_key": norm.replace("-", "_"),
-            "syntax": syn,
-            "python_inputs": _describe_python_inputs("descriptor", norm, syn),
-        }
-
-    type_key = f"<{norm}>"
-    if type_key in VALUE_SYNTAXES:
-        syn = VALUE_SYNTAXES[type_key]
-        return {
-            "kind": "type",
-            "name": type_key,
-            "syntax": syn,
-            "python_inputs": _describe_python_inputs("type", type_key, syn),
+            "python_inputs": _describe_python_inputs("property", norm_name, syn),
         }
 
     return None

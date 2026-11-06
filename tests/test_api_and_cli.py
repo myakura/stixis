@@ -1660,3 +1660,71 @@ def test_type_targets_reject_css_wide_keywords(
     captured = capsys.readouterr()
     assert rc_good == EXIT_OK
     assert captured.out.strip() == "inherit"
+
+
+def test_shared_type_target_resolution_between_library_and_cli(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from stixis.nodes import resolve_target_syntax
+
+    # 1. Built-in evaluator-supported `<type>` targets work in both library and CLI (angled and bare)
+    for type_target, raw_val, expected in (
+        ("<custom-ident>", "foo", "foo"),
+        ("custom-ident", "foo", "foo"),
+        ("<dashed-ident>", r"\--my-var", "--my-var"),
+        ("<integer>", "42", "42"),
+        ("integer", "42", "42"),
+        ("<signless-integer>", "42", "42"),
+        ("<signed-integer>", "+42", "42"),
+        ("<number>", "3.5", "3.5"),
+        ("<percentage>", "50%", "50%"),
+        ("<dimension>", "10px", "10px"),
+        ("<zero>", "0", "0"),
+        ("<string>", '"hello"', '"hello"'),
+        ("<hex-color>", "#ff00aa", "#ff00aa"),
+        ("<urange>", "u+3040-309f", "U+3040-309F"),
+        ("<declaration-value>", "1px solid red", "1px solid red"),
+        ("<any-value>", "<!-- foo -->", "<!-- foo -->"),
+    ):
+        assert canonicalize(type_target, raw_val) == expected
+        rc_check = cli_main(["check", type_target, raw_val])
+        captured = capsys.readouterr()
+        assert rc_check == EXIT_OK
+        assert captured.out.strip() == expected
+
+        rc_inspect = cli_main(["inspect", type_target])
+        captured = capsys.readouterr()
+        assert rc_inspect == EXIT_OK
+        assert "(type)" in captured.out
+
+    assert serialize_value("<signless-integer>", 0) == "0"
+    with pytest.raises(StixisValidationError):
+        serialize_value("<signless-integer>", -1)
+    assert serialize_value("<hex-color>", "#00ff00") == "#00ff00"
+
+    # 2. Unknown `<type>` targets, unimplemented token placeholders, and multi-term `<...>` expressions
+    #    raise StixisValidationError("Unknown CSS target: ...") at target resolution in Python and exit 4 on CLI
+    for unknown_target in (
+        "<not-a-type>",
+        "<lenght>",
+        "<colon-token>",
+        "<declaration-list>",
+        "<length> | <percentage>",
+        "<length [0,∞]>",
+    ):
+        with pytest.raises(StixisValidationError, match="Unknown CSS target"):
+            resolve_target_syntax(unknown_target)
+        with pytest.raises(StixisValidationError, match="Unknown CSS target"):
+            canonicalize(unknown_target, "10px")
+        with pytest.raises(StixisValidationError, match="Unknown CSS target"):
+            serialize_value(unknown_target, "10px")
+
+        rc_check_bad = cli_main(["check", unknown_target, "10px"])
+        captured = capsys.readouterr()
+        assert rc_check_bad == EXIT_NOT_FOUND
+        assert "unknown CSS target" in captured.err
+
+        rc_inspect_bad = cli_main(["inspect", unknown_target])
+        captured = capsys.readouterr()
+        assert rc_inspect_bad == EXIT_NOT_FOUND
+        assert "unknown CSS target" in captured.err

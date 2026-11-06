@@ -887,6 +887,53 @@ _BUILTIN_PRIMITIVES: frozenset[str] = frozenset(
     }
 )
 
+SUPPORTED_BUILTIN_TYPES: frozenset[str] = frozenset(
+    {
+        "<ident>",
+        "<ident-token>",
+        "<custom-ident>",
+        "<dashed-ident>",
+        "<string>",
+        "<string-token>",
+        "<url>",
+        "<url-token>",
+        "<number>",
+        "<integer>",
+        "<signless-integer>",
+        "<signed-integer>",
+        "<percentage>",
+        "<dimension>",
+        "<zero>",
+        "<length>",
+        "<angle>",
+        "<time>",
+        "<frequency>",
+        "<resolution>",
+        "<flex>",
+        "<decibel>",
+        "<semitones>",
+        "<length-percentage>",
+        "<angle-percentage>",
+        "<time-percentage>",
+        "<frequency-percentage>",
+        "<unicode-range-token>",
+        "<urange>",
+        "<opentype-tag>",
+        "<feature-tag-value>",
+        "<family-name>",
+        "<font-family-name>",
+        "<generic-family>",
+        "<generic-font-family>",
+        "<font-src>",
+        "<font-src-list>",
+        "<font-format>",
+        "<font-tech>",
+        "<hex-color>",
+        "<declaration-value>",
+        "<any-value>",
+    }
+)
+
 _BOUND_VAL_RE = re.compile(r"^([+-]?(?:∞|infinity|\d+(?:\.\d+)?))([a-zA-Z%]*)$", re.IGNORECASE)
 
 
@@ -3107,6 +3154,31 @@ def _serialize_primitive_python_value(
                 return serialize_number(value)
             if isinstance(value, (Dimension, Percentage, Keyword, Url)):
                 return str(value)
+            return None
+
+        if kind == "<dimension>":
+            if isinstance(value, Dimension):
+                return f"{serialize_number(value.value, min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value.unit)}"
+            if (
+                isinstance(value, tuple)
+                and len(value) == 2
+                and not isinstance(value[0], bool)
+                and isinstance(value[0], (int, float))
+                and isinstance(value[1], str)
+            ):
+                return f"{serialize_number(value[0], min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value[1])}"
+            return None
+
+        if kind == "<hex-color>":
+            raw = value.value if isinstance(value, Keyword) else value
+            if isinstance(raw, str):
+                s = raw.strip()
+                if (
+                    s.startswith("#")
+                    and len(s[1:]) in (3, 4, 6, 8)
+                    and all(c in "0123456789abcdefABCDEF" for c in s[1:])
+                ):
+                    return f"#{s[1:].lower()}"
             return None
 
     except StixisValidationError:
