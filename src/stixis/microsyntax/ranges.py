@@ -316,7 +316,8 @@ def serialize_font_style(
                 return "oblique"
             if (
                 len(tail) == 1
-                and isinstance(tail[0], (tuple, list))
+                and isinstance(tail[0], Sequence)
+                and not isinstance(tail[0], (str, bytes))
                 and not (
                     len(tail[0]) == 2
                     and isinstance(tail[0][1], str)

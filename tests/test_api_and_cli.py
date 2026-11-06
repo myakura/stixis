@@ -1590,7 +1590,7 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     at = AtRule("@font-feature-values", at_pre, rules=at_rules)
     at_pre.append(";;bad")
     at_rules.clear()
-    assert isinstance(at.prelude, tuple)
+    assert not isinstance(at.prelude, list)
     assert isinstance(at.rules, tuple)
     assert hash(at) == hash(at)
     assert "'Inter', 'Roboto'" in at.format(options=SerializationOptions.cleome())
@@ -1602,3 +1602,28 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     assert len(sheet.rules) == 3
     assert hash(sheet) == hash(sheet)
     assert "color: red;" in sheet.format(options=SerializationOptions.cleome())
+
+    # Regression checks for container semantics and template interpolation snapshots across option rebuilds
+    ff_noncontig = FontFace(unicode_range={0x41, 0x5A})
+    assert "unicode-range: U+41, U+5A;" in ff_noncontig.format()
+    assert "unicode-range: U+41, U+5A;" in ff_noncontig.format(
+        options=SerializationOptions.cleome()
+    )
+
+    ff_two_urls = FontFace(src=["a.woff", "woff2"])
+    assert 'src: url("a.woff"), url("woff2");' in ff_two_urls.format()
+    assert "src: url('a.woff'), url('woff2');" in ff_two_urls.format(
+        options=SerializationOptions.cleome()
+    )
+
+    ff_single_map = FontFace(src={"url": "inter.woff2", "format": "woff2"})
+    assert "src: url('inter.woff2') format('woff2');" in ff_single_map.format(
+        options=SerializationOptions.cleome()
+    )
+
+    tpl_items = ["foo"]
+    r_tpl = StyleRule("a", {"content": t'"{tpl_items}"'}, comment=t"{tpl_items}")
+    tpl_items.append("bar")
+    assert hash(r_tpl) == hash(r_tpl)
+    assert "/* ['foo'] */" in r_tpl.format(options=SerializationOptions.cleome())
+    assert "content: '[\\'foo\\']';" in r_tpl.format(options=SerializationOptions.cleome())

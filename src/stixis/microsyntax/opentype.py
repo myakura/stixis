@@ -153,7 +153,7 @@ def serialize_font_feature_settings(
         isinstance(value, tuple)
         and len(value) == 2
         and isinstance(value[0], str)
-        and not isinstance(value[1], (tuple, list, dict))
+        and (isinstance(value[1], (str, Keyword)) or not isinstance(value[1], (Sequence, Mapping)))
         and not (
             isinstance(value[1], str)
             and len(value[1]) == 4

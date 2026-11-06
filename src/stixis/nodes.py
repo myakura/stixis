@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
-from string.templatelib import Interpolation, Template
+from string.templatelib import Interpolation, Template, convert
 from typing import Any, Unpack
 
 from stixis._generated.specs import (
@@ -338,33 +338,95 @@ def _validate_and_render_comment(
     raise StixisValidationError("comment", "str | Template", comment)
 
 
+class _FrozenMapping(Mapping[Any, Any]):
+    """Immutable, hashable `Mapping` wrapper around a tuple of `(key, value)` pairs."""
+
+    __slots__ = ("_dict", "_pairs")
+
+    def __init__(self, pairs: tuple[tuple[Any, Any], ...]) -> None:
+        self._pairs = pairs
+        self._dict = dict(pairs)
+
+    def __getitem__(self, key: Any) -> Any:
+        return self._dict[key]
+
+    def __iter__(self) -> Any:
+        return iter(self._dict)
+
+    def __len__(self) -> int:
+        return len(self._dict)
+
+    def __hash__(self) -> int:
+        return hash(self._pairs)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _FrozenMapping):
+            return self._pairs == other._pairs
+        if isinstance(other, Mapping):
+            return self._dict == dict(other)
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return repr(self._dict)
+
+
+class _FrozenList(Sequence[Any]):
+    """Immutable, hashable `Sequence` (not a `tuple`) preserving list vs tuple disambiguation."""
+
+    __slots__ = ("_items",)
+
+    def __init__(self, items: tuple[Any, ...]) -> None:
+        self._items = items
+
+    def __getitem__(self, index: Any) -> Any:
+        return self._items[index]
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def __hash__(self) -> int:
+        return hash(("_FrozenList", self._items))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, _FrozenList):
+            return self._items == other._items
+        return NotImplemented
+
+    def __repr__(self) -> str:
+        return repr(list(self._items))
+
+
+def _freeze_interpolation(item: Interpolation) -> Interpolation:
+    val = item.value
+    if not isinstance(val, bool) and isinstance(val, (int, float, str)):
+        return item
+    converted = convert(val, item.conversion)
+    text = format(converted, item.format_spec) if item.format_spec else str(converted)
+    return Interpolation(text, item.expression, None, "")
+
+
 def _freeze_value(val: Any) -> Any:
-    """Recursively convert mutable containers inside AST inputs into immutable, hashable tuples."""
+    """Recursively convert mutable containers inside AST inputs into immutable, hashable equivalents."""
     if isinstance(val, Template):
         frozen_parts: list[str | Interpolation] = []
         for item in val:
             if isinstance(item, Interpolation):
-                frozen_parts.append(
-                    Interpolation(
-                        _freeze_value(item.value),
-                        item.expression,
-                        item.conversion,
-                        item.format_spec,
-                    )
-                )
+                frozen_parts.append(_freeze_interpolation(item))
             else:
                 frozen_parts.append(item)
         return Template(*frozen_parts)
+    if isinstance(val, _FrozenMapping):
+        return val
     if isinstance(val, Mapping):
-        return tuple((k, _freeze_value(v)) for k, v in val.items())
+        return _FrozenMapping(tuple((k, _freeze_value(v)) for k, v in val.items()))
     if isinstance(val, (set, frozenset)):
-        elems = [_freeze_value(x) for x in val]
-        try:
-            return tuple(sorted(elems))
-        except TypeError:
-            return tuple(elems)
-    if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+        return frozenset(_freeze_value(x) for x in val)
+    if isinstance(val, tuple):
         return tuple(_freeze_value(x) for x in val)
+    if isinstance(val, _FrozenList):
+        return val
+    if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+        return _FrozenList(tuple(_freeze_value(x) for x in val))
     return val
 
 

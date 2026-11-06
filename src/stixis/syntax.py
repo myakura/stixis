@@ -2790,23 +2790,6 @@ def _node_matches_single_value(
                 max_override=max_override,
             )
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            if value and all(
-                isinstance(pair, tuple) and len(pair) == 2 and isinstance(pair[0], str)
-                for pair in value
-            ):
-                items_from_pairs = [v for _, v in value if v is not None and v is not False]
-                pair_res = _match_unordered_python_items(
-                    node.items,
-                    items_from_pairs,
-                    require_all=require_all,
-                    specs_lookup=specs_lookup,
-                    options=options,
-                    forbidden_custom_idents=forbidden_custom_idents,
-                    min_override=min_override,
-                    max_override=max_override,
-                )
-                if pair_res is not None:
-                    return pair_res
             res = _match_unordered_python_items(
                 node.items,
                 list(value),

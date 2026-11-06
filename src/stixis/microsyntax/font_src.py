@@ -209,19 +209,6 @@ def serialize_single_font_src(
         )
         return serialize_single_font_src(src_obj, options=options, target=target)
 
-    if (
-        isinstance(item, tuple)
-        and item
-        and all(
-            isinstance(pair, tuple)
-            and len(pair) == 2
-            and isinstance(pair[0], str)
-            and pair[0] in {"url", "local", "format", "tech"}
-            for pair in item
-        )
-    ):
-        return serialize_single_font_src(dict(item), options=options, target=target)
-
     if isinstance(item, tuple) and 1 <= len(item) <= 3:
         url_val = item[0]
         fmt_val = item[1] if len(item) >= 2 else None
