@@ -137,6 +137,21 @@ def serialize_font_tech(
     return f"tech({', '.join(normalized)})"
 
 
+def _serialize_local_font(
+    family: str,
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+    target: str = "src",
+    expected_syntax: str = "<font-src>",
+    invalid_value: Any = None,
+) -> str:
+    err_val = family if invalid_value is None else invalid_value
+    if not family:
+        raise StixisValidationError(target, expected_syntax, err_val)
+    fam_str = serialize_family_name(family, options=options, target=target, is_quoted_token=True)
+    return f"local({fam_str})"
+
+
 def serialize_single_font_src(
     item: Any,
     *,
@@ -147,12 +162,13 @@ def serialize_single_font_src(
     expected_syntax = "<font-src>"
 
     if isinstance(item, LocalFont):
-        if not item.family:
-            raise StixisValidationError(target, expected_syntax, item)
-        fam_str = serialize_family_name(
-            item.family, options=options, target=target, is_quoted_token=True
+        return _serialize_local_font(
+            item.family,
+            options=options,
+            target=target,
+            expected_syntax=expected_syntax,
+            invalid_value=item,
         )
-        return f"local({fam_str})"
 
     if isinstance(item, Url):
         return serialize_url(item, options=options)
@@ -164,12 +180,13 @@ def serialize_single_font_src(
 
     if isinstance(item, FontSrc):
         if item.local is not None:
-            if not item.local:
-                raise StixisValidationError(target, expected_syntax, item)
-            fam_str = serialize_family_name(
-                item.local, options=options, target=target, is_quoted_token=True
+            return _serialize_local_font(
+                item.local,
+                options=options,
+                target=target,
+                expected_syntax=expected_syntax,
+                invalid_value=item,
             )
-            return f"local({fam_str})"
         assert item.url is not None
         parts = [serialize_url(item.url, options=options)]
         if item.format is not None:

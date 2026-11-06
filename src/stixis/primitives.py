@@ -41,11 +41,9 @@ class GenericFamily:
     name: str
 
     def __str__(self) -> str:
-        lower = self.name.strip().lower()
-        if lower.startswith("generic(") and lower.endswith(")"):
-            inner = lower[8:-1].strip()
-            return f"generic({serialize_ident(inner)})"
-        return serialize_ident(lower)
+        from stixis.microsyntax.family_name import serialize_generic_family
+
+        return serialize_generic_family(self.name)
 
 
 def generic(name: str) -> GenericFamily:
@@ -79,7 +77,9 @@ class LocalFont:
     family: str
 
     def __str__(self) -> str:
-        return f"local({serialize_string(self.family)})"
+        from stixis.microsyntax.font_src import _serialize_local_font
+
+        return _serialize_local_font(self.family)
 
 
 @dataclass(frozen=True, slots=True)
