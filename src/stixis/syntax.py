@@ -1509,9 +1509,6 @@ class _TokenMatcher:
                         matched[idx] = rendered
                         dfs(nxt_pos, matched)
                         del matched[idx]
-                    elif not require_all and nxt_pos == cur_pos:
-                        # Avoid zero-width infinite recursion in || / &&
-                        continue
 
         dfs(pos, {})
 

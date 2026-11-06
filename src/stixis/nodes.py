@@ -223,8 +223,6 @@ class RawDeclaration:
 
     def __post_init__(self) -> None:
         norm = normalize_identifier_key(self.property)
-        if not norm or any(ch.isspace() or ch in (":", ";", "{", "}") for ch in norm):
-            raise StixisValidationError(self.property, "<ident>", self.property)
         rendered = serialize_value(
             "--raw",
             self.value,
