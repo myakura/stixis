@@ -1377,3 +1377,66 @@ def test_empty_custom_property_values_accepted_regular_properties_rejected(
     rc_err = cli_main(["check", "width", ""])
     captured = capsys.readouterr()
     assert rc_err == EXIT_VALIDATION_ERROR
+
+
+def test_math_function_calc_sum_structural_validation(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for invalid_expr in (
+        "calc(1px + )",
+        "calc(foo bar)",
+        "calc(1px+2px)",
+        "calc(1px +2px)",
+        "calc(1px+ 2px)",
+        "calc(1px-2px)",
+        "calc(1px -2px)",
+        "calc(1px * )",
+        "min(1px, )",
+        "clamp(1px, 2px)",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("width", invalid_expr)
+        with pytest.raises(StixisValidationError):
+            serialize_value("width", invalid_expr)
+
+    assert canonicalize("width", "calc(1px + 2px)") == "calc(1px + 2px)"
+    assert canonicalize("width", "calc((1px + 2px) * 2)") == "calc((1px + 2px) * 2)"
+    assert canonicalize("width", "min(1px, 2em)") == "min(1px, 2em)"
+    assert canonicalize("opacity", "round(1.5)") == "round(1.5)"
+    assert canonicalize("opacity", "round(up, 1.5)") == "round(up, 1.5)"
+    assert canonicalize("width", "calc-size(auto, min(size, 100px))") == (
+        "calc-size(auto, min(size, 100px))"
+    )
+    assert canonicalize("width", "calc(100px * progress(1, 0, 2))") == (
+        "calc(100px * progress(1, 0, 2))"
+    )
+    assert canonicalize("width", "calc(2 * random(--foo, 0px, 100px))") == (
+        "calc(2 * random(--foo, 0px, 100px))"
+    )
+    assert canonicalize("width", "calc(2 * random(0px, 100px))") == ("calc(2 * random(0px, 100px))")
+    assert canonicalize("left", "calc(inherit(--x) + 1px)") == "calc(inherit(--x) + 1px)"
+    assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))") == (
+        "alpha(from currentcolor / calc(alpha * 0.5))"
+    )
+    assert canonicalize("color", "ictcp(from red calc(i) calc(ct) calc(cp))") == (
+        "ictcp(from red calc(i) calc(ct) calc(cp))"
+    )
+    assert canonicalize("color", "jzazbz(from red calc(jz) calc(az) calc(bz))") == (
+        "jzazbz(from red calc(jz) calc(az) calc(bz))"
+    )
+    assert canonicalize("color", "jzczhz(from red calc(jz) calc(cz) calc(hz))") == (
+        "jzczhz(from red calc(jz) calc(cz) calc(hz))"
+    )
+    with pytest.raises(StixisValidationError):
+        canonicalize("color", "alpha(from red / calc(r * 0.5))")
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "calc(alpha)")
+
+    rc_bad = cli_main(["check", "width", "calc(1px + )"])
+    captured = capsys.readouterr()
+    assert rc_bad == EXIT_VALIDATION_ERROR
+
+    rc_good = cli_main(["check", "width", "calc((1px + 2px) * 2)"])
+    captured = capsys.readouterr()
+    assert rc_good == EXIT_OK
+    assert captured.out.strip() == "calc((1px + 2px) * 2)"

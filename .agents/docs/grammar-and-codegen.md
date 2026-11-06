@@ -19,6 +19,7 @@ Stixis separates build-time specification ingestion (`codegen/`) from its runtim
   * `ExclusiveOrNode(items)`: ordered choice `A | B`.
   * `MultiplierNode(child, min_count, max_count, comma_separated)`: multipliers `?` (`0..1`), `*` (`0..inf`), `+` (`1..inf`), `{A,B}`, `#` (`comma_separated=True`), and `#{A,B}`.
   * `NonEmptyGroupNode(child)`: required group `[ ... ]!`.
+* **Math functions (`_is_math_function_token`).** Numeric, percentage, and dimension primitives accept CSS math functions (`calc(...)`, `min(...)`, `max(...)`, `clamp(...)`, `round(...)`, `mod(...)`, `rem(...)`, `sin(...)`, `cos(...)`, `tan(...)`, `asin(...)`, `acos(...)`, `atan(...)`, `atan2(...)`, `pow(...)`, `sqrt(...)`, `hypot(...)`, `log(...)`, `exp(...)`, `abs(...)`, `sign(...)`, `calc-size(...)`, `sibling-index()`, `sibling-count()`). Stixis validates the function's argument count and parses each expression against the `<calc-sum>` / `<calc-product>` / `<calc-value>` structural grammar (`css-values-4` §10.1), enforcing whitespace on both sides of `+` and `-` operators, known dimension units, `<calc-keyword>` constants (`e`, `pi`, `infinity`, `-infinity`, `nan`), and nested parentheses or math/substitution functions. Dimensional unit-type checking (such as rejecting `1px + 2s` or `1 / 2px`) and algebraic simplification are not performed.
 
 ### PEP 750 `Template` rendering (`render_css_template`)
 
@@ -71,7 +72,7 @@ uv run python codegen/gen_specs.py --check
   * `math-expression-simplification-or-canonical-order`: WPT expects CSS Values 4 §10.10 algebraic folding (`calc(100 + 100)` -> `calc(200)`) or unit term sorting (`calc(10px - 0.5em)` -> `calc(-0.5em + 10px)`).
   * `math-function-in-unsupported-grammar-position`: math function used in a grammar position not matched by `_CALC_ELIGIBLE_PRIMITIVES`.
   * `prose-parse-constraint-not-in-formal-grammar`: invalid combinations prohibited by specification prose rather than the formal Value Definition Syntax grammar.
-  * `math-expression-dimensional-type-checking`: invalid dimensional arithmetic inside `calc(...)` (such as `calc(1 / 2px)`), which Stixis validates syntactically as a balanced token stream without evaluating unit algebra.
+  * `math-expression-dimensional-type-checking`: invalid dimensional arithmetic inside `calc(...)` (such as `calc(1 / 2px)`), which Stixis validates against the `<calc-sum>` structural grammar without evaluating unit algebra.
   * Both `test_wpt_*_valid_xfail` and `test_wpt_*_invalid_xfail` fail with `XPASS` if any `xfail` vector starts passing, prompting test regeneration.
 
 Before committing, verify that generated files are current:

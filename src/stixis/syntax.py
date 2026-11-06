@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from string.templatelib import Interpolation, Template, convert
 from typing import Any
@@ -64,7 +64,9 @@ from stixis.primitives import (
 )
 
 # CSS-wide keywords + CSS Variables / substitution functions that are valid on any property
-GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset({"var", "env", "attr", "first-valid"})
+GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset(
+    {"var", "env", "attr", "first-valid", "inherit"}
+)
 MATH_FUNCTIONS: frozenset[str] = frozenset(
     {
         "calc",
@@ -93,6 +95,39 @@ MATH_FUNCTIONS: frozenset[str] = frozenset(
         "sibling-count",
     }
 )
+CALC_VALUE_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "progress",
+        "calc-mix",
+        "calc-interpolate",
+        "random",
+        "anchor",
+        "anchor-size",
+    }
+)
+CALC_KEYWORDS: frozenset[str] = frozenset({"e", "pi", "infinity", "-infinity", "nan"})
+ROUNDING_STRATEGY_KEYWORDS: frozenset[str] = frozenset({"nearest", "up", "down", "to-zero"})
+RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {
+    "alpha": frozenset({"alpha"}),
+    "rgb": frozenset({"r", "g", "b", "alpha"}),
+    "rgba": frozenset({"r", "g", "b", "alpha"}),
+    "hsl": frozenset({"h", "s", "l", "alpha"}),
+    "hsla": frozenset({"h", "s", "l", "alpha"}),
+    "hwb": frozenset({"h", "w", "b", "alpha"}),
+    "lab": frozenset({"l", "a", "b", "alpha"}),
+    "oklab": frozenset({"l", "a", "b", "alpha"}),
+    "lch": frozenset({"l", "c", "h", "alpha"}),
+    "oklch": frozenset({"l", "c", "h", "alpha"}),
+    "ictcp": frozenset({"i", "ct", "cp", "alpha"}),
+    "jzazbz": frozenset({"jz", "az", "bz", "alpha"}),
+    "jzczhz": frozenset({"jz", "cz", "hz", "alpha"}),
+    "color": frozenset({"r", "g", "b", "x", "y", "z", "alpha"}),
+}
+ALL_LOWER_TO_CANONICAL_UNIT: dict[str, str] = {
+    u_low: u_canon
+    for unit_map in LOWER_TO_CANONICAL_UNIT.values()
+    for u_low, u_canon in unit_map.items()
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +140,7 @@ class CssToken:
     is_integer: bool = False
     unit: str = ""
     hash_type: str = "unrestricted"  # "id" or "unrestricted"
+    ws_around: bool = field(default=True, compare=False)
 
 
 def _consume_escape(text: str, pos: int) -> tuple[str, int]:
@@ -273,6 +309,16 @@ def _consume_unquoted_url(text: str, pos: int) -> tuple[str, int]:
     raise StixisSyntaxError("Unclosed url() token")
 
 
+def _has_ws_after(text: str, pos: int) -> bool:
+    n = len(text)
+    while pos < n and text[pos] == "/" and pos + 1 < n and text[pos + 1] == "*":
+        end_comment = text.find("*/", pos + 2)
+        if end_comment == -1:
+            return False
+        pos = end_comment + 2
+    return pos < n and text[pos] in (" ", "\t", "\n")
+
+
 def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssToken]:
     """Tokenize a CSS string according to W3C CSS Syntax Module Level 3 §4."""
     # Preprocess newlines and NULL characters per §3.3
@@ -282,6 +328,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
     tokens: list[CssToken] = []
     pos = 0
     n = len(normalized)
+    had_ws_before = False
 
     while pos < n:
         ch = normalized[pos]
@@ -303,6 +350,19 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
         ):
             raise StixisSyntaxError("Unexpected comment close `*/`")
 
+        # Whitespace
+        if ch in (" ", "\t", "\n"):
+            start = pos
+            while pos < n and normalized[pos] in (" ", "\t", "\n"):
+                pos += 1
+            if preserve_whitespace:
+                tokens.append(CssToken("whitespace", normalized[start:pos]))
+            had_ws_before = True
+            continue
+
+        cur_ws_before = had_ws_before
+        had_ws_before = False
+
         # CDO `<!--` and CDC `-->`
         if normalized.startswith("<!--", pos):
             tokens.append(CssToken("CDO", "<!--"))
@@ -311,15 +371,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
         if normalized.startswith("-->", pos):
             tokens.append(CssToken("CDC", "-->"))
             pos += 3
-            continue
-
-        # Whitespace
-        if ch in (" ", "\t", "\n"):
-            start = pos
-            while pos < n and normalized[pos] in (" ", "\t", "\n"):
-                pos += 1
-            if preserve_whitespace:
-                tokens.append(CssToken("whitespace", normalized[start:pos]))
             continue
 
         # Strings
@@ -429,7 +480,13 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             pos += 1
             continue
 
-        tokens.append(CssToken("delim", ch))
+        tokens.append(
+            CssToken(
+                "delim",
+                ch,
+                ws_around=(cur_ws_before and _has_ws_after(normalized, pos + 1)),
+            )
+        )
         pos += 1
 
     return tokens
@@ -1200,7 +1257,231 @@ def _consume_balanced_group(
     return None
 
 
-def _is_math_function_token(tokens: Sequence[CssToken], pos: int) -> tuple[str, int] | None:
+def _split_top_level_comma_args(tokens: Sequence[CssToken]) -> list[list[CssToken]] | None:
+    """Split a non-whitespace token slice at top-level commas (`depth == 0`), rejecting empty segments."""
+    args: list[list[CssToken]] = []
+    current: list[CssToken] = []
+    depth = 0
+    for tok in tokens:
+        if tok.kind in ("function", "(", "[", "{"):
+            depth += 1
+            current.append(tok)
+        elif tok.kind in (")", "]", "}"):
+            if depth == 0:
+                return None
+            depth -= 1
+            current.append(tok)
+        elif tok.kind == "comma" and depth == 0:
+            if not current:
+                return None
+            args.append(current)
+            current = []
+        else:
+            current.append(tok)
+    if depth != 0 or not current:
+        return None
+    args.append(current)
+    return args
+
+
+def _parse_calc_value(
+    tokens: Sequence[CssToken],
+    pos: int,
+    *,
+    extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> tuple[str, int] | None:
+    """Parse `<calc-value> = <number> | <dimension> | <percentage> | <calc-keyword> | ( <calc-sum> )`."""
+    if pos >= len(tokens):
+        return None
+    tok = tokens[pos]
+    if tok.kind == "number":
+        if tok.num is None or not math.isfinite(tok.num):
+            return None
+        val = int(tok.num) if tok.is_integer else tok.num
+        return serialize_number(val), pos + 1
+    if tok.kind == "percentage":
+        if tok.num is None or not math.isfinite(tok.num):
+            return None
+        val = int(tok.num) if tok.is_integer else tok.num
+        return f"{serialize_number(val)}%", pos + 1
+    if tok.kind == "dimension":
+        if tok.num is None or not math.isfinite(tok.num):
+            return None
+        canon_u = ALL_LOWER_TO_CANONICAL_UNIT.get(tok.unit.lower())
+        if canon_u is None:
+            return None
+        val = int(tok.num) if tok.is_integer else tok.num
+        return f"{serialize_number(val)}{canon_u}", pos + 1
+    if tok.kind == "ident":
+        low = tok.value.lower()
+        if low in CALC_KEYWORDS or low in extra_keywords:
+            return low, pos + 1
+        return None
+    if tok.kind == "(":
+        grouped = _consume_balanced_group(tokens, pos + 1, ")")
+        if grouped is None:
+            return None
+        inner_toks, next_pos = grouped
+        inner_str = _parse_full_calc_sum(
+            inner_toks,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
+        if inner_str is None:
+            return None
+        return f"({inner_str})", next_pos
+    if tok.kind == "function":
+        fn_low = tok.value.lower()
+        if fn_low in MATH_FUNCTIONS:
+            return _is_math_function_token(
+                tokens,
+                pos,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+        if fn_low in CALC_VALUE_FUNCTIONS and specs_lookup is not None:
+            grouped = _consume_balanced_group(tokens, pos + 1, ")")
+            if grouped is None:
+                return None
+            inner_toks, next_pos = grouped
+            if any(t.kind == "semicolon" for t in inner_toks):
+                return None
+            fn_node = specs_lookup(f"<{fn_low}()>", False)
+            if fn_node is None:
+                return None
+            slice_toks = [t for t in tokens[pos:next_pos] if t.kind != "whitespace"]
+            sub = _TokenMatcher(
+                slice_toks,
+                specs_lookup,
+                options,
+                calc_context_keywords=extra_keywords,
+            )
+            for end_p, rendered in sub.match_node(fn_node, 0):
+                if end_p == len(slice_toks):
+                    return rendered, next_pos
+            return None
+        if fn_low in GLOBAL_SUBSTITUTION_FUNCTIONS:
+            grouped = _consume_balanced_group(tokens, pos + 1, ")")
+            if grouped is None:
+                return None
+            inner_toks, next_pos = grouped
+            if not inner_toks or any(t.kind == "semicolon" for t in inner_toks):
+                return None
+            return f"{fn_low}({format_token_sequence(inner_toks, options=options)})", next_pos
+    return None
+
+
+def _parse_calc_product(
+    tokens: Sequence[CssToken],
+    pos: int,
+    *,
+    extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> tuple[str, int] | None:
+    """Parse `<calc-product> = <calc-value> [ [ '*' | '/' ] <calc-value> ]*`."""
+    first = _parse_calc_value(
+        tokens,
+        pos,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
+    if first is None:
+        return None
+    parts = [first[0]]
+    cur = first[1]
+    while cur < len(tokens) and tokens[cur].kind == "delim" and tokens[cur].value in ("*", "/"):
+        op = tokens[cur].value
+        rhs = _parse_calc_value(
+            tokens,
+            cur + 1,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
+        if rhs is None:
+            return None
+        parts.append(f" {op} {rhs[0]}")
+        cur = rhs[1]
+    return "".join(parts), cur
+
+
+def _parse_calc_sum(
+    tokens: Sequence[CssToken],
+    pos: int = 0,
+    *,
+    extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> tuple[str, int] | None:
+    """Parse `<calc-sum> = <calc-product> [ [ '+' | '-' ] <calc-product> ]*` requiring whitespace around `+` and `-`."""
+    first = _parse_calc_product(
+        tokens,
+        pos,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
+    if first is None:
+        return None
+    parts = [first[0]]
+    cur = first[1]
+    while (
+        cur < len(tokens)
+        and tokens[cur].kind == "delim"
+        and tokens[cur].value in ("+", "-")
+        and tokens[cur].ws_around
+    ):
+        op = tokens[cur].value
+        rhs = _parse_calc_product(
+            tokens,
+            cur + 1,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
+        if rhs is None:
+            return None
+        parts.append(f" {op} {rhs[0]}")
+        cur = rhs[1]
+    return "".join(parts), cur
+
+
+def _parse_full_calc_sum(
+    tokens: Sequence[CssToken],
+    *,
+    extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str | None:
+    non_ws = [t for t in tokens if t.kind != "whitespace"]
+    if not non_ws:
+        return None
+    res = _parse_calc_sum(
+        non_ws,
+        0,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
+    if res is None or res[1] != len(non_ws):
+        return None
+    return res[0]
+
+
+def _is_math_function_token(
+    tokens: Sequence[CssToken],
+    pos: int,
+    *,
+    extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> tuple[str, int] | None:
     """If `tokens[pos]` starts a valid CSS math function (`calc(...)`, `min(...)`, etc.), return `(serialized, next_pos)`."""
     if pos >= len(tokens) or tokens[pos].kind != "function":
         return None
@@ -1211,14 +1492,159 @@ def _is_math_function_token(tokens: Sequence[CssToken], pos: int) -> tuple[str, 
     if grouped is None:
         return None
     inner_tokens, next_pos = grouped
-    if not inner_tokens:
-        return None
-    # Verify balanced non-empty interior without top-level semicolon or bang
-    for t in inner_tokens:
+    non_ws = [t for t in inner_tokens if t.kind != "whitespace"]
+    for t in non_ws:
         if t.kind == "semicolon":
             return None
-    inner_str = format_token_sequence(inner_tokens)
-    return f"{fn_name}({inner_str})", next_pos
+
+    if fn_name in ("sibling-index", "sibling-count"):
+        if non_ws:
+            return None
+        return f"{fn_name}()", next_pos
+
+    if not non_ws:
+        return None
+
+    args = _split_top_level_comma_args(non_ws)
+    if args is None:
+        return None
+
+    rendered_args: list[str] = []
+    if fn_name in (
+        "calc",
+        "sin",
+        "cos",
+        "tan",
+        "asin",
+        "acos",
+        "atan",
+        "sqrt",
+        "exp",
+        "abs",
+        "sign",
+    ):
+        if len(args) != 1:
+            return None
+        s = _parse_full_calc_sum(
+            args[0],
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
+        if s is None:
+            return None
+        rendered_args.append(s)
+    elif fn_name in ("min", "max", "hypot"):
+        for arg in args:
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s is None:
+                return None
+            rendered_args.append(s)
+    elif fn_name in ("mod", "rem", "atan2", "pow"):
+        if len(args) != 2:
+            return None
+        for arg in args:
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s is None:
+                return None
+            rendered_args.append(s)
+    elif fn_name == "log":
+        if not (1 <= len(args) <= 2):
+            return None
+        for arg in args:
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s is None:
+                return None
+            rendered_args.append(s)
+    elif fn_name == "clamp":
+        if len(args) != 3:
+            return None
+        for idx, arg in enumerate(args):
+            if (
+                idx in (0, 2)
+                and len(arg) == 1
+                and arg[0].kind == "ident"
+                and arg[0].value.lower() == "none"
+            ):
+                rendered_args.append("none")
+            else:
+                s = _parse_full_calc_sum(
+                    arg,
+                    extra_keywords=extra_keywords,
+                    specs_lookup=specs_lookup,
+                    options=options,
+                )
+                if s is None:
+                    return None
+                rendered_args.append(s)
+    elif fn_name == "round":
+        if (
+            len(args) >= 2
+            and len(args[0]) == 1
+            and args[0][0].kind == "ident"
+            and args[0][0].value.lower() in ROUNDING_STRATEGY_KEYWORDS
+        ):
+            rendered_args.append(args[0][0].value.lower())
+            sum_args = args[1:]
+        else:
+            sum_args = args
+        if not (1 <= len(sum_args) <= 2):
+            return None
+        for arg in sum_args:
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s is None:
+                return None
+            rendered_args.append(s)
+    elif fn_name == "calc-size":
+        if not (1 <= len(args) <= 2):
+            return None
+        size_keywords = extra_keywords | frozenset({"size"})
+        if len(args[0]) == 1 and args[0][0].kind == "ident":
+            rendered_args.append(serialize_ident(args[0][0].value.lower()))
+        else:
+            s0 = _parse_full_calc_sum(
+                args[0],
+                extra_keywords=size_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s0 is None:
+                return None
+            rendered_args.append(s0)
+        if len(args) == 2:
+            s1 = _parse_full_calc_sum(
+                args[1],
+                extra_keywords=size_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+            if s1 is None:
+                return None
+            rendered_args.append(s1)
+    else:
+        return None
+
+    return f"{fn_name}({', '.join(rendered_args)})", next_pos
 
 
 def _contains_global_substitution(tokens: Sequence[CssToken]) -> bool:
@@ -1268,6 +1694,7 @@ class _TokenMatcher:
         forbidden_custom_idents: frozenset[str] = frozenset(),
         raw_text: str = "",
         allow_css_wide_in_multiword_family: bool = False,
+        calc_context_keywords: frozenset[str] = frozenset(),
     ) -> None:
         self.tokens = [t for t in tokens if t.kind != "whitespace"]
         self.specs_lookup = specs_lookup
@@ -1275,6 +1702,7 @@ class _TokenMatcher:
         self.forbidden_custom_idents = forbidden_custom_idents
         self.raw_text = raw_text
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
+        self.calc_context_keywords = calc_context_keywords
         self._active_refs: set[tuple[str, bool, int]] = set()
 
     def match_root(self, node: ValueNode) -> str | None:
@@ -1397,6 +1825,19 @@ class _TokenMatcher:
             if res:
                 return res
 
+        if not node.is_property and node.name == "<calc-sum>":
+            calc_res = _parse_calc_sum(
+                self.tokens,
+                pos,
+                extra_keywords=self.calc_context_keywords,
+                specs_lookup=self.specs_lookup,
+                options=self.options,
+            )
+            if calc_res is not None:
+                rendered_sum, next_pos = calc_res
+                return [(next_pos, rendered_sum)]
+            return []
+
         guard_key = (node.name, node.is_property, pos)
         if guard_key in self._active_refs:
             return []
@@ -1426,11 +1867,21 @@ class _TokenMatcher:
                 return [(next_pos, f"{fn_name}()")]
             return []
 
+        child_calc_keywords = self.calc_context_keywords
+        if (
+            fn_name in RELATIVE_COLOR_CHANNEL_KEYWORDS
+            and inner_tokens
+            and inner_tokens[0].kind == "ident"
+            and inner_tokens[0].value.lower() == "from"
+        ):
+            child_calc_keywords = child_calc_keywords | RELATIVE_COLOR_CHANNEL_KEYWORDS[fn_name]
+
         sub_matcher = _TokenMatcher(
             inner_tokens,
             self.specs_lookup,
             self.options,
             self.forbidden_custom_idents,
+            calc_context_keywords=child_calc_keywords,
         )
         results: list[tuple[int, str]] = []
         for end_p, rendered in sub_matcher.match_node(node.arg, 0):
@@ -1667,7 +2118,13 @@ class _TokenMatcher:
             "<time-percentage>",
             "<frequency-percentage>",
         ):
-            math_res = _is_math_function_token(self.tokens, pos)
+            math_res = _is_math_function_token(
+                self.tokens,
+                pos,
+                extra_keywords=self.calc_context_keywords,
+                specs_lookup=self.specs_lookup,
+                options=self.options,
+            )
             if math_res is not None:
                 rendered_math, next_pos = math_res
                 return [(next_pos, rendered_math)]
