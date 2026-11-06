@@ -126,6 +126,15 @@ def load_bcd_engine_counts(
     return counts
 
 
+def _merge_new_values(existing: str, new_values: str) -> str:
+    """Append top-level `|` branches from `new_values` not already present in `existing`."""
+    existing_parts = [p.strip() for p in re.split(r"(?<!\|)\|(?!\|)", existing) if p.strip()]
+    for nv in [p.strip() for p in re.split(r"(?<!\|)\|(?!\|)", new_values) if p.strip()]:
+        if nv not in existing_parts:
+            existing_parts.append(nv)
+    return " | ".join(existing_parts)
+
+
 def load_and_merge_specs(
     webref_dir: Path,
     patches: dict[str, Any],
@@ -161,7 +170,9 @@ def load_and_merge_specs(
         units_by_type.setdefault(unit_type, set()).update(extra_list)
 
     properties: dict[str, str] = {}
+    property_new_values: dict[str, list[str]] = {}
     values: dict[str, str] = {}
+    value_new_values: dict[str, list[str]] = {}
     atrules: dict[str, dict[str, Any]] = {}
 
     for jf in json_files:
@@ -180,13 +191,8 @@ def load_and_merge_specs(
                 values[vname] = v["value"]
                 if not vname.startswith("<"):
                     values[f"<{vname}>"] = v["value"]
-            elif v.get("newValues") and vname in values:
-                existing_parts = [p.strip() for p in values[vname].split("|")]
-                for nv in [p.strip() for p in v["newValues"].split("|")]:
-                    if nv not in existing_parts:
-                        values[vname] += f" | {nv}"
-                if not vname.startswith("<"):
-                    values[f"<{vname}>"] = values[vname]
+            elif v.get("newValues"):
+                value_new_values.setdefault(vname, []).append(v["newValues"])
             elif vname.startswith("<") and vname not in values and v.get("values"):
                 kws = _extract_subvalue_keywords(v["values"])
                 if kws:
@@ -200,13 +206,7 @@ def load_and_merge_specs(
             if p.get("value"):
                 properties[pname] = p["value"]
             elif p.get("newValues"):
-                if pname in properties:
-                    existing_parts = [part.strip() for part in properties[pname].split("|")]
-                    for nv in [part.strip() for part in p["newValues"].split("|")]:
-                        if nv not in existing_parts:
-                            properties[pname] += f" | {nv}"
-                else:
-                    properties[pname] = p["newValues"]
+                property_new_values.setdefault(pname, []).append(p["newValues"])
             elif p.get("legacyAliasOf"):
                 alias_target = p["legacyAliasOf"]
                 properties[pname] = f"<'{alias_target}'>"
@@ -236,6 +236,16 @@ def load_and_merge_specs(
                     entry["descriptors"][dname] += " | " + d["newValues"]
                 _collect_nested_types(d.get("values", []), values)
             _collect_nested_types(a.get("values", []), values)
+
+    for vname, nv_list in value_new_values.items():
+        for nv in nv_list:
+            values[vname] = _merge_new_values(values.get(vname, ""), nv)
+            if not vname.startswith("<"):
+                values[f"<{vname}>"] = values[vname]
+
+    for pname, nv_list in property_new_values.items():
+        for nv in nv_list:
+            properties[pname] = _merge_new_values(properties.get(pname, ""), nv)
 
     # Apply declarative patches from `spec_patches.toml`
     for vname, vsyn in patches.get("values", {}).items():
