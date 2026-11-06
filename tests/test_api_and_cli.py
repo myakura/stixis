@@ -1440,3 +1440,95 @@ def test_math_function_calc_sum_structural_validation(
     captured = capsys.readouterr()
     assert rc_good == EXIT_OK
     assert captured.out.strip() == "calc((1px + 2px) * 2)"
+
+
+def test_anchor_and_anchor_size_on_inset_and_in_math_functions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    opts = SerializationOptions(min_engines=0)
+    for prop in (
+        "top",
+        "right",
+        "bottom",
+        "left",
+        "inset-block-start",
+        "inset-block-end",
+        "inset-inline-start",
+        "inset-inline-end",
+        "inset",
+        "inset-block",
+        "inset-inline",
+    ):
+        assert canonicalize(prop, "anchor(--foo top)", options=opts) == "anchor(--foo top)"
+        assert canonicalize(prop, "anchor-size(--foo width)", options=opts) == (
+            "anchor-size(--foo width)"
+        )
+
+    for value in (
+        "anchor(--foo top)",
+        "anchor(top --foo)",
+        "anchor(--foo 50%, 10px)",
+        "calc((anchor(--foo top) + anchor(--bar bottom)) / 2)",
+        "calc(0.5 * (anchor(--foo top) + anchor(--bar bottom)))",
+        "min(100px, 10%, anchor(--foo top), anchor(--bar bottom))",
+        "calc(anchor(--foo left, 1px) + 10%)",
+        "anchor(--foo top, calc(0.5 * anchor(--bar bottom)))",
+        "anchor-size(width, anchor(top))",
+    ):
+        out = canonicalize("top", value, options=opts)
+        assert out
+
+    for size_prop in (
+        "width",
+        "height",
+        "min-width",
+        "max-width",
+        "block-size",
+        "inline-size",
+        "margin-top",
+        "margin-inline-start",
+    ):
+        assert canonicalize(size_prop, "anchor-size(--foo width)", options=opts) == (
+            "anchor-size(--foo width)"
+        )
+        assert (
+            canonicalize(
+                size_prop,
+                "calc(0.5 * (anchor-size(--foo width) + anchor-size(--bar height)))",
+                options=opts,
+            )
+            == "calc(0.5 * (anchor-size(--foo width) + anchor-size(--bar height)))"
+        )
+        with pytest.raises(StixisValidationError):
+            canonicalize(size_prop, "anchor(--foo top)", options=opts)
+        with pytest.raises(StixisValidationError):
+            canonicalize(size_prop, "anchor-size(width, anchor(top))", options=opts)
+        with pytest.raises(StixisValidationError):
+            canonicalize(size_prop, "calc(anchor(--foo top) + 10px)", options=opts)
+
+    with pytest.raises(StixisValidationError):
+        canonicalize("font-size", "calc(anchor(--foo top) + 10px)", options=opts)
+    with pytest.raises(StixisValidationError):
+        canonicalize("font-size", "calc(anchor-size(--foo width) + 10px)", options=opts)
+    with pytest.raises(StixisValidationError):
+        canonicalize("flex-basis", "anchor-size(--a width, 10px)", options=opts)
+    with pytest.raises(StixisValidationError):
+        canonicalize("flex-basis", "calc(anchor-size(--a width, 10px) + 1px)", options=opts)
+
+    rc1 = cli_main(
+        [
+            "check",
+            "top",
+            "calc(0.5 * (anchor(--foo top) + anchor(--bar bottom)))",
+            "--min-engines",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc1 == EXIT_OK
+    assert captured.out.strip() == "calc(0.5 * (anchor(--foo top) + anchor(--bar bottom)))"
+
+    rc2 = cli_main(["check", "top", "anchor(--foo top)", "--min-engines", "0"])
+    captured = capsys.readouterr()
+    assert rc2 == EXIT_OK
+    assert captured.out.strip() == "anchor(--foo top)"

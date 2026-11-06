@@ -101,8 +101,6 @@ CALC_VALUE_FUNCTIONS: frozenset[str] = frozenset(
         "calc-mix",
         "calc-interpolate",
         "random",
-        "anchor",
-        "anchor-size",
     }
 )
 CALC_KEYWORDS: frozenset[str] = frozenset({"e", "pi", "infinity", "-infinity", "nan"})
@@ -1289,6 +1287,7 @@ def _parse_calc_value(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
@@ -1327,6 +1326,7 @@ def _parse_calc_value(
         inner_str = _parse_full_calc_sum(
             inner_toks,
             extra_keywords=extra_keywords,
+            extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
         )
@@ -1340,10 +1340,13 @@ def _parse_calc_value(
                 tokens,
                 pos,
                 extra_keywords=extra_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
-        if fn_low in CALC_VALUE_FUNCTIONS and specs_lookup is not None:
+        if (
+            fn_low in CALC_VALUE_FUNCTIONS or fn_low in extra_functions
+        ) and specs_lookup is not None:
             grouped = _consume_balanced_group(tokens, pos + 1, ")")
             if grouped is None:
                 return None
@@ -1359,6 +1362,7 @@ def _parse_calc_value(
                 specs_lookup,
                 options,
                 calc_context_keywords=extra_keywords,
+                calc_context_functions=extra_functions,
             )
             for end_p, rendered in sub.match_node(fn_node, 0):
                 if end_p == len(slice_toks):
@@ -1380,6 +1384,7 @@ def _parse_calc_product(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
@@ -1388,6 +1393,7 @@ def _parse_calc_product(
         tokens,
         pos,
         extra_keywords=extra_keywords,
+        extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
     )
@@ -1401,6 +1407,7 @@ def _parse_calc_product(
             tokens,
             cur + 1,
             extra_keywords=extra_keywords,
+            extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
         )
@@ -1416,6 +1423,7 @@ def _parse_calc_sum(
     pos: int = 0,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
@@ -1424,6 +1432,7 @@ def _parse_calc_sum(
         tokens,
         pos,
         extra_keywords=extra_keywords,
+        extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
     )
@@ -1442,6 +1451,7 @@ def _parse_calc_sum(
             tokens,
             cur + 1,
             extra_keywords=extra_keywords,
+            extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
         )
@@ -1456,6 +1466,7 @@ def _parse_full_calc_sum(
     tokens: Sequence[CssToken],
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str | None:
@@ -1466,6 +1477,7 @@ def _parse_full_calc_sum(
         non_ws,
         0,
         extra_keywords=extra_keywords,
+        extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
     )
@@ -1479,6 +1491,7 @@ def _is_math_function_token(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
@@ -1528,6 +1541,7 @@ def _is_math_function_token(
         s = _parse_full_calc_sum(
             args[0],
             extra_keywords=extra_keywords,
+            extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
         )
@@ -1539,6 +1553,7 @@ def _is_math_function_token(
             s = _parse_full_calc_sum(
                 arg,
                 extra_keywords=extra_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1552,6 +1567,7 @@ def _is_math_function_token(
             s = _parse_full_calc_sum(
                 arg,
                 extra_keywords=extra_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1565,6 +1581,7 @@ def _is_math_function_token(
             s = _parse_full_calc_sum(
                 arg,
                 extra_keywords=extra_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1586,6 +1603,7 @@ def _is_math_function_token(
                 s = _parse_full_calc_sum(
                     arg,
                     extra_keywords=extra_keywords,
+                    extra_functions=extra_functions,
                     specs_lookup=specs_lookup,
                     options=options,
                 )
@@ -1609,6 +1627,7 @@ def _is_math_function_token(
             s = _parse_full_calc_sum(
                 arg,
                 extra_keywords=extra_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1625,6 +1644,7 @@ def _is_math_function_token(
             s0 = _parse_full_calc_sum(
                 args[0],
                 extra_keywords=size_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1635,6 +1655,7 @@ def _is_math_function_token(
             s1 = _parse_full_calc_sum(
                 args[1],
                 extra_keywords=size_keywords,
+                extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
             )
@@ -1683,6 +1704,44 @@ def _collect_grammar_keywords(
     return frozenset()
 
 
+def _collect_grammar_calc_functions(
+    node: ValueNode,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    visited: set[tuple[str, bool]] | None = None,
+) -> frozenset[str]:
+    """Collect `anchor` and `anchor-size` when referenced in `node`'s grammar tree so math expressions allow them."""
+    if visited is None:
+        visited = set()
+    if isinstance(node, FunctionNode):
+        fn_low = node.name.lower()
+        base = frozenset({fn_low}) if fn_low in ("anchor", "anchor-size") else frozenset()
+        if node.arg is not None:
+            return base | _collect_grammar_calc_functions(node.arg, specs_lookup, visited)
+        return base
+    if isinstance(node, (JuxtaposeNode, AllOfNode, AnyOrderNode, ExclusiveOrNode)):
+        out: set[str] = set()
+        for child in node.items:
+            out.update(_collect_grammar_calc_functions(child, specs_lookup, visited))
+        return frozenset(out)
+    if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
+        return _collect_grammar_calc_functions(node.child, specs_lookup, visited)
+    if isinstance(node, RefNode):
+        out_ref: set[str] = set()
+        if not node.is_property and node.name in ("<anchor()>", "anchor()"):
+            out_ref.add("anchor")
+        elif not node.is_property and node.name in ("<anchor-size()>", "anchor-size()"):
+            out_ref.add("anchor-size")
+        key = (node.name, node.is_property)
+        if key in visited:
+            return frozenset(out_ref)
+        visited.add(key)
+        resolved = specs_lookup(node.name, node.is_property)
+        if resolved is not None:
+            out_ref.update(_collect_grammar_calc_functions(resolved, specs_lookup, visited))
+        return frozenset(out_ref)
+    return frozenset()
+
+
 class _TokenMatcher:
     """Backtracking matcher and CSSOM canonicalizer for `CssToken` streams against `ValueNode`."""
 
@@ -1695,6 +1754,7 @@ class _TokenMatcher:
         raw_text: str = "",
         allow_css_wide_in_multiword_family: bool = False,
         calc_context_keywords: frozenset[str] = frozenset(),
+        calc_context_functions: frozenset[str] = frozenset(),
     ) -> None:
         self.tokens = [t for t in tokens if t.kind != "whitespace"]
         self.specs_lookup = specs_lookup
@@ -1703,6 +1763,7 @@ class _TokenMatcher:
         self.raw_text = raw_text
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
         self.calc_context_keywords = calc_context_keywords
+        self.calc_context_functions = calc_context_functions
         self._active_refs: set[tuple[str, bool, int]] = set()
 
     def match_root(self, node: ValueNode) -> str | None:
@@ -1830,6 +1891,7 @@ class _TokenMatcher:
                 self.tokens,
                 pos,
                 extra_keywords=self.calc_context_keywords,
+                extra_functions=self.calc_context_functions,
                 specs_lookup=self.specs_lookup,
                 options=self.options,
             )
@@ -1882,6 +1944,7 @@ class _TokenMatcher:
             self.options,
             self.forbidden_custom_idents,
             calc_context_keywords=child_calc_keywords,
+            calc_context_functions=self.calc_context_functions,
         )
         results: list[tuple[int, str]] = []
         for end_p, rendered in sub_matcher.match_node(node.arg, 0):
@@ -2122,12 +2185,23 @@ class _TokenMatcher:
                 self.tokens,
                 pos,
                 extra_keywords=self.calc_context_keywords,
+                extra_functions=self.calc_context_functions,
                 specs_lookup=self.specs_lookup,
                 options=self.options,
             )
             if math_res is not None:
                 rendered_math, next_pos = math_res
                 return [(next_pos, rendered_math)]
+            if (
+                kind in ("<length>", "<length-percentage>")
+                and tok.kind == "function"
+                and tok.value.lower() in self.calc_context_functions
+                and self.specs_lookup is not None
+            ):
+                fn_low = tok.value.lower()
+                fn_node = self.specs_lookup(f"<{fn_low}()>", False)
+                if fn_node is not None:
+                    return self.match_node(fn_node, pos)
 
         if kind == "<zero>":
             if tok.kind == "number" and tok.num == 0:
@@ -2499,6 +2573,8 @@ def _join_serialized_parts(parts: Sequence[str]) -> str:
         prev = out[-1]
         if p in (",", ":", ";", ")", "]") or prev in ("(", "["):
             out.append(p)
+        elif p.startswith((",", ":", ";", ")")) and out[-1]:
+            out[-1] = out[-1] + p
         else:
             out.append(" " + p)
     return "".join(out)
@@ -2837,7 +2913,14 @@ def _match_sequence_via_tokens(
         tokens = tokenize_css(joined)
     except StixisSyntaxError:
         return None
-    matcher = _TokenMatcher(tokens, specs_lookup, options, forbidden_custom_idents, raw_text=joined)
+    matcher = _TokenMatcher(
+        tokens,
+        specs_lookup,
+        options,
+        forbidden_custom_idents,
+        raw_text=joined,
+        calc_context_functions=_collect_grammar_calc_functions(node, specs_lookup),
+    )
     return matcher.match_root(node)
 
 
@@ -3090,12 +3173,14 @@ def evaluate_canonicalize(
         raise StixisValidationError(target, syntax, css_text)
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
+    calc_funcs = _collect_grammar_calc_functions(node, specs_lookup)
     matcher = _TokenMatcher(
         non_ws,
         specs_lookup,
         options,
         forbidden_custom_idents=forbidden_idents,
         raw_text=css_text,
+        calc_context_functions=calc_funcs,
     )
     if (
         at_rule is not None
