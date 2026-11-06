@@ -1685,6 +1685,9 @@ def test_shared_type_target_resolution_between_library_and_cli(
         ("<urange>", "u+3040-309f", "U+3040-309F"),
         ("<declaration-value>", "1px solid red", "1px solid red"),
         ("<any-value>", "<!-- foo -->", "<!-- foo -->"),
+        ("<rotateX()>", "rotateX(30deg)", "rotatex(30deg)"),
+        ("<rotatex()>", "rotateX(30deg)", "rotatex(30deg)"),
+        ("image-1D", "stripes(red, blue)", "stripes(red, blue)"),
     ):
         assert canonicalize(type_target, raw_val) == expected
         rc_check = cli_main(["check", type_target, raw_val])
