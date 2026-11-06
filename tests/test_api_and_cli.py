@@ -1337,3 +1337,20 @@ def test_comma_separated_multiplier_scales_linearly() -> None:
     t0 = time.perf_counter()
     canonicalize("animation", value)
     assert time.perf_counter() - t0 < 1.0
+
+
+def test_deeply_nested_value_raises_stixis_validation_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    nested = "color-mix(in srgb, red, " * 70 + "blue" + ")" * 70
+    with pytest.raises(StixisValidationError):
+        canonicalize("color", nested)
+    with pytest.raises(StixisValidationError):
+        serialize_value("color", nested)
+
+    rc = cli_main(["check", "color", nested])
+    captured = capsys.readouterr()
+    assert rc == EXIT_VALIDATION_ERROR
+    assert captured.out == ""
+    assert captured.err.startswith("error: ")
+    assert "Traceback" not in captured.err
