@@ -583,11 +583,12 @@ def validate_token_stream_safety(
 
 def _serialize_dimension_unit(unit: str) -> str:
     """Serialize a dimension unit identifier, escaping a leading `e`/`E` when followed by a digit or `-[0-9]`."""
-    if len(unit) >= 2 and unit[0] in ("e", "E"):
-        if "0" <= unit[1] <= "9" or (
-            len(unit) >= 3 and unit[1] == "-" and "0" <= unit[2] <= "9"
-        ):
-            return f"{escape_code_point(ord(unit[0]))}{serialize_unrestricted_ident(unit[1:])}"
+    if (
+        len(unit) >= 2
+        and unit[0] in ("e", "E")
+        and ("0" <= unit[1] <= "9" or (len(unit) >= 3 and unit[1] == "-" and "0" <= unit[2] <= "9"))
+    ):
+        return f"{escape_code_point(ord(unit[0]))}{serialize_unrestricted_ident(unit[1:])}"
     return serialize_ident(unit)
 
 
