@@ -1402,6 +1402,18 @@ def test_math_function_calc_sum_structural_validation(
     assert canonicalize("width", "calc(1px + 2px)") == "calc(1px + 2px)"
     assert canonicalize("width", "calc((1px + 2px) * 2)") == "calc((1px + 2px) * 2)"
     assert canonicalize("width", "min(1px, 2em)") == "min(1px, 2em)"
+    assert canonicalize("opacity", "round(1.5)") == "round(1.5)"
+    assert canonicalize("opacity", "round(up, 1.5)") == "round(up, 1.5)"
+    assert canonicalize("width", "calc-size(auto, min(size, 100px))") == (
+        "calc-size(auto, min(size, 100px))"
+    )
+    assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))") == (
+        "alpha(from currentcolor / calc(alpha * 0.5))"
+    )
+    with pytest.raises(StixisValidationError):
+        canonicalize("color", "alpha(from red / calc(r * 0.5))")
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "calc(alpha)")
 
     rc_bad = cli_main(["check", "width", "calc(1px + )"])
     captured = capsys.readouterr()
