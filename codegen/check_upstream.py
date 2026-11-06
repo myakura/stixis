@@ -874,9 +874,13 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        _units_by_type, properties, values, atrules = gen_specs.load_and_merge_specs(
-            webref_dir, patches
-        )
+        (
+            _units_by_type,
+            properties,
+            values,
+            atrules,
+            _relative_color_channels,
+        ) = gen_specs.load_and_merge_specs(webref_dir, patches)
         total_descs = sum(len(ainfo["descriptors"]) for ainfo in atrules.values())
         new_baseline = {
             "webref": {
