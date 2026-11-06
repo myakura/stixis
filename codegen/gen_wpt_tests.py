@@ -22,8 +22,22 @@ _VALID_CALL_RE = re.compile(
     r"test_valid_value\(\s*(['\"])([^'\"]+)\1\s*,\s*(['\"])((?:\\.|(?!\3).)*)\3"
     r"(?:\s*,\s*(?:(['\"])((?:\\.|(?!\5).)*)\5|\[([^\]]+)\]))?\s*\)"
 )
+_FUZZY_VALID_COLOR_CALL_RE = re.compile(
+    r"fuzzy_test_valid_color\(\s*(['\"`])((?:\\.|(?!\1).)*)\1"
+    r"(?:\s*,\s*(['\"`])((?:\\.|(?!\3).)*)\3)?\s*\)"
+)
 _INVALID_CALL_RE = re.compile(
     r"test_invalid_value\(\s*(['\"])([^'\"]+)\1\s*,\s*(['\"])((?:\\.|(?!\3).)*)\3\s*\)"
+)
+_INVALID_CALL_BACKTICK_RE = re.compile(
+    r"test_invalid_value\(\s*(['\"`])([^'\"`]+)\1\s*,\s*(['\"`])((?:\\.|(?!\3).)*)\3\s*\)"
+)
+_JS_CONST_OF_LOOP_RE = re.compile(
+    r"for\s*\(\s*const\s+([A-Za-z_][A-Za-z0-9_]*)\s+of\s*\[([^\]]+)\]\s*\)\s*\{"
+)
+_RELATIVE_COLOR_WPT_FILES: tuple[str, ...] = (
+    "color-valid-relative-color.html",
+    "color-invalid-relative-color.html",
 )
 _MATH_FUNCTION_PREFIXES: tuple[str, ...] = (
     "calc(",
@@ -260,6 +274,89 @@ def _classify_invalid_xfail_reason(raw_css: str) -> str:
     return "prose-parse-constraint-not-in-formal-grammar"
 
 
+def _expand_js_const_of_loops(text: str) -> str:
+    """Expand top-level `for (const <var> of [...]) { ... }` template loops used in WPT relative-color tests."""
+    out: list[str] = []
+    pos = 0
+    for m in _JS_CONST_OF_LOOP_RE.finditer(text):
+        out.append(text[pos : m.start()])
+        var_name = m.group(1)
+        items = [im.group(2) for im in re.finditer(r"(['\"])((?:\\.|(?!\1).)*)\1", m.group(2))]
+        brace_pos = m.end()
+        depth = 1
+        while brace_pos < len(text) and depth > 0:
+            if text[brace_pos] == "{":
+                depth += 1
+            elif text[brace_pos] == "}":
+                depth -= 1
+            brace_pos += 1
+        body = text[m.end() : brace_pos - 1]
+        for item in items:
+            expanded = body.replace(f"${{{var_name}}}", item)
+            if var_name == "colorSpace":
+                res_cs = "xyz-d65" if item == "xyz" else item
+                expanded = expanded.replace("${resultColorSpace}", res_cs)
+            out.append(expanded)
+        pos = brace_pos
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _evaluate_valid_property_case(
+    prop: str,
+    val: str,
+    candidates: list[str],
+    *,
+    opts: object,
+    valid: list[tuple[str, str, str]],
+    xfail_valid: list[tuple[str, str, str | tuple[str, ...], str]],
+) -> None:
+    from stixis import StixisError, canonicalize
+
+    expected_entry: str | tuple[str, ...] = (
+        candidates[0] if len(candidates) == 1 else tuple(candidates)
+    )
+    try:
+        got = canonicalize(prop, val, options=opts)
+    except StixisError as exc:
+        xfail_valid.append(
+            (
+                prop,
+                val,
+                expected_entry,
+                _classify_valid_xfail_reason(val, error=exc, got=None),
+            )
+        )
+        return
+
+    if got in candidates:
+        try:
+            roundtrip = canonicalize(prop, got, options=opts)
+        except StixisError as exc:
+            xfail_valid.append(
+                (
+                    prop,
+                    val,
+                    expected_entry,
+                    _classify_valid_xfail_reason(val, error=exc, got=got),
+                )
+            )
+            return
+        if roundtrip == got:
+            valid.append((prop, val, got))
+        else:
+            xfail_valid.append((prop, val, expected_entry, "non-idempotent-canonicalization"))
+    else:
+        xfail_valid.append(
+            (
+                prop,
+                val,
+                expected_entry,
+                _classify_valid_xfail_reason(val, error=None, got=got),
+            )
+        )
+
+
 def _evaluate_property_html_files(
     html_files: list[Path],
     *,
@@ -280,7 +377,12 @@ def _evaluate_property_html_files(
     }
 
     for html_file in html_files:
-        text = html_file.read_text(encoding="utf-8", errors="ignore")
+        raw_text = html_file.read_text(encoding="utf-8", errors="ignore")
+        text = (
+            _expand_js_const_of_loops(raw_text)
+            if html_file.name in _RELATIVE_COLOR_WPT_FILES
+            else raw_text
+        )
         for m in _VALID_CALL_RE.finditer(text):
             prop = m.group(2)
             if prop not in PROPERTY_SYNTAXES:
@@ -301,53 +403,42 @@ def _evaluate_property_html_files(
                     candidates = [val]
             else:
                 candidates = [val]
-            expected_entry: str | tuple[str, ...] = (
-                candidates[0] if len(candidates) == 1 else tuple(candidates)
+            _evaluate_valid_property_case(
+                prop,
+                val,
+                candidates,
+                opts=opts,
+                valid=valid,
+                xfail_valid=xfail_valid,
             )
 
-            try:
-                got = canonicalize(prop, val, options=opts)
-            except StixisError as exc:
-                xfail_valid.append(
-                    (
-                        prop,
-                        val,
-                        expected_entry,
-                        _classify_valid_xfail_reason(val, error=exc, got=None),
-                    )
-                )
-                continue
-
-            if got in candidates:
-                try:
-                    roundtrip = canonicalize(prop, got, options=opts)
-                except StixisError as exc:
-                    xfail_valid.append(
-                        (
-                            prop,
-                            val,
-                            expected_entry,
-                            _classify_valid_xfail_reason(val, error=exc, got=got),
-                        )
-                    )
-                    continue
-                if roundtrip == got:
-                    valid.append((prop, val, got))
-                else:
-                    xfail_valid.append(
-                        (prop, val, expected_entry, "non-idempotent-canonicalization")
-                    )
+        if html_file.name in _RELATIVE_COLOR_WPT_FILES:
+            prop = "color"
+            if prop not in PROPERTY_SYNTAXES:
+                skipped_counts["unknown_property"] += 1
+            elif not is_property_enabled(prop, opts):
+                skipped_counts["disabled_min_engines"] += 1
             else:
-                xfail_valid.append(
-                    (
+                for m in _FUZZY_VALID_COLOR_CALL_RE.finditer(text):
+                    val = _unescape_js_string(m.group(2))
+                    candidates = (
+                        [_unescape_js_string(m.group(4))] if m.group(4) is not None else [val]
+                    )
+                    _evaluate_valid_property_case(
                         prop,
                         val,
-                        expected_entry,
-                        _classify_valid_xfail_reason(val, error=None, got=got),
+                        candidates,
+                        opts=opts,
+                        valid=valid,
+                        xfail_valid=xfail_valid,
                     )
-                )
 
-        for m in _INVALID_CALL_RE.finditer(text):
+        invalid_re = (
+            _INVALID_CALL_BACKTICK_RE
+            if html_file.name in _RELATIVE_COLOR_WPT_FILES
+            else _INVALID_CALL_RE
+        )
+        for m in invalid_re.finditer(text):
             prop = m.group(2)
             if prop not in PROPERTY_SYNTAXES:
                 skipped_counts["unknown_property"] += 1
@@ -396,12 +487,16 @@ def extract_broad_css_property_suite(
     *,
     min_engines: int = 2,
 ) -> PropertySuiteExtraction:
-    """Extract valid, invalid, xfail, and skipped property vectors across WPT `css-*/parsing/*-{valid,invalid}.html`."""
+    """Extract valid, invalid, xfail, and skipped property vectors across WPT `css-*/parsing/*-{valid,invalid}.html` and relative color parsing suites."""
     html_files = [
         p
         for p in sorted(wpt_dir.glob("css-*/parsing/*-*.html"))
         if p.parent.parent.name != "css-fonts"
-        and (p.name.endswith("-valid.html") or p.name.endswith("-invalid.html"))
+        and (
+            p.name.endswith("-valid.html")
+            or p.name.endswith("-invalid.html")
+            or p.name in _RELATIVE_COLOR_WPT_FILES
+        )
     ]
     return _evaluate_property_html_files(html_files, min_engines=min_engines)
 
