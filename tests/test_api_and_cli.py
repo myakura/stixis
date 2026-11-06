@@ -1532,3 +1532,98 @@ def test_anchor_and_anchor_size_on_inset_and_in_math_functions(
     captured = capsys.readouterr()
     assert rc2 == EXIT_OK
     assert captured.out.strip() == "anchor(--foo top)"
+
+
+def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
+    d: dict[str, object] = {
+        "color": "red",
+        "font_family": ["Inter", generic("sans-serif")],
+        "font_feature_settings": {"liga": True, "dlig": False},
+        "font_variation_settings": {"wght": 700},
+    }
+    sels = ["a", "button"]
+    child_list = [StyleRule("&:hover", {"color": "blue"})]
+    s = StyleRule(sels, d, rules=child_list)
+
+    d["color"] = "bogus"
+    assert isinstance(d["font_family"], list)
+    d["font_family"].append("bad")
+    assert isinstance(d["font_feature_settings"], dict)
+    d["font_feature_settings"]["liga"] = "bogus"
+    assert isinstance(d["font_variation_settings"], dict)
+    d["font_variation_settings"]["wght"] = "bogus"
+    sels.append(";;bad")
+    child_list.clear()
+
+    assert isinstance(s.declarations, tuple)
+    assert isinstance(s.rules, tuple)
+    assert isinstance(s.selector, tuple)
+    assert hash(s) == hash(s)
+    formatted_cleome = s.format(options=SerializationOptions.cleome())
+    assert "color: red;" in formatted_cleome
+    assert "font-family: 'Inter', sans-serif;" in formatted_cleome
+    assert "font-feature-settings: 'liga', 'dlig' 0;" in formatted_cleome
+    assert "font-variation-settings: 'wght' 700;" in formatted_cleome
+    assert "&:hover" in formatted_cleome
+
+    ff_descs: dict[str, object] = {
+        "font_family": "Inter",
+        "src": [{"url": "inter.woff2", "format": "woff2", "tech": ["variations"]}],
+        "unicode_range": {0x3000, 0x3001},
+    }
+    ff = FontFace(ff_descs)
+    ff_descs["font_family"] = 123
+    assert isinstance(ff_descs["src"], list)
+    ff_descs["src"].clear()
+    assert isinstance(ff_descs["unicode_range"], set)
+    ff_descs["unicode_range"].add(-1)
+
+    assert isinstance(ff.descriptors, tuple)
+    assert hash(ff) == hash(ff)
+    ff_cleome = ff.format(options=SerializationOptions.cleome())
+    assert "font-family: 'Inter';" in ff_cleome
+    assert "url('inter.woff2') format('woff2') tech(variations)" in ff_cleome
+    assert "U+3000-3001" in ff_cleome
+
+    at_rules = [s]
+    at_pre = ["Inter", "Roboto"]
+    at = AtRule("@font-feature-values", at_pre, rules=at_rules)
+    at_pre.append(";;bad")
+    at_rules.clear()
+    assert not isinstance(at.prelude, list)
+    assert isinstance(at.rules, tuple)
+    assert hash(at) == hash(at)
+    assert "'Inter', 'Roboto'" in at.format(options=SerializationOptions.cleome())
+
+    sheet_rules: list[StyleRule | AtRule] = [ff, s, at]
+    sheet = StyleSheet(sheet_rules)
+    sheet_rules.clear()
+    assert isinstance(sheet.rules, tuple)
+    assert len(sheet.rules) == 3
+    assert hash(sheet) == hash(sheet)
+    assert "color: red;" in sheet.format(options=SerializationOptions.cleome())
+
+    # Regression checks for container semantics and template interpolation snapshots across option rebuilds
+    ff_noncontig = FontFace(unicode_range={0x41, 0x5A})
+    assert "unicode-range: U+41, U+5A;" in ff_noncontig.format()
+    assert "unicode-range: U+41, U+5A;" in ff_noncontig.format(
+        options=SerializationOptions.cleome()
+    )
+
+    ff_two_urls = FontFace(src=["a.woff", "woff2"])
+    assert 'src: url("a.woff"), url("woff2");' in ff_two_urls.format()
+    assert "src: url('a.woff'), url('woff2');" in ff_two_urls.format(
+        options=SerializationOptions.cleome()
+    )
+
+    ff_single_map = FontFace(src={"url": "inter.woff2", "format": "woff2"})
+    assert "src: url('inter.woff2') format('woff2');" in ff_single_map.format(
+        options=SerializationOptions.cleome()
+    )
+
+    tpl_items = ["foo"]
+    r_tpl = StyleRule("a", {"content": t'"{tpl_items}"'}, comment=t"{tpl_items}")
+    tpl_items.append("bar")
+    assert hash(r_tpl) == hash(r_tpl)
+    assert "/* ['foo'] */" in r_tpl.format(options=SerializationOptions.cleome())
+    assert "content: '[\\'foo\\']';" in r_tpl.format(options=SerializationOptions.cleome())
