@@ -2579,7 +2579,10 @@ def evaluate_canonicalize(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     """Validate raw `css_text` against `node` and return its canonical CSSOM string."""
-    if not isinstance(css_text, str) or not css_text.strip():
+    if not isinstance(css_text, str):
+        raise StixisValidationError(target, syntax, css_text)
+    is_custom_prop = target.startswith("--") and len(target) >= 3
+    if not css_text.strip() and not is_custom_prop:
         raise StixisValidationError(target, syntax, css_text)
 
     # Dedicated microsyntax fast-paths for exact WPT conformance
@@ -2591,9 +2594,12 @@ def evaluate_canonicalize(
         forbid_top_level_semicolon=True,
         forbid_top_level_bang=True,
         forbid_top_level_braces=True,
+        allow_empty=is_custom_prop,
         target=target,
     )
     non_ws = [t for t in tokens if t.kind != "whitespace"]
+    if not non_ws and is_custom_prop:
+        return ""
 
     if target == "font-style":
         matcher = _TokenMatcher(non_ws, specs_lookup, options, raw_text=css_text)

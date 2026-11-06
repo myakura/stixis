@@ -1354,3 +1354,26 @@ def test_deeply_nested_value_raises_stixis_validation_error(
     assert captured.out == ""
     assert captured.err.startswith("error: ")
     assert "Traceback" not in captured.err
+
+
+def test_empty_custom_property_values_accepted_regular_properties_rejected(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert canonicalize("--x", "") == ""
+    assert canonicalize("--x", " ") == ""
+    assert serialize_value("--x", "") == ""
+    assert serialize_value("--x", " ") == ""
+
+    rc_ok = cli_main(["check", "--", "--x", ""])
+    captured = capsys.readouterr()
+    assert rc_ok == EXIT_OK
+    assert captured.out == "\n"
+
+    with pytest.raises(StixisValidationError):
+        canonicalize("width", "")
+    with pytest.raises(StixisValidationError):
+        serialize_value("width", "")
+
+    rc_err = cli_main(["check", "width", ""])
+    captured = capsys.readouterr()
+    assert rc_err == EXIT_VALIDATION_ERROR
