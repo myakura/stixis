@@ -1810,6 +1810,11 @@ def test_context_free_math_expression_simplification(
     # 4. Preserving `-` when already in canonical order and keeping out-of-scope units untouched
     assert canonicalize("width", "calc(10% - 0.5em)") == "calc(10% - 0.5em)"
     assert canonicalize("width", "calc(1in + 1px)") == "calc(1in + 1px)"
+    assert (
+        canonicalize("width", "calc((10000000px + 100%) / 10000000)")
+        == "calc((100% + 10000000px) / 10000000)"
+    )
+    assert canonicalize("width", "calc(10000000px / 10000000)") == "calc(1px)"
 
     # 5. CLI check
     rc = cli_main(["check", "background-position-x", "calc(10px - 0.5em)"])

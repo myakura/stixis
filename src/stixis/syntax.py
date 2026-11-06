@@ -1385,9 +1385,14 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
         else:
             flat.append(f)
 
-    # Fold pure numbers and Invert(number) when finite and non-zero
+    # Fold pure numbers and Invert(number) when finite and non-zero.
+    # Keep Invert(number) factors separate first so we only convert division into multiplication
+    # when either every remaining factor is a single numeric/dimension/percentage term (where
+    # the divisor multiplies directly into that term) or the resulting scalar multiplier does
+    # not underflow to "0" under CSSOM 6-decimal serialization.
     num_acc = 1.0
     has_num = False
+    inv_num_factors: list[_CalcInvert] = []
     remaining: list[_CalcNode] = []
     for f in flat:
         if isinstance(f, _CalcNumeric) and f.unit == "":
@@ -1402,24 +1407,45 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
             and f.child.unit == ""
             and f.child.value != 0
         ):
-            inv = 1.0 / f.child.value
-            cand = num_acc * inv
-            if math.isfinite(cand):
-                num_acc = cand
-                has_num = True
-                continue
+            inv_num_factors.append(f)
+            continue
         remaining.append(f)
 
-    if not remaining:
-        return _CalcNumeric(num_acc, "")
+    # Try combining inv_num_factors into num_acc
+    combined_acc = num_acc
+    combined_ok = True
+    for inv_f in inv_num_factors:
+        assert isinstance(inv_f.child, _CalcNumeric)
+        cand = combined_acc * (1.0 / inv_f.child.value)
+        if not math.isfinite(cand):
+            combined_ok = False
+            break
+        combined_acc = cand
 
-    # If remaining contains a single percentage or dimension and no other dimensional/invert factors,
-    # multiply num_acc into that dimension/percentage
-    if has_num and len(remaining) == 1 and isinstance(remaining[0], _CalcNumeric):
+    if not remaining:
+        if not inv_num_factors:
+            return _CalcNumeric(num_acc, "")
+        if combined_ok and (combined_acc == 0.0 or serialize_number(combined_acc) != "0"):
+            return _CalcNumeric(combined_acc, "")
+        remaining.extend(inv_num_factors)
+    elif len(remaining) == 1 and isinstance(remaining[0], _CalcNumeric):
         dim_node = remaining[0]
-        cand = num_acc * dim_node.value
-        if math.isfinite(cand):
-            return _CalcNumeric(cand, dim_node.unit)
+        if combined_ok:
+            cand = combined_acc * dim_node.value
+            if math.isfinite(cand) and (
+                cand == 0.0 or dim_node.value == 0.0 or serialize_number(cand) != "0"
+            ):
+                return _CalcNumeric(cand, dim_node.unit)
+        remaining.extend(inv_num_factors)
+    else:
+        if inv_num_factors:
+            if combined_ok and (
+                combined_acc == 0.0 or num_acc == 0.0 or serialize_number(combined_acc) != "0"
+            ):
+                num_acc = combined_acc
+                has_num = True
+            else:
+                remaining.extend(inv_num_factors)
 
     # Otherwise, if has_num and there is at least one percentage/dimension in remaining (and at most one),
     # multiply num_acc into that percentage/dimension and move it to the front!
@@ -1433,7 +1459,9 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
         d_node = remaining[d_idx]
         assert isinstance(d_node, _CalcNumeric)
         scaled_val = d_node.value * num_acc if has_num else d_node.value
-        if math.isfinite(scaled_val):
+        if math.isfinite(scaled_val) and (
+            scaled_val == 0.0 or d_node.value == 0.0 or serialize_number(scaled_val) != "0"
+        ):
             leading_dim = _CalcNumeric(scaled_val, d_node.unit)
             others = [item for idx, item in enumerate(remaining) if idx != d_idx]
             if not others:
