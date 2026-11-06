@@ -16,6 +16,8 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
   5. `{1,2}` descriptor and property ranges: `font-weight`, `font-width` and `font-stretch`, `font-style: oblique`, and metric overrides.
 * **Includes a read-only CLI.** `stixis inspect` and `stixis check` exit with `0` for valid input, `1` for a validation error, `2` for a usage error, and `4` for an unknown target.
 
+Only the top-level `stixis` package is public; submodules such as `stixis.nodes`, `stixis.syntax`, and `stixis.primitives` are internal and will move in the next minor version.
+
 ## Quickstart
 
 ```python
