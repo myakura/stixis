@@ -1165,10 +1165,10 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
 def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from stixis._generated import specs as gen_specs_mod
+    import stixis.nodes as nodes_mod
     from stixis.nodes import is_property_enabled
 
-    monkeypatch.setattr(gen_specs_mod, "PROPERTY_ENGINE_COUNTS", {})
+    monkeypatch.setattr(nodes_mod, "PROPERTY_ENGINE_COUNTS", {})
     assert not is_property_enabled("width", SerializationOptions(min_engines=1))
     with pytest.raises(StixisValidationError, match=r"0 engine\(s\)"):
         canonicalize("width", "10px", options=SerializationOptions(min_engines=1))

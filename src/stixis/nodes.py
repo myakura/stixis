@@ -8,10 +8,11 @@ from functools import lru_cache
 from string.templatelib import Template
 from typing import Any, Unpack
 
-from stixis._generated import specs as _gen_specs
 from stixis._generated.specs import (
+    ALWAYS_ALLOWED_PROPERTIES,
     ATRULE_DESCRIPTORS,
     ATRULE_PRELUDE_SYNTAXES,
+    PROPERTY_ENGINE_COUNTS,
     PROPERTY_SYNTAXES,
     VALUE_SYNTAXES,
 )
@@ -89,11 +90,9 @@ def is_property_enabled(prop: str, options: SerializationOptions = DEFAULT_OPTIO
         return False
     if options.min_engines <= 0:
         return True
-    always_allowed: frozenset[str] = getattr(_gen_specs, "ALWAYS_ALLOWED_PROPERTIES", frozenset())
-    if prop in always_allowed or prop in options.extra_properties:
+    if prop in ALWAYS_ALLOWED_PROPERTIES or prop in options.extra_properties:
         return True
-    engine_counts: dict[str, int] = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {})
-    return engine_counts.get(prop, 0) >= options.min_engines
+    return PROPERTY_ENGINE_COUNTS.get(prop, 0) >= options.min_engines
 
 
 def resolve_target_syntax(
@@ -147,7 +146,7 @@ def resolve_target_syntax(
     syn = PROPERTY_SYNTAXES.get(norm_prop)
     if syn is not None:
         if not is_property_enabled(norm_prop, options):
-            eng = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {}).get(norm_prop, 0)
+            eng = PROPERTY_ENGINE_COUNTS.get(norm_prop, 0)
             raise StixisValidationError(
                 norm_prop,
                 f"CSS property with >= {options.min_engines} browser engines (got {eng})",
@@ -453,7 +452,7 @@ def _validate_and_normalize_declarations(
             continue
 
         if prop in PROPERTY_SYNTAXES:
-            eng = getattr(_gen_specs, "PROPERTY_ENGINE_COUNTS", {}).get(prop, 0)
+            eng = PROPERTY_ENGINE_COUNTS.get(prop, 0)
             raise StixisValidationError(
                 prop,
                 f"CSS property with >= {options.min_engines} browser engines (got {eng})",
