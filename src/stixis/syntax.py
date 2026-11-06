@@ -2340,10 +2340,19 @@ class _TokenMatcher:
                 else frozenset({"x", "y", "z", "alpha"})
             )
             self.calc_context_keywords = saved_calc_keywords & branch_channels
+            try:
+                matched_params = self.match_node(target_node, pos, eff_min, eff_max)
+                if not matched_params:
+                    self.calc_context_keywords = saved_calc_keywords
+                return matched_params
+            except Exception:
+                self.calc_context_keywords = saved_calc_keywords
+                raise
+            finally:
+                self._active_refs.discard(guard_key)
         try:
             return self.match_node(target_node, pos, eff_min, eff_max)
         finally:
-            self.calc_context_keywords = saved_calc_keywords
             self._active_refs.discard(guard_key)
 
     def _match_function(self, node: FunctionNode, pos: int) -> list[tuple[int, str]]:
@@ -2371,41 +2380,58 @@ class _TokenMatcher:
             and isinstance(node.arg, JuxtaposeNode)
             and len(node.arg.items) >= 2
         ):
-            from_node = JuxtaposeNode((KeywordNode("from"), RefNode("<color>", is_property=False)))
-            rest_items = (
-                node.arg.items[2:]
-                if isinstance(node.arg.items[0], KeywordNode) and node.arg.items[0].name == "from"
-                else node.arg.items[1:]
-            )
-            rest_node = rest_items[0] if len(rest_items) == 1 else JuxtaposeNode(rest_items)
-            origin_matcher = _TokenMatcher(
-                inner_tokens,
-                self.specs_lookup,
-                self.options,
-                self.forbidden_custom_idents,
-                calc_context_keywords=self.calc_context_keywords,
-                calc_context_functions=self.calc_context_functions,
-            )
-            channel_matcher = _TokenMatcher(
-                inner_tokens,
-                self.specs_lookup,
-                self.options,
-                self.forbidden_custom_idents,
-                calc_context_keywords=self.calc_context_keywords
-                | RELATIVE_COLOR_CHANNEL_KEYWORDS[fn_name],
-                calc_context_functions=self.calc_context_functions,
-            )
-            results: list[tuple[int, str]] = []
-            seen: set[tuple[int, str]] = set()
-            for after_origin, origin_str in origin_matcher.match_node(from_node, 0):
-                for end_p, rest_str in channel_matcher.match_node(rest_node, after_origin):
-                    if end_p == len(channel_matcher.tokens):
-                        joined = _join_serialized_parts([origin_str, rest_str])
-                        pair = (next_pos, f"{fn_name}({joined})")
-                        if pair not in seen:
-                            seen.add(pair)
-                            results.append(pair)
-            return results
+            rest_items: tuple[ValueNode, ...] | None = None
+            first_item = node.arg.items[0]
+            if (
+                isinstance(first_item, KeywordNode)
+                and first_item.name == "from"
+                and isinstance(node.arg.items[1], RefNode)
+                and node.arg.items[1].name == "<color>"
+            ):
+                rest_items = node.arg.items[2:]
+            elif (
+                isinstance(first_item, MultiplierNode)
+                and isinstance(first_item.child, JuxtaposeNode)
+                and len(first_item.child.items) == 2
+                and isinstance(first_item.child.items[0], KeywordNode)
+                and first_item.child.items[0].name == "from"
+                and isinstance(first_item.child.items[1], RefNode)
+                and first_item.child.items[1].name == "<color>"
+            ):
+                rest_items = node.arg.items[1:]
+            if rest_items:
+                from_node = JuxtaposeNode(
+                    (KeywordNode("from"), RefNode("<color>", is_property=False))
+                )
+                rest_node = rest_items[0] if len(rest_items) == 1 else JuxtaposeNode(rest_items)
+                origin_matcher = _TokenMatcher(
+                    inner_tokens,
+                    self.specs_lookup,
+                    self.options,
+                    self.forbidden_custom_idents,
+                    calc_context_keywords=self.calc_context_keywords,
+                    calc_context_functions=self.calc_context_functions,
+                )
+                channel_matcher = _TokenMatcher(
+                    inner_tokens,
+                    self.specs_lookup,
+                    self.options,
+                    self.forbidden_custom_idents,
+                    calc_context_keywords=self.calc_context_keywords
+                    | RELATIVE_COLOR_CHANNEL_KEYWORDS[fn_name],
+                    calc_context_functions=self.calc_context_functions,
+                )
+                results: list[tuple[int, str]] = []
+                seen: set[tuple[int, str]] = set()
+                for after_origin, origin_str in origin_matcher.match_node(from_node, 0):
+                    for end_p, rest_str in channel_matcher.match_node(rest_node, after_origin):
+                        if end_p == len(channel_matcher.tokens):
+                            joined = _join_serialized_parts([origin_str, rest_str])
+                            pair = (next_pos, f"{fn_name}({joined})")
+                            if pair not in seen:
+                                seen.add(pair)
+                                results.append(pair)
+                return results
 
         sub_matcher = _TokenMatcher(
             inner_tokens,

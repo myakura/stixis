@@ -1890,12 +1890,18 @@ def test_relative_color_bare_channel_keywords(
         with pytest.raises(StixisValidationError):
             canonicalize("color", invalid_abs)
 
-    # Reject wrong color-space channel keywords in `color(from ...)`
+    # Reject wrong color-space channel keywords in `color(from ...)` and legacy comma syntax
     for invalid_cs in (
+        "rgb(from red, r)",
+        "rgba(from red, r)",
         "color(from color(srgb 0.7 0.5 0.3) srgb x y z)",
         "color(from color(srgb 0.7 0.5 0.3) srgb calc(x) g b)",
+        "color(from color(srgb 0.7 0.5 0.3) srgb 0 0 0 / x)",
+        "color(from color(srgb 0.7 0.5 0.3) srgb 0 0 0 / calc(x))",
         "color(from color(xyz 7 -20.5 100) xyz r g b)",
         "color(from color(xyz 7 -20.5 100) xyz calc(r) y z)",
+        "color(from color(xyz 7 -20.5 100) xyz 0 0 0 / r)",
+        "color(from color(xyz 7 -20.5 100) xyz 0 0 0 / calc(r))",
     ):
         with pytest.raises(StixisValidationError):
             canonicalize("color", invalid_cs)
