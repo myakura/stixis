@@ -1407,8 +1407,20 @@ def test_math_function_calc_sum_structural_validation(
     assert canonicalize("width", "calc-size(auto, min(size, 100px))") == (
         "calc-size(auto, min(size, 100px))"
     )
+    assert canonicalize("width", "calc(100px * progress(1, 0, 2))") == (
+        "calc(100px * progress(1, 0, 2))"
+    )
     assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))") == (
         "alpha(from currentcolor / calc(alpha * 0.5))"
+    )
+    assert canonicalize("color", "ictcp(from red calc(i) calc(ct) calc(cp))") == (
+        "ictcp(from red calc(i) calc(ct) calc(cp))"
+    )
+    assert canonicalize("color", "jzazbz(from red calc(jz) calc(az) calc(bz))") == (
+        "jzazbz(from red calc(jz) calc(az) calc(bz))"
+    )
+    assert canonicalize("color", "jzczhz(from red calc(jz) calc(cz) calc(hz))") == (
+        "jzczhz(from red calc(jz) calc(cz) calc(hz))"
     )
     with pytest.raises(StixisValidationError):
         canonicalize("color", "alpha(from red / calc(r * 0.5))")

@@ -93,6 +93,16 @@ MATH_FUNCTIONS: frozenset[str] = frozenset(
         "sibling-count",
     }
 )
+CALC_VALUE_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        "progress",
+        "calc-mix",
+        "calc-interpolate",
+        "random",
+        "anchor",
+        "anchor-size",
+    }
+)
 CALC_KEYWORDS: frozenset[str] = frozenset({"e", "pi", "infinity", "-infinity", "nan"})
 ROUNDING_STRATEGY_KEYWORDS: frozenset[str] = frozenset({"nearest", "up", "down", "to-zero"})
 RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {
@@ -106,6 +116,9 @@ RELATIVE_COLOR_CHANNEL_KEYWORDS: dict[str, frozenset[str]] = {
     "oklab": frozenset({"l", "a", "b", "alpha"}),
     "lch": frozenset({"l", "c", "h", "alpha"}),
     "oklch": frozenset({"l", "c", "h", "alpha"}),
+    "ictcp": frozenset({"i", "ct", "cp", "alpha"}),
+    "jzazbz": frozenset({"jz", "az", "bz", "alpha"}),
+    "jzczhz": frozenset({"jz", "cz", "hz", "alpha"}),
     "color": frozenset({"r", "g", "b", "x", "y", "z", "alpha"}),
 }
 ALL_LOWER_TO_CANONICAL_UNIT: dict[str, str] = {
@@ -1274,6 +1287,8 @@ def _parse_calc_value(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
     """Parse `<calc-value> = <number> | <dimension> | <percentage> | <calc-keyword> | ( <calc-sum> )`."""
     if pos >= len(tokens):
@@ -1307,14 +1322,46 @@ def _parse_calc_value(
         if grouped is None:
             return None
         inner_toks, next_pos = grouped
-        inner_str = _parse_full_calc_sum(inner_toks, extra_keywords=extra_keywords)
+        inner_str = _parse_full_calc_sum(
+            inner_toks,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
         if inner_str is None:
             return None
         return f"({inner_str})", next_pos
     if tok.kind == "function":
         fn_low = tok.value.lower()
         if fn_low in MATH_FUNCTIONS:
-            return _is_math_function_token(tokens, pos, extra_keywords=extra_keywords)
+            return _is_math_function_token(
+                tokens,
+                pos,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
+        if fn_low in CALC_VALUE_FUNCTIONS and specs_lookup is not None:
+            grouped = _consume_balanced_group(tokens, pos + 1, ")")
+            if grouped is None:
+                return None
+            inner_toks, next_pos = grouped
+            if any(t.kind == "semicolon" for t in inner_toks):
+                return None
+            fn_node = specs_lookup(f"<{fn_low}()>", False)
+            if fn_node is None:
+                return None
+            slice_toks = [t for t in tokens[pos:next_pos] if t.kind != "whitespace"]
+            sub = _TokenMatcher(
+                slice_toks,
+                specs_lookup,
+                options,
+                calc_context_keywords=extra_keywords,
+            )
+            for end_p, rendered in sub.match_node(fn_node, 0):
+                if end_p == len(slice_toks):
+                    return rendered, next_pos
+            return None
         if fn_low in GLOBAL_SUBSTITUTION_FUNCTIONS:
             grouped = _consume_balanced_group(tokens, pos + 1, ")")
             if grouped is None:
@@ -1322,7 +1369,7 @@ def _parse_calc_value(
             inner_toks, next_pos = grouped
             if not inner_toks or any(t.kind == "semicolon" for t in inner_toks):
                 return None
-            return f"{fn_low}({format_token_sequence(inner_toks)})", next_pos
+            return f"{fn_low}({format_token_sequence(inner_toks, options=options)})", next_pos
     return None
 
 
@@ -1331,16 +1378,30 @@ def _parse_calc_product(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
     """Parse `<calc-product> = <calc-value> [ [ '*' | '/' ] <calc-value> ]*`."""
-    first = _parse_calc_value(tokens, pos, extra_keywords=extra_keywords)
+    first = _parse_calc_value(
+        tokens,
+        pos,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
     if first is None:
         return None
     parts = [first[0]]
     cur = first[1]
     while cur < len(tokens) and tokens[cur].kind == "delim" and tokens[cur].value in ("*", "/"):
         op = tokens[cur].value
-        rhs = _parse_calc_value(tokens, cur + 1, extra_keywords=extra_keywords)
+        rhs = _parse_calc_value(
+            tokens,
+            cur + 1,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
         if rhs is None:
             return None
         parts.append(f" {op} {rhs[0]}")
@@ -1353,9 +1414,17 @@ def _parse_calc_sum(
     pos: int = 0,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
     """Parse `<calc-sum> = <calc-product> [ [ '+' | '-' ] <calc-product> ]*` requiring whitespace around `+` and `-`."""
-    first = _parse_calc_product(tokens, pos, extra_keywords=extra_keywords)
+    first = _parse_calc_product(
+        tokens,
+        pos,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
     if first is None:
         return None
     parts = [first[0]]
@@ -1367,7 +1436,13 @@ def _parse_calc_sum(
         and tokens[cur].ws_around
     ):
         op = tokens[cur].value
-        rhs = _parse_calc_product(tokens, cur + 1, extra_keywords=extra_keywords)
+        rhs = _parse_calc_product(
+            tokens,
+            cur + 1,
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
         if rhs is None:
             return None
         parts.append(f" {op} {rhs[0]}")
@@ -1379,11 +1454,19 @@ def _parse_full_calc_sum(
     tokens: Sequence[CssToken],
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str | None:
     non_ws = [t for t in tokens if t.kind != "whitespace"]
     if not non_ws:
         return None
-    res = _parse_calc_sum(non_ws, 0, extra_keywords=extra_keywords)
+    res = _parse_calc_sum(
+        non_ws,
+        0,
+        extra_keywords=extra_keywords,
+        specs_lookup=specs_lookup,
+        options=options,
+    )
     if res is None or res[1] != len(non_ws):
         return None
     return res[0]
@@ -1394,6 +1477,8 @@ def _is_math_function_token(
     pos: int,
     *,
     extra_keywords: frozenset[str] = frozenset(),
+    specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
+    options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[str, int] | None:
     """If `tokens[pos]` starts a valid CSS math function (`calc(...)`, `min(...)`, etc.), return `(serialized, next_pos)`."""
     if pos >= len(tokens) or tokens[pos].kind != "function":
@@ -1438,13 +1523,23 @@ def _is_math_function_token(
     ):
         if len(args) != 1:
             return None
-        s = _parse_full_calc_sum(args[0], extra_keywords=extra_keywords)
+        s = _parse_full_calc_sum(
+            args[0],
+            extra_keywords=extra_keywords,
+            specs_lookup=specs_lookup,
+            options=options,
+        )
         if s is None:
             return None
         rendered_args.append(s)
     elif fn_name in ("min", "max", "hypot"):
         for arg in args:
-            s = _parse_full_calc_sum(arg, extra_keywords=extra_keywords)
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s is None:
                 return None
             rendered_args.append(s)
@@ -1452,7 +1547,12 @@ def _is_math_function_token(
         if len(args) != 2:
             return None
         for arg in args:
-            s = _parse_full_calc_sum(arg, extra_keywords=extra_keywords)
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s is None:
                 return None
             rendered_args.append(s)
@@ -1460,7 +1560,12 @@ def _is_math_function_token(
         if not (1 <= len(args) <= 2):
             return None
         for arg in args:
-            s = _parse_full_calc_sum(arg, extra_keywords=extra_keywords)
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s is None:
                 return None
             rendered_args.append(s)
@@ -1476,7 +1581,12 @@ def _is_math_function_token(
             ):
                 rendered_args.append("none")
             else:
-                s = _parse_full_calc_sum(arg, extra_keywords=extra_keywords)
+                s = _parse_full_calc_sum(
+                    arg,
+                    extra_keywords=extra_keywords,
+                    specs_lookup=specs_lookup,
+                    options=options,
+                )
                 if s is None:
                     return None
                 rendered_args.append(s)
@@ -1494,7 +1604,12 @@ def _is_math_function_token(
         if not (1 <= len(sum_args) <= 2):
             return None
         for arg in sum_args:
-            s = _parse_full_calc_sum(arg, extra_keywords=extra_keywords)
+            s = _parse_full_calc_sum(
+                arg,
+                extra_keywords=extra_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s is None:
                 return None
             rendered_args.append(s)
@@ -1505,12 +1620,22 @@ def _is_math_function_token(
         if len(args[0]) == 1 and args[0][0].kind == "ident":
             rendered_args.append(serialize_ident(args[0][0].value.lower()))
         else:
-            s0 = _parse_full_calc_sum(args[0], extra_keywords=size_keywords)
+            s0 = _parse_full_calc_sum(
+                args[0],
+                extra_keywords=size_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s0 is None:
                 return None
             rendered_args.append(s0)
         if len(args) == 2:
-            s1 = _parse_full_calc_sum(args[1], extra_keywords=size_keywords)
+            s1 = _parse_full_calc_sum(
+                args[1],
+                extra_keywords=size_keywords,
+                specs_lookup=specs_lookup,
+                options=options,
+            )
             if s1 is None:
                 return None
             rendered_args.append(s1)
@@ -1697,6 +1822,19 @@ class _TokenMatcher:
             res = self._match_font_style_tokens(pos, is_descriptor=False)
             if res:
                 return res
+
+        if not node.is_property and node.name == "<calc-sum>":
+            calc_res = _parse_calc_sum(
+                self.tokens,
+                pos,
+                extra_keywords=self.calc_context_keywords,
+                specs_lookup=self.specs_lookup,
+                options=self.options,
+            )
+            if calc_res is not None:
+                rendered_sum, next_pos = calc_res
+                return [(next_pos, rendered_sum)]
+            return []
 
         guard_key = (node.name, node.is_property, pos)
         if guard_key in self._active_refs:
@@ -1982,6 +2120,8 @@ class _TokenMatcher:
                 self.tokens,
                 pos,
                 extra_keywords=self.calc_context_keywords,
+                specs_lookup=self.specs_lookup,
+                options=self.options,
             )
             if math_res is not None:
                 rendered_math, next_pos = math_res
