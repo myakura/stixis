@@ -1742,6 +1742,13 @@ def _collect_grammar_calc_functions(
     return frozenset()
 
 
+def _is_property_target(target: str, at_rule: str | None) -> bool:
+    """Return True if `target` is a CSS property (standard or custom `--*`), not a `<type>`, descriptor, or prelude."""
+    if at_rule is not None:
+        return False
+    return not target.startswith(("<", "@"))
+
+
 class _TokenMatcher:
     """Backtracking matcher and CSSOM canonicalizer for `CssToken` streams against `ValueNode`."""
 
@@ -1766,8 +1773,8 @@ class _TokenMatcher:
         self.calc_context_functions = calc_context_functions
         self._active_refs: set[tuple[str, bool, int]] = set()
 
-    def match_root(self, node: ValueNode) -> str | None:
-        if len(self.tokens) == 1 and self.tokens[0].kind == "ident":
+    def match_root(self, node: ValueNode, *, allow_css_wide: bool = True) -> str | None:
+        if allow_css_wide and len(self.tokens) == 1 and self.tokens[0].kind == "ident":
             kw_low = self.tokens[0].value.lower()
             if kw_low in CSS_WIDE_KEYWORDS:
                 return kw_low
@@ -2921,7 +2928,7 @@ def _match_sequence_via_tokens(
         raw_text=joined,
         calc_context_functions=_collect_grammar_calc_functions(node, specs_lookup),
     )
-    return matcher.match_root(node)
+    return matcher.match_root(node, allow_css_wide=False)
 
 
 def _serialize_primitive_python_value(
@@ -3192,7 +3199,7 @@ def evaluate_canonicalize(
         raise StixisValidationError(target, syntax, css_text)
 
     try:
-        res = matcher.match_root(node)
+        res = matcher.match_root(node, allow_css_wide=_is_property_target(target, at_rule))
     except RecursionError as exc:
         raise StixisValidationError(
             target, syntax, css_text, "Maximum nesting depth exceeded"
@@ -3384,7 +3391,7 @@ def evaluate_serialize_value(
         return serialize_metric_override(value, allow_from_font=True, min_val=None, target=target)
 
     # General ValueNode evaluation
-    if at_rule is None and isinstance(value, (str, Keyword)):
+    if _is_property_target(target, at_rule) and isinstance(value, (str, Keyword)):
         raw_kw = value.value if isinstance(value, Keyword) else value
         if raw_kw.strip().lower() in CSS_WIDE_KEYWORDS:
             return raw_kw.strip().lower()

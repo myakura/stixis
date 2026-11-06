@@ -1627,3 +1627,36 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     assert hash(r_tpl) == hash(r_tpl)
     assert "/* ['foo'] */" in r_tpl.format(options=SerializationOptions.cleome())
     assert "content: '[\\'foo\\']';" in r_tpl.format(options=SerializationOptions.cleome())
+
+
+def test_type_targets_reject_css_wide_keywords(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for type_target in ("<length>", "<color>", "<number>", "<custom-ident>", "length"):
+        for kw in ("inherit", "initial", "unset", "revert", "revert-layer", "revert-rule"):
+            with pytest.raises(StixisValidationError):
+                canonicalize(type_target, kw)
+            with pytest.raises(StixisValidationError):
+                serialize_value(type_target, kw)
+            with pytest.raises(StixisValidationError):
+                serialize_value(type_target, Keyword(kw))
+
+    with pytest.raises(StixisValidationError):
+        canonicalize("<font-src>", "inherit")
+    with pytest.raises(StixisValidationError):
+        serialize_value("<font-src>", Keyword("inherit"))
+
+    for prop in ("width", "color", "--custom"):
+        for kw in ("inherit", "initial", "unset", "revert", "revert-layer", "revert-rule"):
+            assert canonicalize(prop, kw) == kw
+            assert serialize_value(prop, kw) == kw
+            assert serialize_value(prop, Keyword(kw)) == kw
+
+    rc_bad = cli_main(["check", "<length>", "inherit"])
+    captured = capsys.readouterr()
+    assert rc_bad == EXIT_VALIDATION_ERROR
+
+    rc_good = cli_main(["check", "width", "inherit"])
+    captured = capsys.readouterr()
+    assert rc_good == EXIT_OK
+    assert captured.out.strip() == "inherit"
