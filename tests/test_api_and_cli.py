@@ -1410,6 +1410,11 @@ def test_math_function_calc_sum_structural_validation(
     assert canonicalize("width", "calc(100px * progress(1, 0, 2))") == (
         "calc(100px * progress(1, 0, 2))"
     )
+    assert canonicalize("width", "calc(2 * random(--foo, 0px, 100px))") == (
+        "calc(2 * random(--foo, 0px, 100px))"
+    )
+    assert canonicalize("width", "calc(2 * random(0px, 100px))") == ("calc(2 * random(0px, 100px))")
+    assert canonicalize("left", "calc(inherit(--x) + 1px)") == "calc(inherit(--x) + 1px)"
     assert canonicalize("color", "alpha(from currentcolor / calc(alpha * 0.5))") == (
         "alpha(from currentcolor / calc(alpha * 0.5))"
     )

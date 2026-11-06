@@ -64,7 +64,9 @@ from stixis.primitives import (
 )
 
 # CSS-wide keywords + CSS Variables / substitution functions that are valid on any property
-GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset({"var", "env", "attr", "first-valid"})
+GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset(
+    {"var", "env", "attr", "first-valid", "inherit"}
+)
 MATH_FUNCTIONS: frozenset[str] = frozenset(
     {
         "calc",
