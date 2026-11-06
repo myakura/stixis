@@ -1847,3 +1847,70 @@ def test_context_free_math_expression_simplification(
     captured = capsys.readouterr()
     assert rc == EXIT_OK
     assert captured.out.strip() == "calc(-0.5em + 10px)"
+
+
+def test_relative_color_bare_channel_keywords(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Issue #70: relative color functions accept bare channel keywords as operands in channel positions."""
+    assert canonicalize("color", "rgb(from rebeccapurple r g b)") == "rgb(from rebeccapurple r g b)"
+    assert (
+        canonicalize("color", "rgb(from rebeccapurple r g b / alpha)")
+        == "rgb(from rebeccapurple r g b / alpha)"
+    )
+    assert canonicalize("color", "lab(from red l a b)") == "lab(from red l a b)"
+    assert canonicalize("color", "oklab(from red l a b / alpha)") == "oklab(from red l a b / alpha)"
+    assert canonicalize("color", "lch(from red l c h)") == "lch(from red l c h)"
+    assert canonicalize("color", "oklch(from red l c h)") == "oklch(from red l c h)"
+    assert canonicalize("color", "hsl(from red h s l)") == "hsl(from red h s l)"
+    assert canonicalize("color", "hwb(from red h w b)") == "hwb(from red h w b)"
+    assert canonicalize("color", "jzazbz(from red j a b)") == "jzazbz(from red j a b)"
+    assert canonicalize("color", "jzczhz(from red j c h)") == "jzczhz(from red j c h)"
+    assert canonicalize("color", "ictcp(from red i ct cp)") == "ictcp(from red i ct cp)"
+    assert canonicalize("color", "alpha(from red / alpha)") == "alpha(from red / alpha)"
+    assert (
+        canonicalize("color", "color(from color(srgb 0.7 0.5 0.3) srgb r g b / alpha)")
+        == "color(from color(srgb 0.7 0.5 0.3) srgb r g b / alpha)"
+    )
+    assert (
+        canonicalize("color", "color(from color(xyz-d65 7 -20.5 100) xyz-d65 x y z / alpha)")
+        == "color(from color(xyz-d65 7 -20.5 100) xyz-d65 x y z / alpha)"
+    )
+
+    # Reject channel keywords in absolute color functions (without `from <color>`)
+    for invalid_abs in (
+        "rgb(r g b)",
+        "rgb(0 0 0 / alpha)",
+        "hsl(h s l)",
+        "lab(l a b)",
+        "color(srgb r g b)",
+        "color(xyz x y z)",
+        "rgb(from rgb(r g b) r g b)",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("color", invalid_abs)
+
+    # Reject wrong color-space channel keywords in `color(from ...)`
+    for invalid_cs in (
+        "color(from color(srgb 0.7 0.5 0.3) srgb x y z)",
+        "color(from color(srgb 0.7 0.5 0.3) srgb calc(x) g b)",
+        "color(from color(xyz 7 -20.5 100) xyz r g b)",
+        "color(from color(xyz 7 -20.5 100) xyz calc(r) y z)",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("color", invalid_cs)
+
+    # CLI check
+    rc = cli_main(["check", "color", "rgb(from rebeccapurple r g b)"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_OK
+    assert captured.out.strip() == "rgb(from rebeccapurple r g b)"
+
+    rc_lab = cli_main(["check", "color", "lab(from red l a b)"])
+    captured_lab = capsys.readouterr()
+    assert rc_lab == EXIT_OK
+    assert captured_lab.out.strip() == "lab(from red l a b)"
+
+    rc_err = cli_main(["check", "color", "rgb(r g b)"])
+    _ = capsys.readouterr()
+    assert rc_err == EXIT_VALIDATION_ERROR
