@@ -1294,3 +1294,32 @@ def test_dimension_unit_starting_with_exponent_is_escaped(
     assert cli_toks[0].kind == "dimension"
     assert cli_toks[0].num == 1
     assert cli_toks[0].unit == "e3"
+
+
+def test_stylerule_format_minify_visits_nested_rules_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    import stixis.nodes as nodes_mod
+
+    node = StyleRule("a", {"color": "red"})
+    for _ in range(17):
+        node = StyleRule("a", {"color": "red"}, rules=[node])
+
+    calls = 0
+    orig_format_rule_node = nodes_mod._format_rule_node
+
+    def _counting_format_rule_node(*args: object, **kwargs: object) -> str:
+        nonlocal calls
+        calls += 1
+        return orig_format_rule_node(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(nodes_mod, "_format_rule_node", _counting_format_rule_node)
+    t0 = time.perf_counter()
+    minified = node.format(minify=True)
+    elapsed = time.perf_counter() - t0
+
+    assert calls == 17
+    assert elapsed < 0.1
+    assert minified == "a{color:red;" * 17 + "a{color:red}" + "}" * 17

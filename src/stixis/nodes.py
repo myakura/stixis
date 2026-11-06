@@ -676,24 +676,6 @@ class StyleRule:
             )
             return rebuilt.format(minify=minify, indent=indent, options=options)
 
-        pad = "" if minify else ("  " * indent)
-        inner_pad = "" if minify else ("  " * (indent + 1))
-        lines: list[str] = []
-        if self._comment_str and not minify:
-            lines.append(f"{pad}{self._comment_str}")
-
-        body_items: list[str] = []
-        for k, v in self._decl_pairs:
-            if minify:
-                body_items.append(f"{k}:{v}")
-            else:
-                body_items.append(f"{inner_pad}{k}: {v};")
-
-        for child in self._rules_tuple:
-            body_items.append(
-                _format_rule_node(child, minify=minify, indent=indent + 1, options=eff_opts)
-            )
-
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
@@ -702,6 +684,21 @@ class StyleRule:
             )
             sep = ";" if (decl_part and child_part) else ""
             return f"{self._selector_str}{{{decl_part}{sep}{child_part}}}"
+
+        pad = "  " * indent
+        inner_pad = "  " * (indent + 1)
+        lines: list[str] = []
+        if self._comment_str:
+            lines.append(f"{pad}{self._comment_str}")
+
+        body_items: list[str] = []
+        for k, v in self._decl_pairs:
+            body_items.append(f"{inner_pad}{k}: {v};")
+
+        for child in self._rules_tuple:
+            body_items.append(
+                _format_rule_node(child, minify=False, indent=indent + 1, options=eff_opts)
+            )
 
         if not body_items:
             lines.append(f"{pad}{self._selector_str} {{}}")
