@@ -21,6 +21,7 @@ from stixis.errors import StixisSyntaxError, StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions, current_options
 from stixis.primitives import serialize_dashed_ident, serialize_ident
 from stixis.syntax import (
+    SUPPORTED_BUILTIN_TYPES,
     ValueNode,
     compile_value_syntax,
     evaluate_canonicalize,
@@ -30,6 +31,10 @@ from stixis.syntax import (
     validate_token_stream_safety,
 )
 
+_LOWER_VALUE_SYNTAX_KEYS: dict[str, tuple[str, str]] = {
+    k.lower(): (k, v) for k, v in VALUE_SYNTAXES.items() if k.startswith("<") and k.endswith(">")
+}
+
 
 @lru_cache(maxsize=4096)
 def lookup_value_node(name: str, is_property: bool = False) -> ValueNode | None:
@@ -38,6 +43,11 @@ def lookup_value_node(name: str, is_property: bool = False) -> ValueNode | None:
         syn = PROPERTY_SYNTAXES.get(name)
     else:
         syn = VALUE_SYNTAXES.get(name) or VALUE_SYNTAXES.get(f"<{name.strip('<>')}>")
+        if syn is None:
+            angled = f"<{name.strip('<>')}>".lower()
+            entry = _LOWER_VALUE_SYNTAX_KEYS.get(angled)
+            if entry is not None:
+                syn = entry[1]
     if syn is None:
         return None
     return compile_value_syntax(syn)
@@ -95,6 +105,20 @@ def is_property_enabled(prop: str, options: SerializationOptions = DEFAULT_OPTIO
     return PROPERTY_ENGINE_COUNTS.get(prop, 0) >= options.min_engines
 
 
+def resolve_type_syntax(type_name: str) -> tuple[str, str] | None:
+    """Return `(canonical_type_name, syntax_str)` for a known `<type>` (`VALUE_SYNTAXES` or `SUPPORTED_BUILTIN_TYPES`), or `None`."""
+    syn = VALUE_SYNTAXES.get(type_name)
+    if syn is not None:
+        return type_name, syn
+    low = type_name.lower()
+    entry = _LOWER_VALUE_SYNTAX_KEYS.get(low)
+    if entry is not None:
+        return entry
+    if low in SUPPORTED_BUILTIN_TYPES:
+        return low, low
+    return None
+
+
 def resolve_target_syntax(
     target: str,
     *,
@@ -129,11 +153,16 @@ def resolve_target_syntax(
         return norm_desc, norm_at, syn, compile_value_syntax(syn)
 
     if raw.startswith("<") and raw.endswith(">"):
-        syn = VALUE_SYNTAXES.get(raw)
-        if syn is not None:
-            return raw, None, syn, compile_value_syntax(syn)
-        node = compile_value_syntax(raw)
-        return raw, None, raw, node
+        resolved_type = resolve_type_syntax(raw)
+        if resolved_type is not None:
+            canon_type, syn = resolved_type
+            return canon_type, None, syn, compile_value_syntax(syn)
+        raise StixisValidationError(
+            raw,
+            "known CSS property or <type>",
+            target,
+            f"Unknown CSS target: {target!r}",
+        )
 
     if raw.startswith("@") and "/" in raw:
         at_part, desc_part = raw.split("/", 1)
@@ -155,10 +184,10 @@ def resolve_target_syntax(
             )
         return norm_prop, None, syn, compile_value_syntax(syn)
 
-    if f"<{norm_prop}>" in VALUE_SYNTAXES:
-        tname = f"<{norm_prop}>"
-        tsyn = VALUE_SYNTAXES[tname]
-        return tname, None, tsyn, compile_value_syntax(tsyn)
+    resolved_type = resolve_type_syntax(f"<{norm_prop}>")
+    if resolved_type is not None:
+        canon_type, tsyn = resolved_type
+        return canon_type, None, tsyn, compile_value_syntax(tsyn)
 
     raise StixisValidationError(
         norm_prop,
