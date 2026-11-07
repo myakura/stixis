@@ -108,7 +108,7 @@ def test_pep750_template_integration_and_context_escaping() -> None:
     assert str(CommentNode("/* foo**/")) == "/* foo* */"
 
     # Comment Template without outer `/* ... */` is evaluated in comment context from the start
-    from stixis.syntax import render_css_template, tokenize_css
+    from stixis._syntax import render_css_template, tokenize_css
 
     name = "header"
     assert str(CommentNode(t"Don't edit: {name}")) == "/* Don't edit: header */"
@@ -263,7 +263,7 @@ def test_number_primitive_rejects_bool_and_non_finite() -> None:
 def test_large_number_serialization_and_overflow_rejection(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from stixis.primitives import serialize_number
+    from stixis._syntax.serialize import serialize_number
 
     assert serialize_number(1e20) == "100000000000000000000"
     assert serialize_number(1e22) == "10000000000000000000000"
@@ -366,7 +366,7 @@ def test_stylesheet_and_nested_rules_formatting() -> None:
 def test_comment_node_section_spacing_and_options_context(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import stixis.nodes as nodes_mod
+    import stixis.stylesheet as nodes_mod
     from stixis import using_options
 
     # 1. Leading newline on a section comment (or `leading_newline=True`) emits a blank line in non-minified output
@@ -615,7 +615,7 @@ def test_upstream_checker_detects_unresolved_refs_and_formats_agent_issue() -> N
     import check_upstream
 
     from stixis._generated.specs import PROPERTY_SYNTAXES, VALUE_SYNTAXES
-    from stixis.syntax import compile_value_syntax
+    from stixis._grammar.vds import compile_value_syntax
 
     # 1. Resolved syntax produces no unresolved references
     node_ok = compile_value_syntax("normal | <length-percentage>")
@@ -1009,7 +1009,7 @@ def test_unmarked_internal_stixis_names_detected_in_pre_fix_readme_sample() -> N
 
 
 def test_format_token_sequence_preserves_space_after_hyphen_or_hash_delim() -> None:
-    from stixis.syntax import tokenize_css
+    from stixis._syntax.tokenizer import tokenize_css
 
     out = canonicalize("width", "calc(1px - var(--x))")
     assert out == "calc(1px - var(--x))"
@@ -1026,7 +1026,7 @@ def test_format_token_sequence_preserves_space_after_hyphen_or_hash_delim() -> N
 
 
 def test_format_token_sequence_escapes_unrestricted_hash_and_dimension_unit() -> None:
-    from stixis.syntax import tokenize_css
+    from stixis._syntax.tokenizer import tokenize_css
 
     h = canonicalize("--x", r"#1\;color:red")
     assert h == r"#1\;color: red"
@@ -1068,7 +1068,7 @@ def test_url_modifiers_validated_as_ident_or_functional_notation() -> None:
 
 
 def test_tokenize_css_comment_after_star_cdo_cdc_and_escaped_eof() -> None:
-    from stixis.syntax import tokenize_css
+    from stixis._syntax.tokenizer import tokenize_css
 
     def kinds(s: str) -> list[tuple[str, str]]:
         return [(t.kind, t.value) for t in tokenize_css(s)]
@@ -1240,10 +1240,10 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
 def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import stixis.nodes as nodes_mod
-    from stixis.nodes import is_property_enabled
+    import stixis._grammar.targets as targets_mod
+    from stixis._grammar.targets import is_property_enabled
 
-    monkeypatch.setattr(nodes_mod, "PROPERTY_ENGINE_COUNTS", {})
+    monkeypatch.setattr(targets_mod, "PROPERTY_ENGINE_COUNTS", {})
     assert not is_property_enabled("width", SerializationOptions(min_engines=1))
     with pytest.raises(StixisValidationError, match=r"0 engine\(s\)"):
         canonicalize("width", "10px", options=SerializationOptions(min_engines=1))
@@ -1258,8 +1258,8 @@ def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_desc
 
 
 def test_math_functions_and_token_formatting_have_no_dead_entries() -> None:
-    from stixis.primitives import serialize_url
-    from stixis.syntax import MATH_FUNCTIONS, format_token_sequence, tokenize_css
+    from stixis._grammar.calc import MATH_FUNCTIONS
+    from stixis._syntax import format_token_sequence, serialize_url, tokenize_css
 
     assert all(fn == fn.strip() for fn in MATH_FUNCTIONS)
     assert "sibling-index" in MATH_FUNCTIONS
@@ -1345,7 +1345,7 @@ def test_check_upstream_shares_wpt_extraction_and_expected_files_with_gen_wpt_te
 def test_dimension_unit_starting_with_exponent_is_escaped(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from stixis.syntax import tokenize_css
+    from stixis._syntax.tokenizer import tokenize_css
 
     for target in ("--x", "<dimension>"):
         for raw_css, expected_unit in (
@@ -1376,7 +1376,7 @@ def test_stylerule_format_minify_visits_nested_rules_once(
 ) -> None:
     import time
 
-    import stixis.nodes as nodes_mod
+    import stixis.stylesheet as nodes_mod
 
     node = StyleRule("a", {"color": "red"})
     for _ in range(17):
@@ -1757,7 +1757,7 @@ def test_type_targets_reject_css_wide_keywords(
 def test_shared_type_target_resolution_between_library_and_cli(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from stixis.nodes import resolve_target_syntax
+    from stixis._grammar.targets import resolve_target_syntax
 
     # 1. Built-in evaluator-supported `<type>` targets work in both library and CLI (angled and bare)
     for type_target, raw_val, expected in (

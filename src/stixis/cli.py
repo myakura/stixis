@@ -16,8 +16,9 @@ from stixis._generated.specs import (
     PROPERTY_ENGINE_COUNTS,
     PROPERTY_SYNTAXES,
 )
+from stixis._grammar.targets import normalize_identifier_key, resolve_target_syntax
+from stixis.api import canonicalize
 from stixis.errors import StixisError
-from stixis.nodes import canonicalize, normalize_identifier_key, resolve_target_syntax
 from stixis.options import SerializationOptions
 
 EXIT_OK = 0

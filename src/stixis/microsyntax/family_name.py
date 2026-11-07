@@ -6,14 +6,16 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from stixis.errors import StixisValidationError
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions
-from stixis.primitives import (
+from stixis._syntax.serialize import (
     RESERVED_CUSTOM_IDENT_KEYWORDS,
-    GenericFamily,
-    Keyword,
     serialize_ident,
     serialize_string,
+)
+from stixis.errors import StixisValidationError
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+from stixis.values import (
+    GenericFamily,
+    Keyword,
 )
 
 GENERIC_FAMILY_KEYWORDS: frozenset[str] = frozenset(

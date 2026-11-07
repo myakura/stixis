@@ -8,15 +8,17 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
-from stixis.errors import StixisValidationError
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions
-from stixis.primitives import (
-    Dimension,
-    Keyword,
-    Percentage,
+from stixis._syntax.serialize import (
     serialize_dimension,
     serialize_number,
     serialize_percentage,
+)
+from stixis.errors import StixisValidationError
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+from stixis.values import (
+    Dimension,
+    Keyword,
+    Percentage,
 )
 
 ANGLE_UNITS: frozenset[str] = UNITS_BY_TYPE["<angle>"]

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from string.templatelib import Template
 from typing import Any, Literal, TypedDict
 
-from stixis.primitives import Dimension, Keyword, Percentage
+from stixis.values import Dimension, Keyword, Percentage
 
 type FontDisplayKeyword = Literal['auto', 'block', 'swap', 'fallback', 'optional']
 type FontWidthKeyword = Literal['normal', 'ultra-condensed', 'extra-condensed', 'condensed', 'semi-condensed', 'semi-expanded', 'expanded', 'extra-expanded', 'ultra-expanded']

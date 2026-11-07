@@ -364,7 +364,7 @@ def _evaluate_property_html_files(
 ) -> PropertySuiteExtraction:
     from stixis import SerializationOptions, StixisError, canonicalize
     from stixis._generated.specs import PROPERTY_SYNTAXES
-    from stixis.nodes import is_property_enabled
+    from stixis._grammar.targets import is_property_enabled
 
     opts = SerializationOptions.cssom(min_engines=min_engines)
     valid: list[tuple[str, str, str]] = []

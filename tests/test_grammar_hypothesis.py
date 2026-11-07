@@ -17,8 +17,8 @@ from stixis import (
     parse_urange_codepoints,
     serialize_value,
 )
-from stixis.nodes import lookup_value_node, resolve_target_syntax
-from stixis.syntax import (
+from stixis._grammar.targets import lookup_value_node, resolve_target_syntax
+from stixis._grammar.vds import (
     AllOfNode,
     AnyOrderNode,
     DelimNode,
@@ -341,7 +341,7 @@ _TOKEN_STREAM_ATOMS: st.SearchStrategy[str] = st.sampled_from(
 def _semantic_tokens(
     css_text: str,
 ) -> list[tuple[str, str, float | int | None, str | None, str | None]]:
-    from stixis.syntax import tokenize_css
+    from stixis._syntax.tokenizer import tokenize_css
 
     return [
         (

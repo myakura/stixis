@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from stixis._syntax.serialize import serialize_integer, serialize_number, serialize_string
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
-from stixis.primitives import Keyword, serialize_integer, serialize_number, serialize_string
+from stixis.values import Keyword
 
 
 def validate_opentype_tag(
