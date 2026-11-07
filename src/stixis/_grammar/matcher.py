@@ -113,6 +113,7 @@ class _TokenMatcher:
         calc_context_functions: frozenset[str] = frozenset(),
         *,
         single_python_leaf: bool = False,
+        nested_values: dict[int, Any] | None = None,
     ) -> None:
         self.tokens = [t for t in tokens if t.kind != "whitespace"]
         self.specs_lookup = specs_lookup
@@ -123,6 +124,7 @@ class _TokenMatcher:
         self.calc_context_keywords = calc_context_keywords
         self.calc_context_functions = calc_context_functions
         self.single_python_leaf = single_python_leaf
+        self._nested_values: dict[int, Any] = nested_values or {}
         self._active_refs: set[tuple[str, bool, int]] = set()
         self._active_py_refs: set[tuple[str, bool]] = set()
 
@@ -153,6 +155,13 @@ class _TokenMatcher:
         max_override: float | None = None,
     ) -> list[tuple[int, str]]:
         n_toks = len(self.tokens)
+        if pos < n_toks and pos in self._nested_values:
+            nested_res = self.match_python_value(
+                node, self._nested_values[pos], min_override, max_override
+            )
+            if nested_res is not None and nested_res != "":
+                return [(pos + 1, nested_res)]
+            return []
 
         if isinstance(node, KeywordNode):
             if not node.name:
@@ -436,11 +445,14 @@ class _TokenMatcher:
         max_override: float | None,
     ) -> list[tuple[int, str]]:
         k = len(items)
-        required_indices = {
-            idx
-            for idx, b in enumerate(items)
-            if not (isinstance(b, MultiplierNode) and b.min_count == 0)
-        }
+        if self.single_python_leaf:
+            required_indices = set(range(k))
+        else:
+            required_indices = {
+                idx
+                for idx, b in enumerate(items)
+                if not (isinstance(b, MultiplierNode) and b.min_count == 0)
+            }
         # States: (cur_pos, matched_dict {branch_idx: rendered_str})
         results: list[tuple[int, dict[int, str]]] = []
         seen_states: set[tuple[int, tuple[tuple[int, str], ...]]] = set()
@@ -524,7 +536,7 @@ class _TokenMatcher:
             for nxt_pos, rendered in child_matches:
                 if nxt_pos == next_start:
                     continue
-                if node.comma_separated and count > 0:
+                if (node.comma_separated and count > 0) or self.single_python_leaf:
                     if nxt_pos in seen_nxt_pos:
                         continue
                     seen_nxt_pos.add(nxt_pos)
@@ -1234,29 +1246,28 @@ class _TokenMatcher:
                     return None
                 if node.max_count is not None and count > node.max_count:
                     return None
-                rendered_items: list[str] = []
-                for elem in value:
-                    r = self.match_python_value(node.child, elem, min_override, max_override)
-                    if r is None:
-                        return None
-                    rendered_items.append(r)
-                sep = ", " if node.comma_separated else " "
-                return sep.join(rendered_items)
+                if count == 0:
+                    return ""
+                sub = self._build_combinator_item_matcher(
+                    value, comma_separated=node.comma_separated
+                )
+                if sub is None:
+                    return None
+                for end_pos, rendered in sub._match_multiplier(node, 0, min_override, max_override):
+                    if end_pos == len(sub.tokens) and rendered != "":
+                        return rendered
             return None
 
         if isinstance(node, JuxtaposeNode):
             if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
                 if len(value) == len(node.items):
-                    parts: list[str] = []
-                    ok = True
-                    for sub_node, sub_val in zip(node.items, value, strict=True):
-                        r = self.match_python_value(sub_node, sub_val, min_override, max_override)
-                        if r is None:
-                            ok = False
-                            break
-                        parts.append(r)
-                    if ok:
-                        return _join_serialized_parts(parts)
+                    sub = self._build_combinator_item_matcher(value)
+                    if sub is not None:
+                        for end_pos, rendered in sub._match_juxtapose(
+                            node.items, 0, min_override, max_override
+                        ):
+                            if end_pos == len(sub.tokens) and rendered != "":
+                                return rendered
                 return self._match_sequence_tokens(node, value)
             return None
 
@@ -1264,70 +1275,73 @@ class _TokenMatcher:
             require_all = isinstance(node, AllOfNode)
             if isinstance(value, Mapping):
                 items_to_match = [v for k, v in value.items() if v is not None and v is not False]
-                return self._match_unordered_python_items(
+                if not items_to_match or len(items_to_match) > len(node.items):
+                    return None
+                if require_all and len(items_to_match) != len(node.items):
+                    return None
+                sub = self._build_combinator_item_matcher(items_to_match)
+                if sub is None:
+                    return None
+                for end_pos, rendered in sub._match_unordered(
                     node.items,
-                    items_to_match,
+                    0,
                     require_all=require_all,
                     min_override=min_override,
                     max_override=max_override,
-                )
+                ):
+                    if end_pos == len(sub.tokens) and rendered != "":
+                        return rendered
+                return None
             if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-                res = self._match_unordered_python_items(
-                    node.items,
-                    list(value),
-                    require_all=require_all,
-                    min_override=min_override,
-                    max_override=max_override,
-                )
-                if res is not None:
-                    return res
+                if (
+                    value
+                    and len(value) <= len(node.items)
+                    and (not require_all or len(value) == len(node.items))
+                ):
+                    sub = self._build_combinator_item_matcher(value)
+                    if sub is not None:
+                        for end_pos, rendered in sub._match_unordered(
+                            node.items,
+                            0,
+                            require_all=require_all,
+                            min_override=min_override,
+                            max_override=max_override,
+                        ):
+                            if end_pos == len(sub.tokens) and rendered != "":
+                                return rendered
                 return self._match_sequence_tokens(node, value)
             return None
 
         return None
 
-    def _match_unordered_python_items(
+    def _build_combinator_item_matcher(
         self,
-        branches: Sequence[ValueNode],
-        values: Sequence[Any],
+        items: Sequence[Any],
         *,
-        require_all: bool,
-        min_override: float | None,
-        max_override: float | None,
-    ) -> str | None:
-        if not values:
-            return None
-        k = len(branches)
-        if len(values) > k:
-            return None
-        if require_all and len(values) != k:
-            return None
-
-        matched: dict[int, str] = {}
-
-        def backtrack(v_idx: int) -> bool:
-            if v_idx == len(values):
-                return True
-            val = values[v_idx]
-            for b_idx, branch in enumerate(branches):
-                if b_idx in matched:
-                    continue
-                saved_refs = set(self._active_py_refs)
-                self._active_py_refs.clear()
-                try:
-                    r = self.match_python_value(branch, val, min_override, max_override)
-                finally:
-                    self._active_py_refs = saved_refs
-                if r is not None:
-                    matched[b_idx] = r
-                    if backtrack(v_idx + 1):
-                        return True
-                    del matched[b_idx]
-            return False
-
-        if not backtrack(0):
-            return None
-        return _join_serialized_parts([matched[i] for i in range(k) if i in matched])
+        comma_separated: bool = False,
+    ) -> _TokenMatcher | None:
+        toks: list[CssToken] = []
+        nested: dict[int, Any] = {}
+        for idx, elem in enumerate(items):
+            if idx > 0 and comma_separated:
+                toks.append(CssToken(kind="comma", value=","))
+            if isinstance(elem, (Sequence, Mapping)) and not isinstance(elem, (str, bytes)):
+                pos = len(toks)
+                toks.append(CssToken(kind="python-nested", value=""))
+                nested[pos] = elem
+            else:
+                leaf_toks = _python_leaf_to_tokens(elem, options=self.options, tokenize_str=False)
+                if leaf_toks is None or len(leaf_toks) != 1:
+                    return None
+                toks.append(leaf_toks[0])
+        return _TokenMatcher(
+            toks,
+            self.specs_lookup,
+            self.options,
+            self.forbidden_custom_idents,
+            single_python_leaf=True,
+            nested_values=nested,
+        )
 
     def _match_sequence_tokens(
         self,
