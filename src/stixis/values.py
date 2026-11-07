@@ -102,7 +102,15 @@ class Dimension:
     def __post_init__(self) -> None:
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
             raise StixisValidationError("<dimension>", "<dimension>", self.value)
-        if not math.isfinite(self.value):
+        try:
+            is_finite = (
+                math.isfinite(float(self.value))
+                if isinstance(self.value, int)
+                else math.isfinite(self.value)
+            )
+        except OverflowError as exc:
+            raise StixisValidationError("<dimension>", "<dimension>", self.value) from exc
+        if not is_finite:
             raise StixisValidationError("<dimension>", "<dimension>", self.value)
         if not isinstance(self.unit, str) or not self.unit:
             raise StixisValidationError("<dimension>", "<dimension>", self.unit)
@@ -120,7 +128,15 @@ class Percentage:
     def __post_init__(self) -> None:
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
             raise StixisValidationError("<percentage>", "<percentage>", self.value)
-        if not math.isfinite(self.value):
+        try:
+            is_finite = (
+                math.isfinite(float(self.value))
+                if isinstance(self.value, int)
+                else math.isfinite(self.value)
+            )
+        except OverflowError as exc:
+            raise StixisValidationError("<percentage>", "<percentage>", self.value) from exc
+        if not is_finite:
             raise StixisValidationError("<percentage>", "<percentage>", self.value)
 
     def __str__(self) -> str:

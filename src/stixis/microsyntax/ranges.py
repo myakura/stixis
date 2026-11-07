@@ -98,7 +98,17 @@ def serialize_angle_value(
     if unit.lower() not in ANGLE_UNITS_LOWER:
         raise StixisValidationError(target, expected_syntax, value)
 
-    deg = angle_to_deg(float(num), unit)
+    if isinstance(num, float):
+        if not math.isfinite(num):
+            raise StixisValidationError(target, expected_syntax, value)
+        fnum = num
+    else:
+        try:
+            fnum = float(num)
+        except OverflowError as exc:
+            raise StixisValidationError(target, expected_syntax, value) from exc
+
+    deg = angle_to_deg(fnum, unit)
     if min_deg is not None and deg < min_deg - 1e-9:
         raise StixisValidationError(target, expected_syntax, value)
     if max_deg is not None and deg > max_deg + 1e-9:
