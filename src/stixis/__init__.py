@@ -11,6 +11,7 @@ from stixis._generated.types import (
     FontTechKeyword,
     FontWidthKeyword,
 )
+from stixis.api import canonicalize, serialize_value
 from stixis.errors import StixisError, StixisSyntaxError, StixisValidationError
 from stixis.microsyntax.font_src import FontSrc
 from stixis.microsyntax.urange import (
@@ -19,7 +20,8 @@ from stixis.microsyntax.urange import (
     parse_urange,
     parse_urange_codepoints,
 )
-from stixis.nodes import (
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions, using_options
+from stixis.stylesheet import (
     AtRule,
     CommentNode,
     FontFace,
@@ -27,14 +29,11 @@ from stixis.nodes import (
     Rule,
     StyleRule,
     StyleSheet,
-    canonicalize,
     dumps,
     serialize,
     serialize_declarations,
-    serialize_value,
 )
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions, using_options
-from stixis.primitives import (
+from stixis.values import (
     Deg,
     Dimension,
     Em,

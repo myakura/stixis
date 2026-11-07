@@ -1,12 +1,13 @@
-"""W3C CSSOM primitive serialization and range validation (`cssom-1` §2.1 & §6.7.2)."""
+"""W3C CSSOM primitive and token-sequence serialization (`cssom-1` §2.1 & §6.7.2)."""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Context, Decimal
 from typing import Any
 
+from stixis._syntax.tokenizer import CssToken, validate_token_stream_safety
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
@@ -23,123 +24,28 @@ CSS_WIDE_KEYWORDS: frozenset[str] = frozenset(
 
 RESERVED_CUSTOM_IDENT_KEYWORDS: frozenset[str] = CSS_WIDE_KEYWORDS | frozenset({"default"})
 
-
-@dataclass(frozen=True, slots=True)
-class Keyword:
-    """Explicit CSS identifier or keyword (disambiguates keywords from `<string>` or `<family-name>`)."""
-
-    value: str
-
-    def __str__(self) -> str:
-        return serialize_ident(self.value)
-
-
-@dataclass(frozen=True, slots=True)
-class GenericFamily:
-    """Explicit `<generic-family>` value for `font-family` (e.g., `serif`, `generic(kai)`)."""
-
-    name: str
-
-    def __str__(self) -> str:
-        lower = self.name.strip().lower()
-        if lower.startswith("generic(") and lower.endswith(")"):
-            inner = lower[8:-1].strip()
-            return f"generic({serialize_ident(inner)})"
-        return serialize_ident(lower)
-
-
-def generic(name: str) -> GenericFamily:
-    """Construct an explicit `<generic-family>` value (such as `generic('serif')` or `generic('generic(kai)')`)."""
-    return GenericFamily(name)
-
-
-@dataclass(frozen=True, slots=True)
-class Url:
-    """Explicit `<url>` value."""
-
-    value: str
-    modifiers: tuple[str, ...] = ()
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.value, str):
-            raise StixisValidationError("<url>", "<url>", self.value)
-        if not isinstance(self.modifiers, tuple):
-            raise StixisValidationError("<url-modifier>", "<url-modifier>", self.modifiers)
-        for mod in self.modifiers:
-            serialize_url_modifier(mod)
-
-    def __str__(self) -> str:
-        return serialize_url(self.value, modifiers=self.modifiers)
-
-
-@dataclass(frozen=True, slots=True)
-class LocalFont:
-    """Explicit `local(<font-family-name>)` value for `@font-face` `src`."""
-
-    family: str
-
-    def __str__(self) -> str:
-        return f"local({serialize_string(self.family)})"
-
-
-@dataclass(frozen=True, slots=True)
-class Dimension:
-    """A numeric value paired with a CSS unit (`<length>`, `<angle>`, `<time>`, `<frequency>`, `<resolution>`, `<flex>`)."""
-
-    value: int | float
-    unit: str
-
-    def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
-            raise StixisValidationError("<dimension>", "<dimension>", self.value)
-        if not math.isfinite(self.value):
-            raise StixisValidationError("<dimension>", "<dimension>", self.value)
-        if not isinstance(self.unit, str) or not self.unit:
-            raise StixisValidationError("<dimension>", "<dimension>", self.unit)
-
-    def __str__(self) -> str:
-        return f"{serialize_number(self.value)}{self.unit}"
-
-
-@dataclass(frozen=True, slots=True)
-class Percentage:
-    """A numeric percentage value (`<percentage>`)."""
-
-    value: int | float
-
-    def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
-            raise StixisValidationError("<percentage>", "<percentage>", self.value)
-        if not math.isfinite(self.value):
-            raise StixisValidationError("<percentage>", "<percentage>", self.value)
-
-    def __str__(self) -> str:
-        return f"{serialize_number(self.value)}%"
-
-
-def Pct(value: float) -> Percentage:
-    """Shorthand constructor for `Percentage(value)`."""
-    return Percentage(value)
-
-
-def Deg(value: float) -> Dimension:
-    """Shorthand constructor for `Dimension(value, 'deg')`."""
-    return Dimension(value, "deg")
-
-
-def Px(value: float) -> Dimension:
-    """Shorthand constructor for `Dimension(value, 'px')`."""
-    return Dimension(value, "px")
-
-
-def Rem(value: float) -> Dimension:
-    """Shorthand constructor for `Dimension(value, 'rem')`."""
-    return Dimension(value, "rem")
-
-
-def Em(value: float) -> Dimension:
-    """Shorthand constructor for `Dimension(value, 'em')`."""
-    return Dimension(value, "em")
+__all__ = [
+    "CSS_WIDE_KEYWORDS",
+    "RESERVED_CUSTOM_IDENT_KEYWORDS",
+    "_serialize_dimension_unit",
+    "canonicalize_unit",
+    "check_numeric_bounds",
+    "escape_char",
+    "escape_code_point",
+    "format_token_sequence",
+    "is_ident_char",
+    "serialize_custom_ident",
+    "serialize_dashed_ident",
+    "serialize_dimension",
+    "serialize_ident",
+    "serialize_integer",
+    "serialize_number",
+    "serialize_percentage",
+    "serialize_string",
+    "serialize_unrestricted_ident",
+    "serialize_url",
+    "serialize_url_modifier",
+]
 
 
 def escape_code_point(cp: int) -> str:
@@ -266,7 +172,6 @@ def serialize_url_modifier(
     """Validate and serialize a `<url-modifier>` (`<ident> | <function-token> <any-value> )`)."""
     if not isinstance(modifier, str):
         raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
-    from stixis.syntax import format_token_sequence, validate_token_stream_safety
 
     tokens = validate_token_stream_safety(
         modifier,
@@ -296,14 +201,22 @@ def serialize_url_modifier(
     raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
 
 
+def _is_values_instance(value: object, class_name: str) -> bool:
+    """Return True if `value` is an instance or subclass instance of `stixis.values.<class_name>`."""
+    return any(
+        cls.__name__ == class_name and getattr(cls, "__module__", "") == "stixis.values"
+        for cls in type(value).__mro__
+    )
+
+
 def serialize_url(
-    value: str | Url,
+    value: Any,
     *,
     modifiers: tuple[str, ...] = (),
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     """Serialize a CSS `<url>` according to `cssom-1` §2.1 `serialize a URL`."""
-    if isinstance(value, Url):
+    if _is_values_instance(value, "Url"):
         raw = value.value
         mods = value.modifiers or modifiers
     elif isinstance(value, str):
@@ -410,7 +323,7 @@ def serialize_percentage(
 ) -> str:
     """Validate and serialize a CSS `<percentage>` from `Percentage`, `(num, '%')`, or `%` string."""
     num: int | float
-    if isinstance(value, Percentage):
+    if _is_values_instance(value, "Percentage"):
         num = value.value
     elif (
         isinstance(value, tuple)
@@ -473,7 +386,7 @@ def serialize_dimension(
 
     num: int | float
     unit: str
-    if isinstance(value, Dimension):
+    if _is_values_instance(value, "Dimension"):
         num = value.value
         unit = value.unit
     elif (
@@ -499,3 +412,79 @@ def serialize_dimension(
         expected_syntax=expected_syntax,
     )
     return f"{num_str}{canon_unit}"
+
+
+def _serialize_dimension_unit(unit: str) -> str:
+    """Serialize a dimension unit identifier, escaping a leading `e`/`E` when followed by a digit or `-[0-9]`."""
+    if (
+        len(unit) >= 2
+        and unit[0] in ("e", "E")
+        and ("0" <= unit[1] <= "9" or (len(unit) >= 3 and unit[1] == "-" and "0" <= unit[2] <= "9"))
+    ):
+        return f"{escape_code_point(ord(unit[0]))}{serialize_unrestricted_ident(unit[1:])}"
+    return serialize_ident(unit)
+
+
+def format_token_sequence(
+    tokens: Sequence[CssToken],
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
+    """Serialize a validated sequence of `CssToken`s into canonical CSSOM string form."""
+    out: list[str] = []
+    prev: CssToken | None = None
+
+    for tok in tokens:
+        if tok.kind == "whitespace":
+            continue
+
+        # Determine if space is needed before this token
+        need_space = prev is not None and not (
+            prev.kind in ("function", "(", "[")
+            or tok.kind in (")", "]", "comma", "semicolon", "colon")
+        )
+
+        if need_space:
+            out.append(" ")
+
+        if tok.kind == "ident":
+            out.append(serialize_ident(tok.value))
+        elif tok.kind == "function":
+            fn_lower = tok.value.lower()
+            out.append(f"{serialize_ident(fn_lower)}(")
+        elif tok.kind == "(":
+            out.append("(")
+        elif tok.kind == ")":
+            out.append(")")
+        elif tok.kind == "at-keyword":
+            out.append(f"@{serialize_ident(tok.value)}")
+        elif tok.kind == "hash":
+            if tok.hash_type == "id":
+                out.append(f"#{serialize_ident(tok.value)}")
+            else:
+                out.append(f"#{serialize_unrestricted_ident(tok.value)}")
+        elif tok.kind == "string":
+            out.append(serialize_string(tok.value, options=options))
+        elif tok.kind == "url":
+            out.append(serialize_url(tok.value, options=options))
+        elif tok.kind == "number":
+            assert tok.num is not None
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            out.append(serialize_number(val))
+        elif tok.kind == "percentage":
+            assert tok.num is not None
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            num_s = serialize_number(val)
+            out.append(f"{num_s}%")
+        elif tok.kind == "dimension":
+            assert tok.num is not None
+            assert tok.unit is not None
+            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            num_s = serialize_number(val)
+            out.append(f"{num_s}{_serialize_dimension_unit(tok.unit)}")
+        else:
+            out.append(tok.value)
+
+        prev = tok
+
+    return "".join(out)

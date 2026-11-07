@@ -14,7 +14,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from stixis.syntax import (
+from stixis._grammar.vds import (
     _BUILTIN_PRIMITIVES,
     AllOfNode,
     AnyOrderNode,
@@ -558,7 +558,7 @@ def format_types_py(
         "from string.templatelib import Template",
         "from typing import Any, Literal, TypedDict",
         "",
-        "from stixis.primitives import Dimension, Keyword, Percentage",
+        "from stixis.values import Dimension, Keyword, Percentage",
         "",
     ]
 

@@ -29,7 +29,7 @@ import gen_wpt_tests
 from stixis import SerializationOptions, StixisError, canonicalize
 from stixis._generated import specs as current_specs
 from stixis._generated import units as current_units
-from stixis.syntax import (
+from stixis._grammar.vds import (
     _BUILTIN_PRIMITIVES,
     AllOfNode,
     AnyOrderNode,
@@ -208,7 +208,7 @@ def _check_wpt_cases(
     min_engines: int = 2,
 ) -> tuple[dict[str, int], list[WptFailure], bool]:
     """Run WPT extraction and verify every extracted vector against current Stixis."""
-    from stixis.nodes import is_property_enabled
+    from stixis._grammar.targets import is_property_enabled
 
     failures: list[WptFailure] = []
     opts = SerializationOptions.cssom(min_engines=min_engines)
@@ -693,7 +693,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             lines.append("")
             lines.append(
                 "Add missing prose non-terminals to `[values]` in `codegen/spec_patches.toml`, "
-                "or extend `src/stixis/syntax.py` if a new Value Definition Syntax combinator was introduced:"
+                "or extend `src/stixis/_grammar/` if a new Value Definition Syntax combinator was introduced:"
             )
             lines.append("")
             for ut in report.unresolved_targets:
@@ -734,7 +734,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             "## How Should an Agent Complete This Update?",
             "",
             "1. Read `AGENTS.md` and `.agents/docs/grammar-and-codegen.md`.",
-            "2. If unresolved references are listed above, add declarative entries to `codegen/spec_patches.toml` (under `[values]`, `[properties]`, or `[atrule_descriptors]`) or update `src/stixis/syntax.py` / `src/stixis/microsyntax/`.",
+            "2. If unresolved references are listed above, add declarative entries to `codegen/spec_patches.toml` (under `[values]`, `[properties]`, or `[atrule_descriptors]`) or update `src/stixis/_grammar/` / `src/stixis/microsyntax/`.",
             "3. Regenerate the specification tables, `TypedDict` definitions, WPT test suites, and baseline metadata:",
             "",
             "```bash",

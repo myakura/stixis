@@ -6,10 +6,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from stixis._syntax.serialize import serialize_string, serialize_url
 from stixis.errors import StixisValidationError
 from stixis.microsyntax.family_name import serialize_family_name
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
-from stixis.primitives import Keyword, LocalFont, Url, serialize_string, serialize_url
+from stixis.values import Keyword, LocalFont, Url
 
 FONT_FORMAT_KEYWORDS: frozenset[str] = frozenset(
     {
