@@ -1994,3 +1994,20 @@ def test_relative_color_bare_channel_keywords(
     rc_err = cli_main(["check", "color", "rgb(r g b)"])
     _ = capsys.readouterr()
     assert rc_err == EXIT_VALIDATION_ERROR
+
+
+def test_value_wrapper_subclasses_accepted() -> None:
+    from stixis import Dimension, Percentage
+
+    class CustomDimension(Dimension):
+        pass
+
+    class CustomPercentage(Percentage):
+        pass
+
+    class CustomUrl(Url):
+        pass
+
+    assert serialize_value("width", CustomDimension(10, "px")) == "10px"
+    assert serialize_value("<percentage>", CustomPercentage(50)) == "50%"
+    assert serialize_value("<url>", CustomUrl("a.png")) == 'url("a.png")'

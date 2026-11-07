@@ -201,6 +201,14 @@ def serialize_url_modifier(
     raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
 
 
+def _is_values_instance(value: object, class_name: str) -> bool:
+    """Return True if `value` is an instance or subclass instance of `stixis.values.<class_name>`."""
+    return any(
+        cls.__name__ == class_name and getattr(cls, "__module__", "") == "stixis.values"
+        for cls in type(value).__mro__
+    )
+
+
 def serialize_url(
     value: Any,
     *,
@@ -208,7 +216,7 @@ def serialize_url(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     """Serialize a CSS `<url>` according to `cssom-1` §2.1 `serialize a URL`."""
-    if type(value).__name__ == "Url" and getattr(type(value), "__module__", "") == "stixis.values":
+    if _is_values_instance(value, "Url"):
         raw = value.value
         mods = value.modifiers or modifiers
     elif isinstance(value, str):
@@ -315,10 +323,7 @@ def serialize_percentage(
 ) -> str:
     """Validate and serialize a CSS `<percentage>` from `Percentage`, `(num, '%')`, or `%` string."""
     num: int | float
-    if (
-        type(value).__name__ == "Percentage"
-        and getattr(type(value), "__module__", "") == "stixis.values"
-    ):
+    if _is_values_instance(value, "Percentage"):
         num = value.value
     elif (
         isinstance(value, tuple)
@@ -381,10 +386,7 @@ def serialize_dimension(
 
     num: int | float
     unit: str
-    if (
-        type(value).__name__ == "Dimension"
-        and getattr(type(value), "__module__", "") == "stixis.values"
-    ):
+    if _is_values_instance(value, "Dimension"):
         num = value.value
         unit = value.unit
     elif (
