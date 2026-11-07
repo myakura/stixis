@@ -1,6 +1,6 @@
 # CSSOM serialization and microsyntaxes guide
 
-## CSSOM primitive serialization (`src/stixis/primitives.py`)
+## CSSOM primitive serialization (`src/stixis/_syntax/serialize.py` and `src/stixis/values.py`)
 
 All primitive serializers implement W3C CSSOM section 2.1 (`Common Serializing Idioms`) and section 6.7.2 (`Serializing CSS Values`):
 

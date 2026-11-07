@@ -7,7 +7,7 @@ description: Serialize and validate CSS rules, @font-face descriptors, unicode-r
 
 Stixis is a CSS serializer and validator for Python 3.14+ with zero runtime dependencies. All AST nodes (`FontFace`, `StyleRule`, `AtRule`, `StyleSheet`, `CommentNode`, `RawDeclaration`) validate inputs in `__post_init__` against W3C `@webref/css` Value Definition Syntax grammars and raise `StixisValidationError` or `StixisSyntaxError` on invalid input.
 
-Only the top-level `stixis` package is public; submodules such as `stixis.nodes`, `stixis.syntax`, and `stixis.primitives` are internal and will move in the next minor version.
+Only the top-level `stixis` package is public; submodules such as `stixis._syntax`, `stixis._grammar`, `stixis.values`, `stixis.stylesheet`, and `stixis.api` are internal and not part of the public API.
 
 ## Core API signatures
 

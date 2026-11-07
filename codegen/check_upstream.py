@@ -693,7 +693,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             lines.append("")
             lines.append(
                 "Add missing prose non-terminals to `[values]` in `codegen/spec_patches.toml`, "
-                "or extend `src/stixis/syntax.py` if a new Value Definition Syntax combinator was introduced:"
+                "or extend `src/stixis/_grammar/` if a new Value Definition Syntax combinator was introduced:"
             )
             lines.append("")
             for ut in report.unresolved_targets:
@@ -734,7 +734,7 @@ def format_markdown_issue(report: UpstreamReport) -> str:
             "## How Should an Agent Complete This Update?",
             "",
             "1. Read `AGENTS.md` and `.agents/docs/grammar-and-codegen.md`.",
-            "2. If unresolved references are listed above, add declarative entries to `codegen/spec_patches.toml` (under `[values]`, `[properties]`, or `[atrule_descriptors]`) or update `src/stixis/syntax.py` / `src/stixis/microsyntax/`.",
+            "2. If unresolved references are listed above, add declarative entries to `codegen/spec_patches.toml` (under `[values]`, `[properties]`, or `[atrule_descriptors]`) or update `src/stixis/_grammar/` / `src/stixis/microsyntax/`.",
             "3. Regenerate the specification tables, `TypedDict` definitions, WPT test suites, and baseline metadata:",
             "",
             "```bash",

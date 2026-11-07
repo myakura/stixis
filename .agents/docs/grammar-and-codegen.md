@@ -2,9 +2,9 @@
 
 ## Overview
 
-Stixis separates build-time specification ingestion (`codegen/`) from its runtime evaluator (`src/stixis/syntax.py`). `serialize_value` and `canonicalize` both evaluate inputs against the same compiled `ValueNode` combinator tree.
+Stixis separates build-time specification ingestion (`codegen/`) from its runtime evaluator (`src/stixis/_grammar/` and `src/stixis/_syntax/`). `serialize_value` and `canonicalize` (`src/stixis/api.py`) both evaluate inputs against the same compiled `ValueNode` combinator tree.
 
-## Value Definition Syntax (`src/stixis/syntax.py`)
+## Value Definition Syntax (`src/stixis/_grammar/`)
 
 `compile_value_syntax(syntax_str)` compiles W3C CSS Value Definition Syntax strings (`css-values-4` section 5) into an immutable `ValueNode` tree:
 
@@ -21,7 +21,7 @@ Stixis separates build-time specification ingestion (`codegen/`) from its runtim
   * `NonEmptyGroupNode(child)`: required group `[ ... ]!`.
 * **Math functions (`_is_math_function_token`).** Numeric, percentage, and dimension primitives accept CSS math functions (`calc(...)`, `min(...)`, `max(...)`, `clamp(...)`, `round(...)`, `mod(...)`, `rem(...)`, `sin(...)`, `cos(...)`, `tan(...)`, `asin(...)`, `acos(...)`, `atan(...)`, `atan2(...)`, `pow(...)`, `sqrt(...)`, `hypot(...)`, `log(...)`, `exp(...)`, `abs(...)`, `sign(...)`, `calc-size(...)`, `sibling-index()`, `sibling-count()`). Stixis validates the function's argument count and parses each expression against the `<calc-sum>` / `<calc-product>` / `<calc-value>` structural grammar (`css-values-4` §10.1), enforcing whitespace on both sides of `+` and `-` operators, known dimension units, `<calc-keyword>` constants (`e`, `pi`, `infinity`, `-infinity`, `nan`), and nested parentheses or math/substitution functions. When serializing, Stixis applies the context-free simplification rules of `css-values-4` §10.10: it unwraps nested `calc(...)`, folds pure numbers (`calc(2 * 3)` -> `calc(6)`) and identical-unit dimensions/percentages (`calc(100px + 100px)` -> `calc(200px)`), rewrites division by a non-zero number as multiplication, places the numeric/dimensional factor first in a product (`calc(alpha * 0.5)` -> `calc(0.5 * alpha)`), sorts terms of a sum (`number`, then `percentage`, then dimensions sorted ASCII case-insensitively by canonical unit, then non-numeric terms; `calc(2em + 3%)` -> `calc(3% + 2em)`), preserves `-` when already in canonical order (`calc(10% - 0.5em)` stays `calc(10% - 0.5em)`), and keeps the outer `calc(...)` wrapper on single values. Converting between compatible absolute units (`1in` + `1px`), combining layout-dependent units, evaluating `min()`/`max()`/`clamp()`/`sign()` to `calc(...)`, and dimensional unit-type checking (such as rejecting `1px + 2s` or `1 / 2px`) are not performed.
 
-### PEP 750 `Template` rendering (`render_css_template`)
+### PEP 750 `Template` rendering (`src/stixis/_syntax/template.py`)
 
 When `serialize_value`, `StyleRule`, `AtRule`, `FontFace`, `CommentNode`, or `StyleSheet` receives a Python 3.14+ `string.templatelib.Template` (`t"..."`), `render_css_template` checks the tokens before each `Interpolation` slot:
 
@@ -89,10 +89,10 @@ uv run pytest
 
 When upstream repositories advance, or when `.github/workflows/upstream-watch.yml` opens or updates an `upstream-sync` GitHub Issue, run `codegen/check_upstream.py` to classify the changes:
 
-1. **Auto-applicable updates.** New or modified properties, descriptors, units, or WPT cases that compile and pass with `src/stixis/syntax.py` and `codegen/spec_patches.toml`.
+1. **Auto-applicable updates.** New or modified properties, descriptors, units, or WPT cases that compile and pass with `src/stixis/_grammar/` and `codegen/spec_patches.toml`.
 2. **Action-required items.**
    * **Unresolved non-terminals (`<new-type>`).** Add prose aliases to `[values]` in `codegen/spec_patches.toml`, or add a microsyntax handler under `src/stixis/microsyntax/`.
-   * **Failing WPT cases.** Inspect the target grammar with `uv run stixis inspect <target> --json`, reproduce with `uv run stixis check <target> <raw_css>`, and update `codegen/spec_patches.toml` or `src/stixis/syntax.py`.
+   * **Failing WPT cases.** Inspect the target grammar with `uv run stixis inspect <target> --json`, reproduce with `uv run stixis check <target> <raw_css>`, and update `codegen/spec_patches.toml` or `src/stixis/_grammar/`.
 
 After resolving action items, regenerate all tables, tests, and baseline metadata:
 
