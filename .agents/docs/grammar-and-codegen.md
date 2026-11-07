@@ -47,7 +47,7 @@ After editing `codegen/spec_patches.toml`, run:
 
 ```bash
 uv run python codegen/gen_specs.py
-uv run python codegen/gen_specs.py --check
+uv run python codegen/gen_specs.py --check --webref-dir .upstream/webref/ed/css --bcd-dir .upstream/bcd/css
 ```
 
 ## WPT test generation (`codegen/gen_wpt_tests.py`)
@@ -79,7 +79,7 @@ uv run python codegen/gen_specs.py --check
 Before committing, verify that generated files are current:
 
 ```bash
-uv run python codegen/gen_wpt_tests.py --check
+uv run python codegen/gen_wpt_tests.py --check --wpt-dir .upstream/wpt/css
 uv run pytest
 ```
 
