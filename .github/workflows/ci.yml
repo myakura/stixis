@@ -23,7 +23,15 @@ jobs:
           echo "wpt_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["wpt"]["commit"])')" >> "$GITHUB_OUTPUT"
           echo "bcd_sha=$(python3 -c 'import json; print(json.load(open("codegen/upstream.json"))["bcd"]["commit"])')" >> "$GITHUB_OUTPUT"
 
+      - name: Cache baseline upstream checkouts
+        id: upstream-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .upstream
+          key: upstream-${{ steps.baseline.outputs.webref_sha }}-${{ steps.baseline.outputs.wpt_sha }}-${{ steps.baseline.outputs.bcd_sha }}
+
       - name: Sparse-checkout w3c/webref at baseline commit
+        if: steps.upstream-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: w3c/webref
@@ -33,6 +41,7 @@ jobs:
             ed/css
 
       - name: Sparse-checkout web-platform-tests/wpt at baseline commit
+        if: steps.upstream-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: web-platform-tests/wpt
@@ -42,6 +51,7 @@ jobs:
             css
 
       - name: Sparse-checkout mdn/browser-compat-data at baseline commit
+        if: steps.upstream-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mdn/browser-compat-data
