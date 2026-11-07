@@ -2011,3 +2011,58 @@ def test_value_wrapper_subclasses_accepted() -> None:
     assert serialize_value("width", CustomDimension(10, "px")) == "10px"
     assert serialize_value("<percentage>", CustomPercentage(50)) == "50%"
     assert serialize_value("<url>", CustomUrl("a.png")) == 'url("a.png")'
+
+
+def test_python_value_lowering_through_token_matcher() -> None:
+    from stixis._grammar.matcher import _python_leaf_to_tokens, _python_sequence_to_tokens
+    from stixis.options import DEFAULT_OPTIONS
+
+    # Direct CssToken lowering without string-join re-tokenization
+    assert _python_leaf_to_tokens(True, options=DEFAULT_OPTIONS, tokenize_str=False) is None
+    assert _python_leaf_to_tokens(math.nan, options=DEFAULT_OPTIONS, tokenize_str=False) is None
+    num_toks = _python_leaf_to_tokens(400, options=DEFAULT_OPTIONS, tokenize_str=False)
+    assert num_toks is not None and len(num_toks) == 1
+    assert num_toks[0].kind == "number" and num_toks[0].num == 400.0 and num_toks[0].is_integer
+
+    dim_toks = _python_leaf_to_tokens(Px(10), options=DEFAULT_OPTIONS, tokenize_str=False)
+    assert dim_toks is not None and len(dim_toks) == 1
+    assert dim_toks[0].kind == "dimension" and dim_toks[0].unit == "px"
+
+    seq_toks = _python_sequence_to_tokens(
+        [Px(1), Keyword("solid"), "red"],
+        options=DEFAULT_OPTIONS,
+    )
+    assert seq_toks is not None
+    assert [t.kind for t in seq_toks] == ["dimension", "ident", "ident"]
+
+    # Plain `str` disambiguation on <family-name>, <string>, <opentype-tag>, and <hex-color>
+    assert serialize_value("font-family", ["serif", Keyword("serif"), generic("sans-serif")]) == (
+        '"serif", serif, sans-serif'
+    )
+    assert serialize_value("quotes", ["<<", ">>"]) == '"<<" ">>"'
+    assert serialize_value("text-align", "justify") == '"justify"'
+    assert serialize_value("text-align", Keyword("justify")) == "justify"
+    assert serialize_value("<opentype-tag>", "liga") == '"liga"'
+    assert serialize_value("<hex-color>", "#FF00AA") == "#ff00aa"
+    assert serialize_value("<hex-color>", Keyword("#00FF00")) == "#00ff00"
+
+    # Comma-separated `#` multipliers and `Mapping` inputs on `||` and `&&`
+    assert serialize_value("transition-property", ["opacity", "transform"]) == "opacity, transform"
+    assert (
+        serialize_value(
+            "border",
+            {"color": "red", "style": Keyword("solid"), "width": Px(1)},
+        )
+        == "1px solid red"
+    )
+    opts = SerializationOptions(min_engines=0)
+    assert (
+        serialize_value(
+            "scrollbar-gutter",
+            {"gutter": "stable", "edges": "both-edges"},
+            options=opts,
+        )
+        == "stable both-edges"
+    )
+    with pytest.raises(StixisValidationError):
+        serialize_value("scrollbar-gutter", {"gutter": "stable"}, options=opts)

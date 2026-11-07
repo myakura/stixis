@@ -37,17 +37,16 @@ from stixis._grammar.vds import (
 from stixis._syntax.serialize import (
     CSS_WIDE_KEYWORDS,
     RESERVED_CUSTOM_IDENT_KEYWORDS,
+    _is_values_instance,
     _serialize_dimension_unit,
     format_token_sequence,
     serialize_custom_ident,
     serialize_dashed_ident,
-    serialize_dimension,
     serialize_ident,
-    serialize_integer,
     serialize_number,
-    serialize_percentage,
     serialize_string,
     serialize_url,
+    serialize_url_modifier,
 )
 from stixis._syntax.template import render_css_template
 from stixis._syntax.tokenizer import (
@@ -86,12 +85,9 @@ from stixis.microsyntax.ranges import (
 from stixis.microsyntax.urange import format_urange
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.values import (
-    Dimension,
     GenericFamily,
     Keyword,
     LocalFont,
-    Percentage,
-    Url,
 )
 
 
@@ -115,6 +111,8 @@ class _TokenMatcher:
         allow_css_wide_in_multiword_family: bool = False,
         calc_context_keywords: frozenset[str] = frozenset(),
         calc_context_functions: frozenset[str] = frozenset(),
+        *,
+        single_python_leaf: bool = False,
     ) -> None:
         self.tokens = [t for t in tokens if t.kind != "whitespace"]
         self.specs_lookup = specs_lookup
@@ -124,7 +122,9 @@ class _TokenMatcher:
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
         self.calc_context_keywords = calc_context_keywords
         self.calc_context_functions = calc_context_functions
+        self.single_python_leaf = single_python_leaf
         self._active_refs: set[tuple[str, bool, int]] = set()
+        self._active_py_refs: set[tuple[str, bool]] = set()
 
     def match_root(self, node: ValueNode, *, allow_css_wide: bool = True) -> str | None:
         if allow_css_wide and len(self.tokens) == 1 and self.tokens[0].kind == "ident":
@@ -132,7 +132,7 @@ class _TokenMatcher:
             if kw_low in CSS_WIDE_KEYWORDS:
                 return kw_low
 
-        if _contains_global_substitution(self.tokens):
+        if not self.single_python_leaf and _contains_global_substitution(self.tokens):
             validate_token_stream_safety(
                 self.raw_text or format_token_sequence(self.tokens, options=self.options),
                 forbid_top_level_bang=True,
@@ -157,18 +157,25 @@ class _TokenMatcher:
         if isinstance(node, KeywordNode):
             if not node.name:
                 return [(pos, "")]
-            if (
-                pos < n_toks
-                and self.tokens[pos].kind == "ident"
-                and self.tokens[pos].value.lower() == node.name.lower()
-            ):
-                return [(pos + 1, node.name.lower())]
+            if pos < n_toks:
+                tok = self.tokens[pos]
+                if tok.kind == "ident" and tok.value.lower() == node.name.lower():
+                    return [(pos + 1, node.name.lower())]
+                if (
+                    tok.kind in ("python-str", "python-keyword")
+                    and tok.value.strip().lower() == node.name.lower()
+                ):
+                    return [(pos + 1, node.name.lower())]
             return []
 
         if isinstance(node, DelimNode):
             if pos >= n_toks:
                 return []
             tok = self.tokens[pos]
+            if tok.kind == "python-str":
+                if tok.value.strip() == node.delim:
+                    return [(pos + 1, node.delim)]
+                return []
             if node.delim == "," and tok.kind == "comma":
                 return [(pos + 1, ",")]
             if node.delim == ":" and tok.kind == "colon":
@@ -197,7 +204,23 @@ class _TokenMatcher:
         if isinstance(node, ExclusiveOrNode):
             out: list[tuple[int, str]] = []
             seen: set[tuple[int, str]] = set()
-            for branch in node.items:
+            branches: Sequence[ValueNode] = node.items
+            if pos < n_toks and self.tokens[pos].kind == "python-str":
+                family_branches = [
+                    b
+                    for b in node.items
+                    if (
+                        isinstance(b, PrimitiveNode)
+                        and b.kind in ("<family-name>", "<font-family-name>")
+                    )
+                    or (
+                        isinstance(b, RefNode) and b.name in ("<family-name>", "<font-family-name>")
+                    )
+                ]
+                if family_branches:
+                    other_branches = [b for b in node.items if b not in family_branches]
+                    branches = [*family_branches, *other_branches]
+            for branch in branches:
                 for res in self.match_node(branch, pos, min_override, max_override):
                     if res not in seen:
                         seen.add(res)
@@ -205,9 +228,13 @@ class _TokenMatcher:
             return out
 
         if isinstance(node, JuxtaposeNode):
+            if self.single_python_leaf:
+                return []
             return self._match_juxtapose(node.items, pos, min_override, max_override)
 
         if isinstance(node, AllOfNode):
+            if self.single_python_leaf:
+                return []
             return self._match_unordered(
                 node.items,
                 pos,
@@ -217,6 +244,15 @@ class _TokenMatcher:
             )
 
         if isinstance(node, AnyOrderNode):
+            if self.single_python_leaf:
+                out_any: list[tuple[int, str]] = []
+                seen_any: set[tuple[int, str]] = set()
+                for branch in node.items:
+                    for res in self.match_node(branch, pos, min_override, max_override):
+                        if res not in seen_any:
+                            seen_any.add(res)
+                            out_any.append(res)
+                return out_any
             return self._match_unordered(
                 node.items,
                 pos,
@@ -226,6 +262,14 @@ class _TokenMatcher:
             )
 
         if isinstance(node, MultiplierNode):
+            if self.single_python_leaf:
+                if node.min_count <= 1:
+                    return [
+                        (p, s)
+                        for p, s in self.match_node(node.child, pos, min_override, max_override)
+                        if p > pos and s != ""
+                    ]
+                return []
             return self._match_multiplier(node, pos, min_override, max_override)
 
         return []
@@ -241,12 +285,12 @@ class _TokenMatcher:
         eff_max = node.max_val if node.max_val is not None else max_override
 
         # Special microsyntax fast-paths for font properties when referenced via `<'prop'>`
-        if node.is_property and node.name == "font-style":
+        if not self.single_python_leaf and node.is_property and node.name == "font-style":
             res = self._match_font_style_tokens(pos, is_descriptor=False)
             if res:
                 return res
 
-        if not node.is_property and node.name == "<calc-sum>":
+        if not self.single_python_leaf and not node.is_property and node.name == "<calc-sum>":
             calc_res = _parse_calc_sum(
                 self.tokens,
                 pos,
@@ -547,10 +591,49 @@ class _TokenMatcher:
         if kind in ("<declaration-value>", "<any-value>"):
             if pos >= len(self.tokens):
                 return []
+            if self.single_python_leaf:
+                tok = self.tokens[pos]
+                if tok.kind in ("python-template", "python-str"):
+                    try:
+                        validate_token_stream_safety(
+                            tok.value,
+                            forbid_top_level_semicolon=(kind == "<declaration-value>"),
+                            forbid_top_level_bang=(kind == "<declaration-value>"),
+                            target=kind,
+                        )
+                    except StixisValidationError:
+                        return []
+                    return [(pos + 1, tok.value.strip())]
+                if tok.kind == "number":
+                    return [(pos + 1, tok.value)]
+                if tok.kind == "dimension" and tok.hash_type != "tuple":
+                    return [(pos + 1, f"{tok.value}{tok.unit}")]
+                if tok.kind == "percentage" and tok.hash_type != "tuple":
+                    return [(pos + 1, f"{tok.value}%")]
+                if tok.kind == "python-keyword":
+                    try:
+                        return [(pos + 1, serialize_ident(tok.value))]
+                    except StixisValidationError:
+                        return []
+                if tok.kind == "url":
+                    if tok.unit:
+                        return [(pos + 1, f"url({serialize_string(tok.value)} {tok.unit})")]
+                    return [(pos + 1, serialize_url(tok.value))]
+                return []
             rest = self.tokens[pos:]
             return [(len(self.tokens), format_token_sequence(rest, options=self.options))]
 
         if kind in ("<unicode-range-token>", "<urange>"):
+            if pos < len(self.tokens) and self.tokens[pos].kind == "python-str":
+                try:
+                    return [
+                        (
+                            pos + 1,
+                            format_urange(self.tokens[pos].value, options=self.options),
+                        )
+                    ]
+                except StixisValidationError:
+                    return []
             # `unicode-range` uses raw_text parsing via `format_urange` at the root
             if pos == 0 and self.raw_text:
                 try:
@@ -679,14 +762,19 @@ class _TokenMatcher:
 
         if kind == "<dimension>":
             if (
-                tok.kind == "dimension"
+                (tok.kind == "dimension" or (tok.kind == "percentage" and tok.hash_type == "tuple"))
                 and tok.num is not None
                 and math.isfinite(tok.num)
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
+                raw_unit = "%" if tok.kind == "percentage" else tok.unit
+                try:
+                    unit_s = _serialize_dimension_unit(raw_unit)
+                except StixisValidationError:
+                    return []
                 val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, f"{serialize_number(val)}{_serialize_dimension_unit(tok.unit)}")]
+                return [(pos + 1, f"{serialize_number(val)}{unit_s}")]
             return []
 
         if kind in (
@@ -711,12 +799,12 @@ class _TokenMatcher:
             return dim_matches + pct_matches
 
         if kind in ("<string>", "<string-token>"):
-            if tok.kind == "string":
+            if tok.kind in ("string", "python-str"):
                 return [(pos + 1, serialize_string(tok.value, options=self.options))]
             return []
 
         if kind == "<opentype-tag>":
-            if tok.kind == "string":
+            if tok.kind in ("string", "python-str"):
                 try:
                     return [(pos + 1, serialize_opentype_tag(tok.value, options=self.options))]
                 except StixisValidationError:
@@ -754,6 +842,9 @@ class _TokenMatcher:
 
         if kind in ("<url>", "<url-token>"):
             if tok.kind == "url":
+                if tok.unit:
+                    inner = serialize_string(tok.value, options=self.options)
+                    return [(pos + 1, f"url({inner} {tok.unit})")]
                 return [(pos + 1, serialize_url(tok.value, options=self.options))]
             if tok.kind == "function" and tok.value.lower() in ("url", "src"):
                 grouped = _consume_balanced_group(self.tokens, pos + 1, ")")
@@ -766,13 +857,21 @@ class _TokenMatcher:
             return []
 
         if kind in ("<ident>", "<ident-token>"):
-            if tok.kind == "ident":
-                return [(pos + 1, serialize_ident(tok.value))]
+            if tok.kind in ("ident", "python-str", "python-keyword"):
+                try:
+                    return [(pos + 1, serialize_ident(tok.value))]
+                except StixisValidationError:
+                    return []
             return []
 
         if kind == "<dashed-ident>":
             if tok.kind == "ident" and tok.value.startswith("--") and len(tok.value) >= 2:
                 return [(pos + 1, serialize_dashed_ident(tok.value))]
+            if tok.kind in ("python-str", "python-keyword"):
+                try:
+                    return [(pos + 1, serialize_dashed_ident(tok.value))]
+                except StixisValidationError:
+                    return []
             return []
 
         if kind == "<custom-ident>":
@@ -781,9 +880,31 @@ class _TokenMatcher:
                 if low in RESERVED_CUSTOM_IDENT_KEYWORDS or low in self.forbidden_custom_idents:
                     return []
                 return [(pos + 1, serialize_ident(tok.value))]
+            if tok.kind in ("python-str", "python-keyword"):
+                try:
+                    return [
+                        (
+                            pos + 1,
+                            serialize_custom_ident(
+                                tok.value, forbidden_keywords=self.forbidden_custom_idents
+                            ),
+                        )
+                    ]
+                except StixisValidationError:
+                    return []
             return []
 
         if kind in ("<generic-family>", "<generic-font-family>"):
+            if tok.kind == "python-generic-family":
+                try:
+                    return [(pos + 1, serialize_generic_family(GenericFamily(tok.value)))]
+                except StixisValidationError:
+                    return []
+            if tok.kind == "python-keyword":
+                try:
+                    return [(pos + 1, serialize_generic_family(Keyword(tok.value)))]
+                except StixisValidationError:
+                    return []
             if tok.kind == "ident":
                 low = tok.value.lower()
                 if low in GENERIC_FAMILY_KEYWORDS or (
@@ -801,15 +922,18 @@ class _TokenMatcher:
             return []
 
         if kind in ("<family-name>", "<font-family-name>"):
-            if tok.kind == "string":
-                return [
-                    (
-                        pos + 1,
-                        serialize_family_name(
-                            tok.value, options=self.options, is_quoted_token=True
-                        ),
-                    )
-                ]
+            if tok.kind in ("string", "python-str"):
+                try:
+                    return [
+                        (
+                            pos + 1,
+                            serialize_family_name(
+                                tok.value, options=self.options, is_quoted_token=True
+                            ),
+                        )
+                    ]
+                except StixisValidationError:
+                    return []
             if tok.kind == "ident":
                 # Consume one or more consecutive <custom-ident> tokens
                 idents: list[str] = []
@@ -842,6 +966,18 @@ class _TokenMatcher:
             return []
 
         if kind == "<font-format>":
+            if tok.kind == "python-str":
+                try:
+                    s = serialize_font_format(tok.value, options=self.options)
+                    return [(pos + 1, s[7:-1])]
+                except StixisValidationError:
+                    return []
+            if tok.kind == "python-keyword":
+                try:
+                    s = serialize_font_format(Keyword(tok.value), options=self.options)
+                    return [(pos + 1, s[7:-1])]
+                except StixisValidationError:
+                    return []
             if tok.kind == "string":
                 try:
                     s = serialize_font_format(tok.value, is_quoted_token=True, options=self.options)
@@ -860,14 +996,52 @@ class _TokenMatcher:
             return []
 
         if kind == "<font-tech>":
+            if tok.kind == "python-str":
+                try:
+                    s = serialize_font_tech(tok.value)
+                    return [(pos + 1, s[5:-1])]
+                except StixisValidationError:
+                    return []
+            if tok.kind == "python-keyword":
+                try:
+                    s = serialize_font_tech(Keyword(tok.value))
+                    return [(pos + 1, s[5:-1])]
+                except StixisValidationError:
+                    return []
             if tok.kind == "ident" and tok.value.lower() in FONT_TECH_KEYWORDS:
                 return [(pos + 1, tok.value.lower())]
             return []
 
         if kind in ("<font-src>", "<font-src-list>"):
+            if tok.kind == "python-str":
+                try:
+                    if kind == "<font-src>":
+                        return [
+                            (
+                                pos + 1,
+                                serialize_single_font_src(tok.value, options=self.options),
+                            )
+                        ]
+                    return [
+                        (
+                            pos + 1,
+                            serialize_font_src_list(tok.value, options=self.options),
+                        )
+                    ]
+                except StixisValidationError:
+                    return []
             return self._match_font_src(pos, is_list=(kind == "<font-src-list>"))
 
         if kind == "<hex-color>":
+            if tok.kind in ("python-str", "python-keyword"):
+                s = tok.value.strip()
+                if (
+                    s.startswith("#")
+                    and len(s[1:]) in (3, 4, 6, 8)
+                    and all(c in "0123456789abcdefABCDEF" for c in s[1:])
+                ):
+                    return [(pos + 1, f"#{s[1:].lower()}")]
+                return []
             if (
                 tok.kind == "hash"
                 and len(tok.value) in (3, 4, 6, 8)
@@ -963,6 +1137,215 @@ class _TokenMatcher:
             results.append((cur, " ".join(parts)))
         return results
 
+    def _match_leaf_via_tokens(
+        self,
+        node: ValueNode,
+        value: Any,
+        min_override: float | None = None,
+        max_override: float | None = None,
+    ) -> str | None:
+        toks = _python_leaf_to_tokens(value, options=self.options, tokenize_str=False)
+        if toks is None:
+            return None
+        leaf_matcher = _TokenMatcher(
+            toks,
+            self.specs_lookup,
+            self.options,
+            self.forbidden_custom_idents,
+            single_python_leaf=True,
+        )
+        for pos, rendered in leaf_matcher.match_node(node, 0, min_override, max_override):
+            if pos == len(leaf_matcher.tokens) and rendered != "":
+                return rendered
+        return None
+
+    def match_python_value(
+        self,
+        node: ValueNode,
+        value: Any,
+        min_override: float | None = None,
+        max_override: float | None = None,
+    ) -> str | None:
+        """Evaluate a structured Python `value` against `node` by lowering leaves to `CssToken`s."""
+        if not isinstance(value, (Sequence, Mapping)) or isinstance(value, (str, bytes)):
+            return self._match_leaf_via_tokens(node, value, min_override, max_override)
+
+        if isinstance(node, (KeywordNode, DelimNode)):
+            return None
+
+        if isinstance(node, PrimitiveNode):
+            if node.kind in (
+                "<unicode-range-token>",
+                "<urange>",
+                "<font-src>",
+                "<font-src-list>",
+                "<font-format>",
+                "<font-tech>",
+            ):
+                try:
+                    if node.kind in ("<unicode-range-token>", "<urange>"):
+                        return format_urange(value, options=self.options)
+                    if node.kind == "<font-src>":
+                        return serialize_single_font_src(value, options=self.options)
+                    if node.kind == "<font-src-list>":
+                        return serialize_font_src_list(value, options=self.options)
+                    if node.kind == "<font-format>":
+                        return serialize_font_format(value, options=self.options)[7:-1]
+                    if node.kind == "<font-tech>":
+                        return serialize_font_tech(value)[5:-1]
+                except StixisValidationError:
+                    return None
+            return self._match_leaf_via_tokens(node, value, min_override, max_override)
+
+        if isinstance(node, RefNode):
+            eff_min = node.min_val if node.min_val is not None else min_override
+            eff_max = node.max_val if node.max_val is not None else max_override
+            key = (node.name, node.is_property)
+            if key in self._active_py_refs:
+                return None
+            target_node = self.specs_lookup(node.name, node.is_property)
+            if target_node is None:
+                return None
+            self._active_py_refs.add(key)
+            try:
+                return self.match_python_value(target_node, value, eff_min, eff_max)
+            finally:
+                self._active_py_refs.discard(key)
+
+        if isinstance(node, NonEmptyGroupNode):
+            res = self.match_python_value(node.child, value, min_override, max_override)
+            return res if res else None
+
+        if isinstance(node, ExclusiveOrNode):
+            for branch in node.items:
+                res = self.match_python_value(branch, value, min_override, max_override)
+                if res is not None:
+                    return res
+            return None
+
+        if isinstance(node, MultiplierNode):
+            if node.min_count <= 1:
+                single = self.match_python_value(node.child, value, min_override, max_override)
+                if single is not None:
+                    return single
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                count = len(value)
+                if count < node.min_count:
+                    return None
+                if node.max_count is not None and count > node.max_count:
+                    return None
+                rendered_items: list[str] = []
+                for elem in value:
+                    r = self.match_python_value(node.child, elem, min_override, max_override)
+                    if r is None:
+                        return None
+                    rendered_items.append(r)
+                sep = ", " if node.comma_separated else " "
+                return sep.join(rendered_items)
+            return None
+
+        if isinstance(node, JuxtaposeNode):
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                if len(value) == len(node.items):
+                    parts: list[str] = []
+                    ok = True
+                    for sub_node, sub_val in zip(node.items, value, strict=True):
+                        r = self.match_python_value(sub_node, sub_val, min_override, max_override)
+                        if r is None:
+                            ok = False
+                            break
+                        parts.append(r)
+                    if ok:
+                        return _join_serialized_parts(parts)
+                return self._match_sequence_tokens(node, value)
+            return None
+
+        if isinstance(node, (AllOfNode, AnyOrderNode)):
+            require_all = isinstance(node, AllOfNode)
+            if isinstance(value, Mapping):
+                items_to_match = [v for k, v in value.items() if v is not None and v is not False]
+                return self._match_unordered_python_items(
+                    node.items,
+                    items_to_match,
+                    require_all=require_all,
+                    min_override=min_override,
+                    max_override=max_override,
+                )
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                res = self._match_unordered_python_items(
+                    node.items,
+                    list(value),
+                    require_all=require_all,
+                    min_override=min_override,
+                    max_override=max_override,
+                )
+                if res is not None:
+                    return res
+                return self._match_sequence_tokens(node, value)
+            return None
+
+        return None
+
+    def _match_unordered_python_items(
+        self,
+        branches: Sequence[ValueNode],
+        values: Sequence[Any],
+        *,
+        require_all: bool,
+        min_override: float | None,
+        max_override: float | None,
+    ) -> str | None:
+        if not values:
+            return None
+        k = len(branches)
+        if len(values) > k:
+            return None
+        if require_all and len(values) != k:
+            return None
+
+        matched: dict[int, str] = {}
+
+        def backtrack(v_idx: int) -> bool:
+            if v_idx == len(values):
+                return True
+            val = values[v_idx]
+            for b_idx, branch in enumerate(branches):
+                if b_idx in matched:
+                    continue
+                saved_refs = set(self._active_py_refs)
+                self._active_py_refs.clear()
+                try:
+                    r = self.match_python_value(branch, val, min_override, max_override)
+                finally:
+                    self._active_py_refs = saved_refs
+                if r is not None:
+                    matched[b_idx] = r
+                    if backtrack(v_idx + 1):
+                        return True
+                    del matched[b_idx]
+            return False
+
+        if not backtrack(0):
+            return None
+        return _join_serialized_parts([matched[i] for i in range(k) if i in matched])
+
+    def _match_sequence_tokens(
+        self,
+        node: ValueNode,
+        seq: Sequence[Any],
+    ) -> str | None:
+        tokens = _python_sequence_to_tokens(seq, options=self.options)
+        if tokens is None:
+            return None
+        seq_matcher = _TokenMatcher(
+            tokens,
+            self.specs_lookup,
+            self.options,
+            self.forbidden_custom_idents,
+            calc_context_functions=_collect_grammar_calc_functions(node, self.specs_lookup),
+        )
+        return seq_matcher.match_root(node, allow_css_wide=False)
+
 
 def _join_serialized_parts(parts: Sequence[str]) -> str:
     out: list[str] = []
@@ -982,308 +1365,44 @@ def _join_serialized_parts(parts: Sequence[str]) -> str:
     return "".join(out)
 
 
-def _node_matches_single_value(
-    node: ValueNode,
-    value: Any,
-    specs_lookup: Callable[[str, bool], ValueNode | None],
-    options: SerializationOptions,
-    forbidden_custom_idents: frozenset[str],
-    min_override: float | None = None,
-    max_override: float | None = None,
-    active_refs: set[tuple[str, bool]] | None = None,
-) -> str | None:
-    """Try to serialize a structured Python `value` directly against `node`, returning `None` if it does not match."""
-    if active_refs is None:
-        active_refs = set()
-
-    if isinstance(node, KeywordNode):
-        if isinstance(value, Keyword):
-            raw = value.value
-        elif isinstance(value, str):
-            raw = value
-        else:
-            return None
-        if raw.strip().lower() == node.name.lower():
-            return node.name.lower()
-        return None
-
-    if isinstance(node, DelimNode):
-        if isinstance(value, str) and value.strip() == node.delim:
-            return node.delim
-        return None
-
-    if isinstance(node, PrimitiveNode):
-        return _serialize_primitive_python_value(
-            node,
-            value,
-            specs_lookup,
-            options,
-            forbidden_custom_idents,
-            min_override,
-            max_override,
-        )
-
-    if isinstance(node, RefNode):
-        eff_min = node.min_val if node.min_val is not None else min_override
-        eff_max = node.max_val if node.max_val is not None else max_override
-        key = (node.name, node.is_property)
-        if key in active_refs:
-            return None
-        target_node = specs_lookup(node.name, node.is_property)
-        if target_node is None:
-            return None
-        active_refs.add(key)
-        try:
-            return _node_matches_single_value(
-                target_node,
-                value,
-                specs_lookup,
-                options,
-                forbidden_custom_idents,
-                eff_min,
-                eff_max,
-                active_refs,
-            )
-        finally:
-            active_refs.discard(key)
-
-    if isinstance(node, NonEmptyGroupNode):
-        res = _node_matches_single_value(
-            node.child,
-            value,
-            specs_lookup,
-            options,
-            forbidden_custom_idents,
-            min_override,
-            max_override,
-            active_refs,
-        )
-        return res if res else None
-
-    if isinstance(node, ExclusiveOrNode):
-        # If `value` is a plain `str` (and not `Keyword`/`GenericFamily`) and one of the branches
-        # is `<string>` or `<family-name>` / `<font-family-name>`, check whether it matches a keyword first
-        # ONLY when neither `<family-name>` nor `<font-family-name>` is a branch!
-        has_family_branch = any(
-            isinstance(b, PrimitiveNode)
-            and b.kind in ("<family-name>", "<font-family-name>")
-            or (isinstance(b, RefNode) and b.name in ("<family-name>", "<font-family-name>"))
-            for b in node.items
-        )
-        if isinstance(value, str) and has_family_branch:
-            for branch in node.items:
-                if (
-                    isinstance(branch, PrimitiveNode)
-                    and branch.kind in ("<family-name>", "<font-family-name>")
-                ) or (
-                    isinstance(branch, RefNode)
-                    and branch.name in ("<family-name>", "<font-family-name>")
-                ):
-                    res = _node_matches_single_value(
-                        branch,
-                        value,
-                        specs_lookup,
-                        options,
-                        forbidden_custom_idents,
-                        min_override,
-                        max_override,
-                        active_refs,
-                    )
-                    if res is not None:
-                        return res
-
-        for branch in node.items:
-            res = _node_matches_single_value(
-                branch,
-                value,
-                specs_lookup,
-                options,
-                forbidden_custom_idents,
-                min_override,
-                max_override,
-                active_refs,
-            )
-            if res is not None:
-                return res
-        return None
-
-    if isinstance(node, MultiplierNode):
-        # A single item is valid if min_count <= 1
-        if node.min_count <= 1:
-            single = _node_matches_single_value(
-                node.child,
-                value,
-                specs_lookup,
-                options,
-                forbidden_custom_idents,
-                min_override,
-                max_override,
-                active_refs,
-            )
-            if single is not None:
-                return single
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            count = len(value)
-            if count < node.min_count:
-                return None
-            if node.max_count is not None and count > node.max_count:
-                return None
-            rendered_items: list[str] = []
-            for elem in value:
-                r = _node_matches_single_value(
-                    node.child,
-                    elem,
-                    specs_lookup,
-                    options,
-                    forbidden_custom_idents,
-                    min_override,
-                    max_override,
-                    active_refs,
-                )
-                if r is None:
-                    return None
-                rendered_items.append(r)
-            sep = ", " if node.comma_separated else " "
-            return sep.join(rendered_items)
-        return None
-
-    if isinstance(node, JuxtaposeNode):
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            # Try matching sequence items via token stream or positional matching
-            if len(value) == len(node.items):
-                parts: list[str] = []
-                ok = True
-                for sub_node, sub_val in zip(node.items, value, strict=True):
-                    r = _node_matches_single_value(
-                        sub_node,
-                        sub_val,
-                        specs_lookup,
-                        options,
-                        forbidden_custom_idents,
-                        min_override,
-                        max_override,
-                        active_refs,
-                    )
-                    if r is None:
-                        ok = False
-                        break
-                    parts.append(r)
-                if ok:
-                    return _join_serialized_parts(parts)
-            # Or convert sequence elements to CSS tokens and match through _TokenMatcher
-            return _match_sequence_via_tokens(
-                node, value, specs_lookup, options, forbidden_custom_idents
-            )
-        return None
-
-    if isinstance(node, (AllOfNode, AnyOrderNode)):
-        require_all = isinstance(node, AllOfNode)
-        if isinstance(value, Mapping):
-            # Match mapping keys/values or values against branches in canonical order
-            items_to_match = [v for k, v in value.items() if v is not None and v is not False]
-            return _match_unordered_python_items(
-                node.items,
-                items_to_match,
-                require_all=require_all,
-                specs_lookup=specs_lookup,
-                options=options,
-                forbidden_custom_idents=forbidden_custom_idents,
-                min_override=min_override,
-                max_override=max_override,
-            )
-        if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            res = _match_unordered_python_items(
-                node.items,
-                list(value),
-                require_all=require_all,
-                specs_lookup=specs_lookup,
-                options=options,
-                forbidden_custom_idents=forbidden_custom_idents,
-                min_override=min_override,
-                max_override=max_override,
-            )
-            if res is not None:
-                return res
-            return _match_sequence_via_tokens(
-                node, value, specs_lookup, options, forbidden_custom_idents
-            )
-        if not require_all:
-            # Single item matching one branch of `A || B`
-            for branch in node.items:
-                r = _node_matches_single_value(
-                    branch,
-                    value,
-                    specs_lookup,
-                    options,
-                    forbidden_custom_idents,
-                    min_override,
-                    max_override,
-                    active_refs,
-                )
-                if r is not None:
-                    return r
-        return None
-
-    return None
-
-
-def _match_unordered_python_items(
-    branches: Sequence[ValueNode],
-    values: Sequence[Any],
+def _python_leaf_to_tokens(
+    item: Any,
     *,
-    require_all: bool,
-    specs_lookup: Callable[[str, bool], ValueNode | None],
     options: SerializationOptions,
-    forbidden_custom_idents: frozenset[str],
-    min_override: float | None,
-    max_override: float | None,
-) -> str | None:
-    if not values:
-        return None
-    k = len(branches)
-    if len(values) > k:
-        return None
-    if require_all and len(values) != k:
+    tokenize_str: bool,
+) -> list[CssToken] | None:
+    """Lower a Python leaf value directly into `CssToken`s."""
+    if isinstance(item, bool):
         return None
 
-    # Find assignment of `values` to distinct branch indices `0..k-1`
-    matched: dict[int, str] = {}
+    if isinstance(item, (int, float)):
+        if not math.isfinite(item):
+            return None
+        is_int = isinstance(item, int) or item.is_integer()
+        num_str = serialize_number(item)
+        return [CssToken(kind="number", value=num_str, num=float(item), is_integer=is_int)]
 
-    def backtrack(v_idx: int) -> bool:
-        if v_idx == len(values):
-            return True
-        val = values[v_idx]
-        for b_idx, branch in enumerate(branches):
-            if b_idx in matched:
-                continue
-            r = _node_matches_single_value(
-                branch,
-                val,
-                specs_lookup,
-                options,
-                forbidden_custom_idents,
-                min_override,
-                max_override,
+    if _is_values_instance(item, "Dimension"):
+        num = item.value
+        unit = item.unit
+        is_int = isinstance(num, int) or num.is_integer()
+        num_str = serialize_number(num)
+        return [
+            CssToken(
+                kind="dimension",
+                value=num_str,
+                num=float(num),
+                is_integer=is_int,
+                unit=unit,
             )
-            if r is not None:
-                matched[b_idx] = r
-                if backtrack(v_idx + 1):
-                    return True
-                del matched[b_idx]
-        return False
+        ]
 
-    if not backtrack(0):
-        return None
-    return _join_serialized_parts([matched[i] for i in range(k) if i in matched])
+    if _is_values_instance(item, "Percentage"):
+        num = item.value
+        is_int = isinstance(num, int) or num.is_integer()
+        num_str = serialize_number(num)
+        return [CssToken(kind="percentage", value=num_str, num=float(num), is_integer=is_int)]
 
-
-def _value_item_to_css_fragment(item: Any, options: SerializationOptions) -> str | None:
-    if isinstance(item, Template):
-        return render_css_template(item, options=options)
-    if isinstance(item, (Keyword, GenericFamily, Url, LocalFont, Dimension, Percentage)):
-        return str(item)
-    if not isinstance(item, bool) and isinstance(item, (int, float)):
-        return serialize_number(item)
     if (
         isinstance(item, tuple)
         and len(item) == 2
@@ -1291,248 +1410,116 @@ def _value_item_to_css_fragment(item: Any, options: SerializationOptions) -> str
         and isinstance(item[0], (int, float))
         and isinstance(item[1], str)
     ):
-        return f"{serialize_number(item[0])}{item[1]}"
+        num, unit = item[0], item[1]
+        if not math.isfinite(num) or not unit:
+            return None
+        is_int = isinstance(num, int) or num.is_integer()
+        num_str = serialize_number(num)
+        if unit == "%":
+            return [
+                CssToken(
+                    kind="percentage",
+                    value=num_str,
+                    num=float(num),
+                    is_integer=is_int,
+                    hash_type="tuple",
+                )
+            ]
+        return [
+            CssToken(
+                kind="dimension",
+                value=num_str,
+                num=float(num),
+                is_integer=is_int,
+                unit=unit,
+                hash_type="tuple",
+            )
+        ]
+
+    if isinstance(item, Keyword):
+        if tokenize_str:
+            try:
+                ident_s = serialize_ident(item.value)
+            except StixisValidationError:
+                return None
+            return [CssToken(kind="ident", value=item.value)] if ident_s else None
+        return [CssToken(kind="python-keyword", value=item.value)]
+
+    if isinstance(item, GenericFamily):
+        if tokenize_str:
+            lower = item.name.strip().lower()
+            if lower.startswith("generic(") and lower.endswith(")"):
+                inner = lower[8:-1].strip()
+                if not inner:
+                    return None
+                return [
+                    CssToken(kind="function", value="generic"),
+                    CssToken(kind="ident", value=inner),
+                    CssToken(kind=")", value=")"),
+                ]
+            if not lower:
+                return None
+            return [CssToken(kind="ident", value=lower)]
+        return [CssToken(kind="python-generic-family", value=item.name)]
+
+    if _is_values_instance(item, "Url"):
+        if item.modifiers:
+            if tokenize_str:
+                out_toks: list[CssToken] = [
+                    CssToken(kind="function", value="url"),
+                    CssToken(kind="string", value=item.value),
+                ]
+                for mod in item.modifiers:
+                    mod_s = serialize_url_modifier(mod, options=options)
+                    out_toks.extend(t for t in tokenize_css(mod_s) if t.kind != "whitespace")
+                out_toks.append(CssToken(kind=")", value=")"))
+                return out_toks
+            mod_str = " ".join(serialize_url_modifier(m, options=options) for m in item.modifiers)
+            return [CssToken(kind="url", value=item.value, unit=mod_str)]
+        return [CssToken(kind="url", value=item.value)]
+
+    if isinstance(item, LocalFont):
+        if tokenize_str:
+            return [
+                CssToken(kind="function", value="local"),
+                CssToken(kind="string", value=item.family),
+                CssToken(kind=")", value=")"),
+            ]
+        return None
+
+    if isinstance(item, Template):
+        rendered = render_css_template(item, options=options)
+        if tokenize_str:
+            try:
+                return [t for t in tokenize_css(rendered) if t.kind != "whitespace"]
+            except StixisSyntaxError:
+                return None
+        return [CssToken(kind="python-template", value=rendered)]
+
     if isinstance(item, str):
-        return item
+        if tokenize_str:
+            try:
+                return [t for t in tokenize_css(item) if t.kind != "whitespace"]
+            except StixisSyntaxError:
+                return None
+        return [CssToken(kind="python-str", value=item)]
+
     return None
 
 
-def _match_sequence_via_tokens(
-    node: ValueNode,
+def _python_sequence_to_tokens(
     seq: Sequence[Any],
-    specs_lookup: Callable[[str, bool], ValueNode | None],
+    *,
     options: SerializationOptions,
-    forbidden_custom_idents: frozenset[str],
-) -> str | None:
-    fragments: list[str] = []
+) -> list[CssToken] | None:
+    """Lower a sequence of Python items into a flat `CssToken` stream."""
+    out: list[CssToken] = []
     for elem in seq:
-        frag = _value_item_to_css_fragment(elem, options)
-        if frag is None:
+        toks = _python_leaf_to_tokens(elem, options=options, tokenize_str=True)
+        if toks is None:
             return None
-        fragments.append(frag)
-    joined = " ".join(fragments)
-    try:
-        tokens = tokenize_css(joined)
-    except StixisSyntaxError:
-        return None
-    matcher = _TokenMatcher(
-        tokens,
-        specs_lookup,
-        options,
-        forbidden_custom_idents,
-        raw_text=joined,
-        calc_context_functions=_collect_grammar_calc_functions(node, specs_lookup),
-    )
-    return matcher.match_root(node, allow_css_wide=False)
-
-
-def _serialize_primitive_python_value(
-    node: PrimitiveNode,
-    value: Any,
-    specs_lookup: Callable[[str, bool], ValueNode | None],
-    options: SerializationOptions,
-    forbidden_custom_idents: frozenset[str],
-    min_override: float | None,
-    max_override: float | None,
-) -> str | None:
-    kind = node.kind
-    eff_min = node.min_val if node.min_val is not None else min_override
-    eff_max = node.max_val if node.max_val is not None else max_override
-
-    try:
-        if kind == "<zero>":
-            if not isinstance(value, bool) and isinstance(value, (int, float)) and value == 0:
-                return "0"
-            return None
-
-        if kind == "<integer>":
-            return serialize_integer(value, min_val=eff_min, max_val=eff_max)
-
-        if kind == "<number>":
-            return serialize_number(value, min_val=eff_min, max_val=eff_max)
-
-        if kind == "<percentage>":
-            return serialize_percentage(value, min_val=eff_min, max_val=eff_max)
-
-        if kind in (
-            "<length>",
-            "<angle>",
-            "<time>",
-            "<frequency>",
-            "<resolution>",
-            "<flex>",
-            "<decibel>",
-            "<semitones>",
-        ):
-            allowed = UNITS_BY_TYPE.get(kind, frozenset())
-            lower_map = LOWER_TO_CANONICAL_UNIT.get(kind, {})
-            if kind == "<angle>" and (node.min_unit or node.max_unit):
-                if isinstance(value, Dimension):
-                    deg = angle_to_deg(float(value.value), value.unit)
-                elif (
-                    isinstance(value, tuple)
-                    and len(value) == 2
-                    and not isinstance(value[0], bool)
-                    and isinstance(value[0], (int, float))
-                    and isinstance(value[1], str)
-                ):
-                    deg = angle_to_deg(float(value[0]), value[1])
-                else:
-                    return None
-                if eff_min is not None and deg < eff_min - 1e-9:
-                    return None
-                if eff_max is not None and deg > eff_max + 1e-9:
-                    return None
-                return serialize_dimension(
-                    value,
-                    allowed_units=allowed,
-                    lower_to_canonical=lower_map,
-                    allow_unitless_zero=False,
-                )
-            return serialize_dimension(
-                value,
-                allowed_units=allowed,
-                lower_to_canonical=lower_map,
-                allow_unitless_zero=(kind == "<length>"),
-                min_val=eff_min,
-                max_val=eff_max,
-            )
-
-        if kind in (
-            "<length-percentage>",
-            "<angle-percentage>",
-            "<time-percentage>",
-            "<frequency-percentage>",
-        ):
-            base_kind = f"<{kind[1:].split('-')[0]}>"
-            if isinstance(value, Percentage) or (
-                isinstance(value, tuple) and len(value) == 2 and value[1] == "%"
-            ):
-                return serialize_percentage(value, min_val=eff_min, max_val=eff_max)
-            return _serialize_primitive_python_value(
-                PrimitiveNode(base_kind, eff_min, eff_max, node.min_unit, node.max_unit),
-                value,
-                specs_lookup,
-                options,
-                forbidden_custom_idents,
-                eff_min,
-                eff_max,
-            )
-
-        if kind in ("<string>", "<string-token>"):
-            if isinstance(value, str):
-                return serialize_string(value, options=options)
-            return None
-
-        if kind == "<opentype-tag>":
-            if isinstance(value, str):
-                return serialize_opentype_tag(value, options=options)
-            return None
-
-        if kind in ("<url>", "<url-token>"):
-            if isinstance(value, Url):
-                return serialize_url(value, options=options)
-            return None
-
-        if kind in ("<ident>", "<ident-token>"):
-            if isinstance(value, Keyword):
-                return serialize_ident(value.value)
-            if isinstance(value, str):
-                return serialize_ident(value)
-            return None
-
-        if kind == "<custom-ident>":
-            raw = value.value if isinstance(value, Keyword) else value
-            if isinstance(raw, str):
-                return serialize_custom_ident(raw, forbidden_keywords=forbidden_custom_idents)
-            return None
-
-        if kind == "<dashed-ident>":
-            raw = value.value if isinstance(value, Keyword) else value
-            if isinstance(raw, str):
-                return serialize_dashed_ident(raw)
-            return None
-
-        if kind in ("<family-name>", "<font-family-name>"):
-            if isinstance(value, str):
-                return serialize_family_name(value, options=options, is_quoted_token=True)
-            return None
-
-        if kind in ("<generic-family>", "<generic-font-family>"):
-            if isinstance(value, (GenericFamily, Keyword)):
-                return serialize_generic_family(value)
-            return None
-
-        if kind in ("<unicode-range-token>", "<urange>"):
-            return format_urange(value, options=options)
-
-        if kind == "<font-src>":
-            return serialize_single_font_src(value, options=options)
-
-        if kind == "<font-src-list>":
-            return serialize_font_src_list(value, options=options)
-
-        if kind == "<font-format>":
-            s = serialize_font_format(value, options=options)
-            return s[7:-1]
-
-        if kind == "<font-tech>":
-            s = serialize_font_tech(value)
-            return s[5:-1]
-
-        if kind in ("<declaration-value>", "<any-value>"):
-            if isinstance(value, Template):
-                rendered = render_css_template(value, options=options)
-                validate_token_stream_safety(
-                    rendered,
-                    forbid_top_level_semicolon=(kind == "<declaration-value>"),
-                    forbid_top_level_bang=(kind == "<declaration-value>"),
-                    target=kind,
-                )
-                return rendered.strip()
-            if isinstance(value, str):
-                validate_token_stream_safety(
-                    value,
-                    forbid_top_level_semicolon=(kind == "<declaration-value>"),
-                    forbid_top_level_bang=(kind == "<declaration-value>"),
-                    target=kind,
-                )
-                return value.strip()
-            if not isinstance(value, bool) and isinstance(value, (int, float)):
-                return serialize_number(value)
-            if isinstance(value, (Dimension, Percentage, Keyword, Url)):
-                return str(value)
-            return None
-
-        if kind == "<dimension>":
-            if isinstance(value, Dimension):
-                return f"{serialize_number(value.value, min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value.unit)}"
-            if (
-                isinstance(value, tuple)
-                and len(value) == 2
-                and not isinstance(value[0], bool)
-                and isinstance(value[0], (int, float))
-                and isinstance(value[1], str)
-            ):
-                return f"{serialize_number(value[0], min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value[1])}"
-            return None
-
-        if kind == "<hex-color>":
-            raw = value.value if isinstance(value, Keyword) else value
-            if isinstance(raw, str):
-                s = raw.strip()
-                if (
-                    s.startswith("#")
-                    and len(s[1:]) in (3, 4, 6, 8)
-                    and all(c in "0123456789abcdefABCDEF" for c in s[1:])
-                ):
-                    return f"#{s[1:].lower()}"
-            return None
-
-    except StixisValidationError:
-        return None
-
-    return None
+        out.extend(toks)
+    return out
 
 
 def evaluate_canonicalize(
@@ -1817,8 +1804,14 @@ def evaluate_serialize_value(
             return raw_kw.strip().lower()
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
+    matcher = _TokenMatcher(
+        (),
+        specs_lookup,
+        options,
+        forbidden_custom_idents=forbidden_idents,
+    )
     try:
-        direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
+        direct = matcher.match_python_value(node, value)
     except RecursionError as exc:
         raise StixisValidationError(
             target, syntax, value, "Maximum nesting depth exceeded"
