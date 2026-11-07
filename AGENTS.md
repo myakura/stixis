@@ -39,7 +39,7 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * **Keep the consumer skill and releases in sync.**
   * Treat rejecting previously accepted input, changing a public function or constant's name, parameters, or return value, or changing a public keyword or default value as a breaking change: state it at the top of the PR body and update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`. Also update both files whenever you add or change public APIs, options, or microsyntax behavior.
   * Do not copy generated counts (WPT cases, properties, descriptors) into docs; point to the `--check` output instead.
-  * To cut a release, create branch `chore/release-X.Y.Z`, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, open and merge a PR, tag `vX.Y.Z` on the merge commit, push tag `vX.Y.Z`, and run `gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes`.
+  * To prepare a release, create branch `chore/release-X.Y.Z`, bump the version in `pyproject.toml`, run `uv sync`, commit `chore(release): bump version to X.Y.Z`, and open the release PR. Do not merge it, tag, push a tag, or run `gh release create`: a tag push starts `publish.yml`, which uploads to PyPI and cannot be undone. The maintainer merges the PR, waits for CI on `main`, then tags and publishes.
 
 ## Domain guides
 
