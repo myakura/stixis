@@ -9,9 +9,9 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * Lint check: `uv run ruff check`
 * Format check: `uv run ruff format --check`
 * Regenerate spec tables and types: `uv run python codegen/gen_specs.py`
-* Verify generated spec tables are current: `uv run python codegen/gen_specs.py --check`
+* Verify generated spec tables are current: `uv run python codegen/gen_specs.py --check --webref-dir .upstream/webref/ed/css --bcd-dir .upstream/bcd/css`
 * Regenerate WPT test suite: `uv run python codegen/gen_wpt_tests.py --wpt-dir <path-to-wpt-css>`
-* Verify generated WPT tests are current: `uv run python codegen/gen_wpt_tests.py --check`
+* Verify generated WPT tests are current: `uv run python codegen/gen_wpt_tests.py --check --wpt-dir .upstream/wpt/css`
 * Diff upstream `@webref/css` and WPT and emit an agent Issue report: `uv run python codegen/check_upstream.py [--webref-dir <dir>] [--wpt-dir <dir>] [--min-engines 0..3] [--format markdown|json] [--update-baseline]`
 * Inspect CSS syntax or `@font-face` descriptors: `uv run stixis inspect <target> [--json]`
 * Validate and canonicalize a CSS value: `uv run stixis check <target> <value> [--at-rule <name>] [--min-engines 0..3]`
@@ -35,7 +35,7 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * **Verify premises first.** Before implementing an Issue, check every factual claim and reproduction snippet against live runtime output (`uv run pytest`, `uv run stixis check`) and the W3C CSS specification or WPT suite. If a claim contradicts the CSS specification, close the Issue or scope out that item, and cite the spec section or tokenizer behavior.
 * **Label and link Issues and PRs.**
   * Add appropriate labels (`bug`, `enhancement`, `documentation`, `upstream-sync`) to every Issue and PR.
-  * Use a dedicated branch per Issue, keep behavior changes (`feat`, `fix`) and behavior-preserving refactors (`refactor`) in separate commits even within the same PR, include `Closes #<n>` in the PR body, and run `uv run python codegen/gen_specs.py --check`, `uv run python codegen/gen_wpt_tests.py --check`, `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`, and `codex review` before creating or merging a PR.
+  * Use a dedicated branch per Issue, keep behavior changes (`feat`, `fix`) and behavior-preserving refactors (`refactor`) in separate commits even within the same PR, include `Closes #<n>` in the PR body, and run the test, lint, format, and generated-file verify commands in Commands above (use the `--webref-dir`, `--bcd-dir`, and `--wpt-dir` forms, which match CI) and `codex review` before creating or merging a PR.
 * **Keep the consumer skill and releases in sync.**
   * Treat rejecting previously accepted input, changing a public function or constant's name, parameters, or return value, or changing a public keyword or default value as a breaking change: mark the commit type with `!` after the type and any scope (`fix!:`, `feat!:`, `fix(syntax)!:`; not `fix!(syntax):`), state the breaking change at the top of the PR body, and update [`skills/stixis/SKILL.md`](skills/stixis/SKILL.md) and `README.md`. Also update both files whenever you add or change public APIs, options, or microsyntax behavior.
   * Do not copy generated counts (WPT cases, properties, descriptors) into docs; point to the `--check` output instead.
