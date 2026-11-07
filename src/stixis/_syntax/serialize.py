@@ -285,8 +285,14 @@ def serialize_number(
     """Validate and serialize a CSS `<number>` (`cssom-1` §6.7.2: shortest base-10, max 6 decimals, no scientific notation)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise StixisValidationError(target, expected_syntax, value)
-    if not math.isfinite(value):
-        raise StixisValidationError(target, expected_syntax, value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise StixisValidationError(target, expected_syntax, value)
+    else:
+        try:
+            float(value)
+        except OverflowError as exc:
+            raise StixisValidationError(target, expected_syntax, value) from exc
 
     check_numeric_bounds(value, min_val, max_val, target, expected_syntax)
 

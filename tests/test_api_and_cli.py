@@ -292,6 +292,31 @@ def test_large_number_serialization_and_overflow_rejection(
     captured = capsys.readouterr()
     assert rc_overflow == EXIT_VALIDATION_ERROR
 
+    # Issue #87: Python `int` values too large to convert to a finite float raise StixisValidationError
+    # on `<number>`, dimension, and percentage targets (and in `Px` / `Pct` wrappers), while `<integer>`
+    # and `z-index` keep accepting arbitrary-precision integers.
+    with pytest.raises(StixisValidationError):
+        serialize_value("<number>", 10**400)
+    with pytest.raises(StixisValidationError):
+        Px(10**400)
+    with pytest.raises(StixisValidationError):
+        serialize_value("width", Px(10**400))
+    with pytest.raises(StixisValidationError):
+        serialize_value("width", (10**400, "px"))
+    with pytest.raises(StixisValidationError):
+        Pct(10**400)
+    with pytest.raises(StixisValidationError):
+        serialize_value("<percentage>", Pct(10**400))
+    with pytest.raises(StixisValidationError):
+        serialize_value("<percentage>", (10**400, "%"))
+    with pytest.raises(StixisValidationError):
+        serialize_value("font-style", ("oblique", (10**400, "deg")))
+
+    expected_digits = "1" + "0" * 400
+    assert serialize_value("<integer>", 10**400) == expected_digits
+    assert serialize_value("z-index", 10**400) == expected_digits
+    assert serialize_value("<integer>", 9007199254740993) == "9007199254740993"
+
 
 def test_compact_urange_cascade_shadowing() -> None:
     from stixis import format_urange, parse_urange
