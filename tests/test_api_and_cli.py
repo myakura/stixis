@@ -2022,7 +2022,15 @@ def test_python_value_lowering_through_token_matcher() -> None:
     assert _python_leaf_to_tokens(math.nan, options=DEFAULT_OPTIONS, tokenize_str=False) is None
     num_toks = _python_leaf_to_tokens(400, options=DEFAULT_OPTIONS, tokenize_str=False)
     assert num_toks is not None and len(num_toks) == 1
-    assert num_toks[0].kind == "number" and num_toks[0].num == 400.0 and num_toks[0].is_integer
+    assert num_toks[0].kind == "number" and num_toks[0].num == 400 and num_toks[0].is_integer
+    assert isinstance(num_toks[0].num, int)
+
+    # Preserve exact integer precision above 2**53
+    large_int = 9007199254740993
+    assert serialize_value("<integer>", large_int) == "9007199254740993"
+    assert serialize_value("<number>", large_int) == "9007199254740993"
+    assert serialize_value("width", Px(large_int)) == "9007199254740993px"
+    assert serialize_value("<percentage>", (large_int, "%")) == "9007199254740993%"
 
     dim_toks = _python_leaf_to_tokens(Px(10), options=DEFAULT_OPTIONS, tokenize_str=False)
     assert dim_toks is not None and len(dim_toks) == 1
@@ -2034,6 +2042,14 @@ def test_python_value_lowering_through_token_matcher() -> None:
     )
     assert seq_toks is not None
     assert [t.kind for t in seq_toks] == ["dimension", "ident", "ident"]
+
+    # Sequence-boundary whitespace around math `+` / `-` operators
+    assert serialize_value("border", ["calc(", Px(1), "+", Px(2), ")"]) == "calc(3px)"
+    assert serialize_value("border", [t"calc(", Px(1), t"+", Px(2), t")"]) == "calc(3px)"
+    with pytest.raises(StixisValidationError):
+        serialize_value("border", ["calc(1px+2px)"])
+    with pytest.raises(StixisValidationError):
+        serialize_value("border", ["calc(1px+", "2px)"])
 
     # Plain `str` disambiguation on <family-name>, <string>, <opentype-tag>, and <hex-color>
     assert serialize_value("font-family", ["serif", Keyword("serif"), generic("sans-serif")]) == (

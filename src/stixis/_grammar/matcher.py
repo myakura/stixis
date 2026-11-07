@@ -723,8 +723,7 @@ class _TokenMatcher:
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
-                val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, serialize_number(val))]
+                return [(pos + 1, serialize_number(tok.num))]
             if tok.kind == "ident" and tok.value.lower() in self.calc_context_keywords:
                 return [(pos + 1, tok.value.lower())]
             return []
@@ -737,8 +736,7 @@ class _TokenMatcher:
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
-                val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, f"{serialize_number(val)}%")]
+                return [(pos + 1, f"{serialize_number(tok.num)}%")]
             return []
 
         if kind in (
@@ -768,8 +766,7 @@ class _TokenMatcher:
                     return []
                 if eff_max is not None and check_val > eff_max + 1e-9:
                     return []
-                val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, f"{serialize_number(val)}{canon_u}")]
+                return [(pos + 1, f"{serialize_number(tok.num)}{canon_u}")]
             return []
 
         if kind == "<dimension>":
@@ -785,8 +782,7 @@ class _TokenMatcher:
                     unit_s = _serialize_dimension_unit(raw_unit)
                 except StixisValidationError:
                     return []
-                val = int(tok.num) if tok.is_integer else tok.num
-                return [(pos + 1, f"{serialize_number(val)}{unit_s}")]
+                return [(pos + 1, f"{serialize_number(tok.num)}{unit_s}")]
             return []
 
         if kind in (
@@ -1394,7 +1390,7 @@ def _python_leaf_to_tokens(
             return None
         is_int = isinstance(item, int) or item.is_integer()
         num_str = serialize_number(item)
-        return [CssToken(kind="number", value=num_str, num=float(item), is_integer=is_int)]
+        return [CssToken(kind="number", value=num_str, num=item, is_integer=is_int)]
 
     if _is_values_instance(item, "Dimension"):
         num = item.value
@@ -1405,7 +1401,7 @@ def _python_leaf_to_tokens(
             CssToken(
                 kind="dimension",
                 value=num_str,
-                num=float(num),
+                num=num,
                 is_integer=is_int,
                 unit=unit,
             )
@@ -1415,7 +1411,7 @@ def _python_leaf_to_tokens(
         num = item.value
         is_int = isinstance(num, int) or num.is_integer()
         num_str = serialize_number(num)
-        return [CssToken(kind="percentage", value=num_str, num=float(num), is_integer=is_int)]
+        return [CssToken(kind="percentage", value=num_str, num=num, is_integer=is_int)]
 
     if (
         isinstance(item, tuple)
@@ -1434,7 +1430,7 @@ def _python_leaf_to_tokens(
                 CssToken(
                     kind="percentage",
                     value=num_str,
-                    num=float(num),
+                    num=num,
                     is_integer=is_int,
                     hash_type="tuple",
                 )
@@ -1443,7 +1439,7 @@ def _python_leaf_to_tokens(
             CssToken(
                 kind="dimension",
                 value=num_str,
-                num=float(num),
+                num=num,
                 is_integer=is_int,
                 unit=unit,
                 hash_type="tuple",
@@ -1505,7 +1501,11 @@ def _python_leaf_to_tokens(
         rendered = render_css_template(item, options=options)
         if tokenize_str:
             try:
-                return [t for t in tokenize_css(rendered) if t.kind != "whitespace"]
+                return [
+                    t
+                    for t in tokenize_css(rendered, boundary_whitespace=True)
+                    if t.kind != "whitespace"
+                ]
             except StixisSyntaxError:
                 return None
         return [CssToken(kind="python-template", value=rendered)]
@@ -1513,7 +1513,11 @@ def _python_leaf_to_tokens(
     if isinstance(item, str):
         if tokenize_str:
             try:
-                return [t for t in tokenize_css(item) if t.kind != "whitespace"]
+                return [
+                    t
+                    for t in tokenize_css(item, boundary_whitespace=True)
+                    if t.kind != "whitespace"
+                ]
             except StixisSyntaxError:
                 return None
         return [CssToken(kind="python-str", value=item)]
