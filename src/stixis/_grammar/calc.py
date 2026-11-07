@@ -441,20 +441,38 @@ def _parse_calc_value_node(
         return None
     tok = tokens[pos]
     if tok.kind == "number":
-        if tok.num is None or not math.isfinite(tok.num):
+        if tok.num is None:
             return None
-        return _CalcNumeric(float(tok.num), ""), pos + 1
+        try:
+            fnum = float(tok.num)
+        except OverflowError:
+            return None
+        if not math.isfinite(fnum):
+            return None
+        return _CalcNumeric(fnum, ""), pos + 1
     if tok.kind == "percentage":
-        if tok.num is None or not math.isfinite(tok.num):
+        if tok.num is None:
             return None
-        return _CalcNumeric(float(tok.num), "%"), pos + 1
+        try:
+            fnum = float(tok.num)
+        except OverflowError:
+            return None
+        if not math.isfinite(fnum):
+            return None
+        return _CalcNumeric(fnum, "%"), pos + 1
     if tok.kind == "dimension":
-        if tok.num is None or not math.isfinite(tok.num):
+        if tok.num is None:
+            return None
+        try:
+            fnum = float(tok.num)
+        except OverflowError:
+            return None
+        if not math.isfinite(fnum):
             return None
         canon_u = ALL_LOWER_TO_CANONICAL_UNIT.get(tok.unit.lower())
         if canon_u is None:
             return None
-        return _CalcNumeric(float(tok.num), canon_u), pos + 1
+        return _CalcNumeric(fnum, canon_u), pos + 1
     if tok.kind == "ident":
         low = tok.value.lower()
         if low in CALC_KEYWORDS or low in extra_keywords:

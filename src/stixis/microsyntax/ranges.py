@@ -51,12 +51,16 @@ def angle_to_deg(val: float, unit: str) -> float:
     u = unit.lower()
     if u == "deg":
         return val
-    if u == "grad":
-        return val * 0.9
-    if u == "rad":
-        return val * 180.0 / math.pi
     if u == "turn":
-        return val * 360.0
+        return val * 360
+    try:
+        fval = float(val)
+    except OverflowError:
+        return math.inf if val > 0 else -math.inf
+    if u == "grad":
+        return fval * 0.9
+    if u == "rad":
+        return fval * 180.0 / math.pi
     raise ValueError(f"Unknown angle unit: {unit}")
 
 
@@ -98,7 +102,7 @@ def serialize_angle_value(
     if unit.lower() not in ANGLE_UNITS_LOWER:
         raise StixisValidationError(target, expected_syntax, value)
 
-    deg = angle_to_deg(float(num), unit)
+    deg = angle_to_deg(num, unit)
     if min_deg is not None and deg < min_deg - 1e-9:
         raise StixisValidationError(target, expected_syntax, value)
     if max_deg is not None and deg > max_deg + 1e-9:

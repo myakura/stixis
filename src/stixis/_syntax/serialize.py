@@ -285,13 +285,13 @@ def serialize_number(
     """Validate and serialize a CSS `<number>` (`cssom-1` §6.7.2: shortest base-10, max 6 decimals, no scientific notation)."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise StixisValidationError(target, expected_syntax, value)
+    if isinstance(value, int):
+        check_numeric_bounds(value, min_val, max_val, target, expected_syntax)
+        return str(value)
     if not math.isfinite(value):
         raise StixisValidationError(target, expected_syntax, value)
 
     check_numeric_bounds(value, min_val, max_val, target, expected_syntax)
-
-    if isinstance(value, int):
-        return str(value)
 
     if value == 0.0:
         return "0"
@@ -469,17 +469,29 @@ def format_token_sequence(
             out.append(serialize_url(tok.value, options=options))
         elif tok.kind == "number":
             assert tok.num is not None
-            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            val = (
+                int(tok.num)
+                if tok.is_integer and (isinstance(tok.num, int) or math.isfinite(tok.num))
+                else tok.num
+            )
             out.append(serialize_number(val))
         elif tok.kind == "percentage":
             assert tok.num is not None
-            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            val = (
+                int(tok.num)
+                if tok.is_integer and (isinstance(tok.num, int) or math.isfinite(tok.num))
+                else tok.num
+            )
             num_s = serialize_number(val)
             out.append(f"{num_s}%")
         elif tok.kind == "dimension":
             assert tok.num is not None
             assert tok.unit is not None
-            val = int(tok.num) if tok.is_integer and math.isfinite(tok.num) else tok.num
+            val = (
+                int(tok.num)
+                if tok.is_integer and (isinstance(tok.num, int) or math.isfinite(tok.num))
+                else tok.num
+            )
             num_s = serialize_number(val)
             out.append(f"{num_s}{_serialize_dimension_unit(tok.unit)}")
         else:

@@ -605,6 +605,8 @@ class _TokenMatcher:
                 return []
             if self.single_python_leaf:
                 tok = self.tokens[pos]
+                if tok.kind == "python-template-error":
+                    raise StixisSyntaxError(tok.value)
                 if tok.kind in ("python-template", "python-str"):
                     try:
                         validate_token_stream_safety(
@@ -616,12 +618,12 @@ class _TokenMatcher:
                     except StixisValidationError:
                         return []
                     return [(pos + 1, tok.value.strip())]
-                if tok.kind == "number":
-                    return [(pos + 1, tok.value)]
-                if tok.kind == "dimension" and tok.hash_type != "tuple":
-                    return [(pos + 1, f"{tok.value}{tok.unit}")]
-                if tok.kind == "percentage" and tok.hash_type != "tuple":
-                    return [(pos + 1, f"{tok.value}%")]
+                if tok.kind == "number" and tok.num is not None:
+                    return [(pos + 1, serialize_number(tok.num))]
+                if tok.kind == "dimension" and tok.hash_type != "tuple" and tok.num is not None:
+                    return [(pos + 1, f"{serialize_number(tok.num)}{tok.unit}")]
+                if tok.kind == "percentage" and tok.hash_type != "tuple" and tok.num is not None:
+                    return [(pos + 1, f"{serialize_number(tok.num)}%")]
                 if tok.kind == "python-keyword":
                     try:
                         return [(pos + 1, serialize_ident(tok.value))]
@@ -708,7 +710,7 @@ class _TokenMatcher:
                 tok.kind == "number"
                 and tok.is_integer
                 and tok.num is not None
-                and math.isfinite(tok.num)
+                and (isinstance(tok.num, int) or math.isfinite(tok.num))
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -719,7 +721,7 @@ class _TokenMatcher:
             if (
                 tok.kind == "number"
                 and tok.num is not None
-                and math.isfinite(tok.num)
+                and (isinstance(tok.num, int) or math.isfinite(tok.num))
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -732,7 +734,7 @@ class _TokenMatcher:
             if (
                 tok.kind == "percentage"
                 and tok.num is not None
-                and math.isfinite(tok.num)
+                and (isinstance(tok.num, int) or math.isfinite(tok.num))
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -755,7 +757,11 @@ class _TokenMatcher:
                 if (eff_min is None or 0 >= eff_min) and (eff_max is None or 0 <= eff_max):
                     return [(pos + 1, "0px")]
                 return []
-            if tok.kind == "dimension" and tok.num is not None and math.isfinite(tok.num):
+            if (
+                tok.kind == "dimension"
+                and tok.num is not None
+                and (isinstance(tok.num, int) or math.isfinite(tok.num))
+            ):
                 canon_u = lower_map.get(tok.unit.lower())
                 if canon_u is None or canon_u not in allowed_units:
                     return []
@@ -773,7 +779,7 @@ class _TokenMatcher:
             if (
                 (tok.kind == "dimension" or (tok.kind == "percentage" and tok.hash_type == "tuple"))
                 and tok.num is not None
-                and math.isfinite(tok.num)
+                and (isinstance(tok.num, int) or math.isfinite(tok.num))
                 and (eff_min is None or tok.num >= eff_min)
                 and (eff_max is None or tok.num <= eff_max)
             ):
@@ -1385,23 +1391,42 @@ def _python_leaf_to_tokens(
     if isinstance(item, bool):
         return None
 
-    if isinstance(item, (int, float)):
+    if isinstance(item, int):
+        return [CssToken(kind="number", value=str(item), num=item, is_integer=True)]
+
+    if isinstance(item, float):
         if not math.isfinite(item):
             return None
-        is_int = isinstance(item, int) or item.is_integer()
         num_str = serialize_number(item)
+        if tokenize_str:
+            is_int = "." not in num_str
+            num_val: int | float = int(num_str) if is_int else float(num_str)
+            return [CssToken(kind="number", value=num_str, num=num_val, is_integer=is_int)]
+        is_int = item.is_integer()
         return [CssToken(kind="number", value=num_str, num=item, is_integer=is_int)]
 
     if _is_values_instance(item, "Dimension"):
         num = item.value
         unit = item.unit
-        is_int = isinstance(num, int) or num.is_integer()
-        num_str = serialize_number(num)
+        if isinstance(num, int):
+            is_int = True
+            num_str = str(num)
+            num_val = num
+        else:
+            if not math.isfinite(num):
+                return None
+            num_str = serialize_number(num)
+            if tokenize_str:
+                is_int = "." not in num_str
+                num_val = int(num_str) if is_int else float(num_str)
+            else:
+                is_int = num.is_integer()
+                num_val = num
         return [
             CssToken(
                 kind="dimension",
                 value=num_str,
-                num=num,
+                num=num_val,
                 is_integer=is_int,
                 unit=unit,
             )
@@ -1409,9 +1434,21 @@ def _python_leaf_to_tokens(
 
     if _is_values_instance(item, "Percentage"):
         num = item.value
-        is_int = isinstance(num, int) or num.is_integer()
-        num_str = serialize_number(num)
-        return [CssToken(kind="percentage", value=num_str, num=num, is_integer=is_int)]
+        if isinstance(num, int):
+            is_int = True
+            num_str = str(num)
+            num_val = num
+        else:
+            if not math.isfinite(num):
+                return None
+            num_str = serialize_number(num)
+            if tokenize_str:
+                is_int = "." not in num_str
+                num_val = int(num_str) if is_int else float(num_str)
+            else:
+                is_int = num.is_integer()
+                num_val = num
+        return [CssToken(kind="percentage", value=num_str, num=num_val, is_integer=is_int)]
 
     if (
         isinstance(item, tuple)
@@ -1421,25 +1458,42 @@ def _python_leaf_to_tokens(
         and isinstance(item[1], str)
     ):
         num, unit = item[0], item[1]
-        if not math.isfinite(num) or not unit:
+        if not unit and not tokenize_str:
             return None
-        is_int = isinstance(num, int) or num.is_integer()
-        num_str = serialize_number(num)
+        if isinstance(num, int):
+            is_int = True
+            num_str = str(num)
+            num_val = num
+        else:
+            if not math.isfinite(num):
+                return None
+            num_str = serialize_number(num)
+            if tokenize_str:
+                is_int = "." not in num_str
+                num_val = int(num_str) if is_int else float(num_str)
+            else:
+                is_int = num.is_integer()
+                num_val = num
         if unit == "%":
             return [
                 CssToken(
                     kind="percentage",
                     value=num_str,
-                    num=num,
+                    num=num_val,
                     is_integer=is_int,
                     hash_type="tuple",
                 )
             ]
+        if tokenize_str and not unit.isalpha():
+            try:
+                return [t for t in tokenize_css(f"{num_str}{unit}") if t.kind != "whitespace"]
+            except StixisSyntaxError:
+                return None
         return [
             CssToken(
                 kind="dimension",
                 value=num_str,
-                num=num,
+                num=num_val,
                 is_integer=is_int,
                 unit=unit,
                 hash_type="tuple",
@@ -1498,26 +1552,22 @@ def _python_leaf_to_tokens(
         return None
 
     if isinstance(item, Template):
-        rendered = render_css_template(item, options=options)
         if tokenize_str:
+            rendered = render_css_template(item, options=options)
             try:
-                return [
-                    t
-                    for t in tokenize_css(rendered, boundary_whitespace=True)
-                    if t.kind != "whitespace"
-                ]
+                return [t for t in tokenize_css(rendered) if t.kind != "whitespace"]
             except StixisSyntaxError:
                 return None
+        try:
+            rendered = render_css_template(item, options=options)
+        except StixisSyntaxError as exc:
+            return [CssToken(kind="python-template-error", value=str(exc))]
         return [CssToken(kind="python-template", value=rendered)]
 
     if isinstance(item, str):
         if tokenize_str:
             try:
-                return [
-                    t
-                    for t in tokenize_css(item, boundary_whitespace=True)
-                    if t.kind != "whitespace"
-                ]
+                return [t for t in tokenize_css(item) if t.kind != "whitespace"]
             except StixisSyntaxError:
                 return None
         return [CssToken(kind="python-str", value=item)]
@@ -1525,18 +1575,92 @@ def _python_leaf_to_tokens(
     return None
 
 
+def _tokenize_joined_sequence_fallback(
+    seq: Sequence[Any],
+    *,
+    options: SerializationOptions,
+) -> list[CssToken] | None:
+    fragments: list[str] = []
+    for item in seq:
+        if isinstance(item, Template):
+            fragments.append(render_css_template(item, options=options))
+        elif (
+            isinstance(item, (Keyword, GenericFamily, LocalFont))
+            or _is_values_instance(item, "Url")
+            or _is_values_instance(item, "Dimension")
+            or _is_values_instance(item, "Percentage")
+        ):
+            fragments.append(str(item))
+        elif not isinstance(item, bool) and isinstance(item, (int, float)):
+            if isinstance(item, float) and not math.isfinite(item):
+                return None
+            fragments.append(serialize_number(item))
+        elif (
+            isinstance(item, tuple)
+            and len(item) == 2
+            and not isinstance(item[0], bool)
+            and isinstance(item[0], (int, float))
+            and isinstance(item[1], str)
+        ):
+            if isinstance(item[0], float) and not math.isfinite(item[0]):
+                return None
+            fragments.append(f"{serialize_number(item[0])}{item[1]}")
+        elif isinstance(item, str):
+            fragments.append(item)
+        else:
+            return None
+    try:
+        return [t for t in tokenize_css(" ".join(fragments)) if t.kind != "whitespace"]
+    except StixisSyntaxError:
+        return None
+
+
 def _python_sequence_to_tokens(
     seq: Sequence[Any],
     *,
     options: SerializationOptions,
 ) -> list[CssToken] | None:
-    """Lower a sequence of Python items into a flat `CssToken` stream."""
+    """Lower a sequence of Python items into a flat `CssToken` stream.
+
+    Consecutive `str` and `Template` fragments are joined with a space and
+    tokenized once (with boundary spaces when adjacent to structured values),
+    while structured Python values between runs are lowered directly to tokens.
+    """
     out: list[CssToken] = []
-    for elem in seq:
-        toks = _python_leaf_to_tokens(elem, options=options, tokenize_str=True)
-        if toks is None:
-            return None
-        out.extend(toks)
+    n = len(seq)
+    idx = 0
+    while idx < n:
+        elem = seq[idx]
+        if isinstance(elem, (str, Template)):
+            run_start = idx
+            text_parts: list[str] = []
+            while idx < n and isinstance(seq[idx], (str, Template)):
+                cur = seq[idx]
+                if isinstance(cur, Template):
+                    text_parts.append(render_css_template(cur, options=options))
+                else:
+                    text_parts.append(cur)
+                idx += 1
+            joined_run = " ".join(text_parts)
+            if idx < n and "\\" in joined_run:
+                return _tokenize_joined_sequence_fallback(seq, options=options)
+            prefix = " " if run_start > 0 else ""
+            suffix = " " if idx < n else ""
+            try:
+                run_toks = [
+                    t
+                    for t in tokenize_css(f"{prefix}{joined_run}{suffix}")
+                    if t.kind != "whitespace"
+                ]
+            except StixisSyntaxError:
+                return _tokenize_joined_sequence_fallback(seq, options=options)
+            out.extend(run_toks)
+        else:
+            toks = _python_leaf_to_tokens(elem, options=options, tokenize_str=True)
+            if toks is None:
+                return None
+            out.extend(toks)
+            idx += 1
     return out
 
 

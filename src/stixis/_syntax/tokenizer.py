@@ -187,24 +187,17 @@ def _consume_unquoted_url(text: str, pos: int) -> tuple[str, int]:
     raise StixisSyntaxError("Unclosed url() token")
 
 
-def _has_ws_after(text: str, pos: int, *, boundary_whitespace: bool = False) -> bool:
+def _has_ws_after(text: str, pos: int) -> bool:
     n = len(text)
     while pos < n and text[pos] == "/" and pos + 1 < n and text[pos + 1] == "*":
         end_comment = text.find("*/", pos + 2)
         if end_comment == -1:
             return False
         pos = end_comment + 2
-    if pos >= n:
-        return boundary_whitespace
-    return text[pos] in (" ", "\t", "\n")
+    return pos < n and text[pos] in (" ", "\t", "\n")
 
 
-def tokenize_css(
-    text: str,
-    *,
-    preserve_whitespace: bool = False,
-    boundary_whitespace: bool = False,
-) -> list[CssToken]:
+def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssToken]:
     """Tokenize a CSS string according to W3C CSS Syntax Module Level 3 §4."""
     # Preprocess newlines and NULL characters per §3.3
     normalized = (
@@ -213,7 +206,7 @@ def tokenize_css(
     tokens: list[CssToken] = []
     pos = 0
     n = len(normalized)
-    had_ws_before = boundary_whitespace
+    had_ws_before = False
 
     while pos < n:
         ch = normalized[pos]
@@ -369,10 +362,7 @@ def tokenize_css(
             CssToken(
                 "delim",
                 ch,
-                ws_around=(
-                    cur_ws_before
-                    and _has_ws_after(normalized, pos + 1, boundary_whitespace=boundary_whitespace)
-                ),
+                ws_around=(cur_ws_before and _has_ws_after(normalized, pos + 1)),
             )
         )
         pos += 1

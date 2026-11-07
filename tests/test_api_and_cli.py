@@ -2025,12 +2025,57 @@ def test_python_value_lowering_through_token_matcher() -> None:
     assert num_toks[0].kind == "number" and num_toks[0].num == 400 and num_toks[0].is_integer
     assert isinstance(num_toks[0].num, int)
 
-    # Preserve exact integer precision above 2**53
-    large_int = 9007199254740993
-    assert serialize_value("<integer>", large_int) == "9007199254740993"
-    assert serialize_value("<number>", large_int) == "9007199254740993"
-    assert serialize_value("width", Px(large_int)) == "9007199254740993px"
-    assert serialize_value("<percentage>", (large_int, "%")) == "9007199254740993%"
+    # Preserve exact integer precision above 2**53 and outside float range (10**400)
+    for n in (2**53 - 1, 2**53, 2**53 + 1, -(2**53 + 1), 10**400, -(10**400)):
+        expected_int = str(n)
+        assert serialize_value("<integer>", n) == expected_int
+        assert serialize_value("<number>", n) == expected_int
+        assert serialize_value("z-index", n) == expected_int
+        assert serialize_value("<dimension>", Px(n)) == f"{expected_int}px"
+        assert serialize_value("<dimension>", (n, "px")) == f"{expected_int}px"
+        assert serialize_value("<percentage>", Pct(n)) == f"{expected_int}%"
+        assert serialize_value("<percentage>", (n, "%")) == f"{expected_int}%"
+        if n >= 0:
+            assert serialize_value("width", Px(n)) == f"{expected_int}px"
+        else:
+            with pytest.raises(StixisValidationError):
+                serialize_value("width", Px(n))
+
+    # Float boundary and non-finite handling
+    assert serialize_value("<integer>", 1.0) == "1"
+    assert serialize_value("<number>", 1.0) == "1"
+    assert serialize_value("z-index", 1.0) == "1"
+    assert serialize_value("width", Px(1.0)) == "1px"
+    assert serialize_value("<percentage>", Pct(1.0)) == "1%"
+
+    assert serialize_value("<integer>", -0.0) == "0"
+    assert serialize_value("<number>", -0.0) == "0"
+    assert serialize_value("z-index", -0.0) == "0"
+    assert serialize_value("width", Px(-0.0)) == "0px"
+    assert serialize_value("<percentage>", Pct(-0.0)) == "0%"
+
+    assert serialize_value("<integer>", 1e21) == "1000000000000000000000"
+    assert serialize_value("<number>", 1e21) == "1000000000000000000000"
+    assert serialize_value("z-index", 1e21) == "1000000000000000000000"
+    assert serialize_value("width", Px(1e21)) == "1000000000000000000000px"
+    assert serialize_value("<percentage>", Pct(1e21)) == "1000000000000000000000%"
+
+    with pytest.raises(StixisValidationError):
+        serialize_value("<integer>", 1e-7)
+    assert serialize_value("<number>", 1e-7) == "0"
+    with pytest.raises(StixisValidationError):
+        serialize_value("z-index", 1e-7)
+    assert serialize_value("width", Px(1e-7)) == "0px"
+    assert serialize_value("<percentage>", Pct(1e-7)) == "0%"
+
+    for bad_float in (float("nan"), float("inf")):
+        for target in ("<integer>", "<number>", "z-index"):
+            with pytest.raises(StixisValidationError):
+                serialize_value(target, bad_float)
+        with pytest.raises(StixisValidationError):
+            Px(bad_float)
+        with pytest.raises(StixisValidationError):
+            Pct(bad_float)
 
     dim_toks = _python_leaf_to_tokens(Px(10), options=DEFAULT_OPTIONS, tokenize_str=False)
     assert dim_toks is not None and len(dim_toks) == 1
@@ -2043,9 +2088,23 @@ def test_python_value_lowering_through_token_matcher() -> None:
     assert seq_toks is not None
     assert [t.kind for t in seq_toks] == ["dimension", "ident", "ident"]
 
-    # Sequence-boundary whitespace around math `+` / `-` operators
+    # Sequence fragments: split strings, split comments, and math expressions across items
+    assert serialize_value("grid-template", ['"a', 'a"']) == '"a a"'
+    assert serialize_value("border", ["/* split", "comment */ 1px", "solid", "red"]) == (
+        "1px solid red"
+    )
     assert serialize_value("border", ["calc(", Px(1), "+", Px(2), ")"]) == "calc(3px)"
+    assert serialize_value("border", ["calc(", "var(--a)", "+", Px(2), ")"]) == (
+        "calc(var(--a) + 2px)"
+    )
     assert serialize_value("border", [t"calc(", Px(1), t"+", Px(2), t")"]) == "calc(3px)"
+    assert serialize_value("border", [t"calc(", t"var(--a)", t"+", Px(2), t")"]) == (
+        "calc(var(--a) + 2px)"
+    )
+    assert serialize_value("border", [1e-7]) == "0px"
+    assert serialize_value("border", ["var(--a)", (10, "")]) == "var(--a) 10"
+    with pytest.raises(StixisValidationError):
+        serialize_value("margin", [t'"a'])
     with pytest.raises(StixisValidationError):
         serialize_value("border", ["calc(1px+2px)"])
     with pytest.raises(StixisValidationError):
