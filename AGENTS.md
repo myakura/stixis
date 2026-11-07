@@ -28,6 +28,7 @@ Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero r
 * **Error contract.** Public functions and AST nodes raise `StixisError` subclasses (`StixisValidationError`, `StixisSyntaxError`, which subclass `ValueError`) for invalid CSS or inputs (`SerializationOptions` raises `ValueError`), and the CLI reports errors on `stderr` without a traceback.
 * **Entrypoint guard.** Wrap top-level execution in `if __name__ == "__main__":` in any runnable Python snippet in `README.md` or any script that uses `multiprocessing`.
 * **CLI contract.** `src/stixis/cli.py` is read-only, never branches on agent-detection environment variables, never mixes `nargs="*"` or `"+"` optional flags with positional arguments, and exits with `0` (valid), `1` (validation error), `2` (usage error), or `4` (unknown target).
+* **Layered test modules.** Hand-written tests live in `tests/test_<layer>.py` files that follow the layers of `src/stixis`; add any new test to the file for the layer it exercises.
 
 ## Issue triage and release workflow
 
