@@ -605,7 +605,15 @@ def _truncate_span(text: str | None, max_chars: int = _MAX_SPAN_CHARS) -> str:
     return collapsed[: max_chars - 3] + "..."
 
 
-def format_markdown_issue(report: UpstreamReport) -> str:
+def format_json_report(report: UpstreamReport) -> str:
+    """Format the full, untruncated `UpstreamReport` as JSON."""
+    payload = asdict(report)
+    payload["has_changes"] = report.has_changes
+    payload["needs_agent_intervention"] = report.needs_agent_intervention
+    return json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+
+
+def format_markdown_issue(report: UpstreamReport, *, run_id: str | None = None) -> str:
     """Format a compact, mechanical GitHub Issue report in Markdown."""
     status = (
         "action-required"
@@ -619,6 +627,8 @@ def format_markdown_issue(report: UpstreamReport) -> str:
         f"* `web-platform-tests/wpt` (`css`): `{report.wpt_old_commit[:12]}` -> `{report.wpt_new_commit[:12]}`",
         f"* `mdn/browser-compat-data` (`css`): `{report.bcd_old_commit[:12]}` -> `{report.bcd_new_commit[:12]}`",
     ]
+    if run_id and run_id.isdigit():
+        lines.append(f"* artifact: `gh run download {run_id} -n upstream-report -D .upstream`")
 
     if report.support_changes:
         lines.extend(["", f"## Engine support changes ({len(report.support_changes)})", ""])
@@ -731,6 +741,18 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="Optional file path to write the report to.",
+    )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        default=None,
+        help="Optional file path to also write the full untruncated JSON report to.",
+    )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Optional GitHub Actions run ID to reference in the Markdown artifact download line.",
     )
     parser.add_argument(
         "--update-baseline",
@@ -854,13 +876,14 @@ def main(argv: list[str] | None = None) -> int:
             bcd_dir=bcd_dir,
         )
 
+    if args.json_output is not None:
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(format_json_report(report), encoding="utf-8")
+
     if args.format == "json":
-        payload = asdict(report)
-        payload["has_changes"] = report.has_changes
-        payload["needs_agent_intervention"] = report.needs_agent_intervention
-        rendered = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        rendered = format_json_report(report)
     else:
-        rendered = format_markdown_issue(report)
+        rendered = format_markdown_issue(report, run_id=args.run_id)
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

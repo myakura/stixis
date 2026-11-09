@@ -124,9 +124,22 @@ def test_upstream_markdown_issue_truncates_large_reports_below_github_limit() ->
         unresolved_targets=unresolved_targets,
         wpt_failures=wpt_failures,
     )
-    md = check_upstream.format_markdown_issue(report)
+    md = check_upstream.format_markdown_issue(report, run_id="42607512900")
     assert len(md) <= check_upstream._MAX_ISSUE_BODY_CHARS
     assert "* ... (+70 more)" in md
+    assert "gh run download 42607512900 -n upstream-report -D .upstream" in md
+
+    import json
+
+    full_json = json.loads(check_upstream.format_json_report(report))
+    assert len(full_json["syntax_changes"]) == 120
+    assert len(full_json["unresolved_targets"]) == 120
+    assert len(full_json["wpt_failures"]) == 120
+    assert full_json["syntax_changes"][0]["old_syntax"] == long_syntax
+
+    # Non-numeric run_id is ignored so arbitrary text cannot be injected into the artifact line
+    md_bad_run = check_upstream.format_markdown_issue(report, run_id="123; rm -rf /")
+    assert "artifact:" not in md_bad_run
 
 
 def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path: Path) -> None:
