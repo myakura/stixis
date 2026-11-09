@@ -67,10 +67,79 @@ def test_upstream_checker_detects_unresolved_refs_and_formats_agent_issue() -> N
     assert report.has_changes
     assert report.needs_agent_intervention
     md = check_upstream.format_markdown_issue(report)
-    assert "Action Required" in md
+    assert "`action-required`" in md
     assert "`<future-css-type>`" in md
     assert "`font-future`" in md
-    assert "codegen/spec_patches.toml" in md
+    assert "## Syntax changes (1)" in md
+    assert "## Unresolved targets (1)" in md
+    assert "## WPT failures (1)" in md
+
+
+def test_upstream_markdown_issue_truncates_large_reports_below_github_limit() -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import check_upstream
+
+    long_syntax = " | ".join(f"keyword-{i}-with-extra-text" for i in range(40))
+    syntax_changes = [
+        check_upstream.SyntaxChange(
+            target=f"<type-{i}>",
+            kind="value",
+            change_type="modified",
+            old_syntax=long_syntax,
+            new_syntax=long_syntax + " | extra",
+            resolvable=False,
+            unresolved_refs=[f"<missing-{i}>"],
+        )
+        for i in range(120)
+    ]
+    unresolved_targets = [
+        check_upstream.SyntaxChange(
+            target=f"prop-{i}",
+            kind="property",
+            change_type="modified",
+            old_syntax="auto",
+            new_syntax=long_syntax,
+            resolvable=False,
+            unresolved_refs=[f"<missing-{i}>"],
+        )
+        for i in range(120)
+    ]
+    wpt_failures = [
+        check_upstream.WptFailure(
+            suite="css-properties",
+            target=f"prop-{i}",
+            raw_css=long_syntax,
+            expected=long_syntax,
+            actual_or_error=f"raised Invalid value: {long_syntax}",
+        )
+        for i in range(120)
+    ]
+    report = check_upstream.UpstreamReport(
+        webref_old_commit="1111111111111111111111111111111111111111",
+        webref_new_commit="2222222222222222222222222222222222222222",
+        wpt_old_commit="3333333333333333333333333333333333333333",
+        wpt_new_commit="4444444444444444444444444444444444444444",
+        syntax_changes=syntax_changes,
+        unresolved_targets=unresolved_targets,
+        wpt_failures=wpt_failures,
+    )
+    md = check_upstream.format_markdown_issue(report, run_id="42607512900")
+    assert len(md) <= check_upstream._MAX_ISSUE_BODY_CHARS
+    assert "* ... (+70 more)" in md
+    assert "gh run download 42607512900 -n upstream-report -D .upstream" in md
+
+    import json
+
+    full_json = json.loads(check_upstream.format_json_report(report))
+    assert len(full_json["syntax_changes"]) == 120
+    assert len(full_json["unresolved_targets"]) == 120
+    assert len(full_json["wpt_failures"]) == 120
+    assert full_json["syntax_changes"][0]["old_syntax"] == long_syntax
+
+    # Non-numeric run_id is ignored so arbitrary text cannot be injected into the artifact line
+    md_bad_run = check_upstream.format_markdown_issue(report, run_id="123; rm -rf /")
+    assert "artifact:" not in md_bad_run
 
 
 def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path: Path) -> None:
