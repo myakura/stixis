@@ -413,9 +413,9 @@ def analyze_upstream(
             old_en = min_engines <= 0 or pname in allow_props or old_c >= min_engines
             new_en = min_engines <= 0 or pname in allow_props or new_c >= min_engines
             if old_en != new_en:
-                state_str = "ENABLED" if new_en else "DISABLED"
+                state_str = "enabled" if new_en else "disabled"
                 support_changes.append(
-                    f"`{pname}`: {old_c} -> {new_c} engines (**{state_str}** at `min_engines={min_engines}`)"
+                    f"`{pname}`: {old_c} -> {new_c} engines ({state_str} at `min_engines={min_engines}`)"
                 )
             elif max(old_c, new_c) >= min_engines:
                 support_changes.append(f"`{pname}`: {old_c} -> {new_c} engines")
@@ -590,171 +590,105 @@ def analyze_upstream(
     )
 
 
+_MAX_SECTION_ITEMS = 50
+_MAX_SPAN_CHARS = 200
+_MAX_ISSUE_BODY_CHARS = 60_000
+
+
+def _truncate_span(text: str | None, max_chars: int = _MAX_SPAN_CHARS) -> str:
+    """Collapse whitespace and truncate `text` so a single grammar or error cannot bloat a line."""
+    if not text:
+        return ""
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= max_chars:
+        return collapsed
+    return collapsed[: max_chars - 3] + "..."
+
+
 def format_markdown_issue(report: UpstreamReport) -> str:
-    """Format an agent-ready GitHub Issue / triage report in Markdown."""
-    status_badge = (
-        "Action Required (Spec Patch / Kernel Extension Needed)"
+    """Format a compact, mechanical GitHub Issue report in Markdown."""
+    status = (
+        "action-required"
         if report.needs_agent_intervention
-        else (
-            "Ready for Regeneration (`gen_specs.py` / `gen_wpt_tests.py`)"
-            if report.has_changes
-            else "Up to Date"
-        )
+        else ("ready" if report.has_changes else "up-to-date")
     )
 
     lines = [
-        "# Upstream Specification & WPT Sync Report",
-        "",
-        f"* **Status**: {status_badge}",
-        f"* **Support Threshold**: `min_engines = {report.min_engines}` (pass `--min-engines 1` to include single-engine prototypes)",
-        f"* **`w3c/webref` (`ed/css`)**: `{report.webref_old_commit[:12]}` -> `{report.webref_new_commit[:12]}`",
-        f"* **`web-platform-tests/wpt` (`css`)**: `{report.wpt_old_commit[:12]}` -> `{report.wpt_new_commit[:12]}`",
-        f"* **`mdn/browser-compat-data` (`css`)**: `{report.bcd_old_commit[:12]}` -> `{report.bcd_new_commit[:12]}`",
-        "",
-        "## What Changed Upstream?",
-        "",
+        f"* status: `{status}` (`min_engines={report.min_engines}`)",
+        f"* `w3c/webref` (`ed/css`): `{report.webref_old_commit[:12]}` -> `{report.webref_new_commit[:12]}`",
+        f"* `web-platform-tests/wpt` (`css`): `{report.wpt_old_commit[:12]}` -> `{report.wpt_new_commit[:12]}`",
+        f"* `mdn/browser-compat-data` (`css`): `{report.bcd_old_commit[:12]}` -> `{report.bcd_new_commit[:12]}`",
     ]
 
-    if (
-        not report.unit_changes
-        and not report.syntax_changes
-        and not report.support_changes
-        and not report.wpt_files_changed
-    ):
-        lines.append(
-            "* No syntax, unit, engine-support, or WPT test vector changes detected for enabled targets (`min_engines >= "
-            + str(report.min_engines)
-            + "`)."
-        )
-        if report.experimental_syntax_changes:
-            lines.append(
-                f"* ({len(report.experimental_syntax_changes)} experimental `< {report.min_engines}`-engine property change(s) ignored; run with `--min-engines 1` or `--min-engines 0` to inspect.)"
+    if report.support_changes:
+        lines.extend(["", f"## Engine support changes ({len(report.support_changes)})", ""])
+        for sc_line in report.support_changes[:_MAX_SECTION_ITEMS]:
+            lines.append(f"* {sc_line}")
+        if len(report.support_changes) > _MAX_SECTION_ITEMS:
+            lines.append(f"* ... (+{len(report.support_changes) - _MAX_SECTION_ITEMS} more)")
+
+    if report.unit_changes:
+        lines.extend(["", "## Unit changes", ""])
+        for utype, diff in report.unit_changes.items():
+            lines.append(f"* `{utype}`: added `{diff['added']}`, removed `{diff['removed']}`")
+
+    if report.syntax_changes:
+        lines.extend(["", f"## Syntax changes ({len(report.syntax_changes)})", ""])
+        for sc in report.syntax_changes[:_MAX_SECTION_ITEMS]:
+            old_s = _truncate_span(sc.old_syntax)
+            new_s = _truncate_span(sc.new_syntax)
+            if sc.change_type == "added":
+                lines.append(f"* added `{sc.target}` ({sc.kind}): `{new_s}`")
+            elif sc.change_type == "modified":
+                lines.append(f"* modified `{sc.target}` ({sc.kind}): `{old_s}` -> `{new_s}`")
+            elif sc.change_type == "removed":
+                lines.append(f"* removed `{sc.target}` ({sc.kind}): `{old_s}`")
+        if len(report.syntax_changes) > _MAX_SECTION_ITEMS:
+            lines.append(f"* ... (+{len(report.syntax_changes) - _MAX_SECTION_ITEMS} more)")
+
+    wpt_deltas = [
+        f"* `{key}`: {report.wpt_counts_old.get(key, new_val)} -> {new_val} ({new_val - report.wpt_counts_old.get(key, new_val):+d})"
+        for key, new_val in report.wpt_counts_new.items()
+        if new_val != report.wpt_counts_old.get(key, new_val)
+    ]
+    if wpt_deltas:
+        lines.extend(["", "## WPT counts", "", *wpt_deltas])
+
+    if report.unresolved_targets:
+        lines.extend(["", f"## Unresolved targets ({len(report.unresolved_targets)})", ""])
+        for ut in report.unresolved_targets[:_MAX_SECTION_ITEMS]:
+            new_s = _truncate_span(ut.new_syntax)
+            if ut.compile_error:
+                err_s = _truncate_span(ut.compile_error)
+                lines.append(f"* `{ut.target}` (`{new_s}`): compile error `{err_s}`")
+            else:
+                refs = ", ".join(f"`{r}`" for r in ut.unresolved_refs)
+                lines.append(f"* `{ut.target}` (`{new_s}`): {refs}")
+        if len(report.unresolved_targets) > _MAX_SECTION_ITEMS:
+            lines.append(f"* ... (+{len(report.unresolved_targets) - _MAX_SECTION_ITEMS} more)")
+
+    if report.wpt_failures:
+        lines.extend(["", f"## WPT failures ({len(report.wpt_failures)})", ""])
+        for wf in report.wpt_failures[:_MAX_SECTION_ITEMS]:
+            raw_s = _truncate_span(wf.raw_css)
+            exp_str = (
+                f"expected `{_truncate_span(wf.expected)}`"
+                if wf.expected is not None
+                else "expected `StixisError`"
             )
-        lines.append("")
-    else:
-        if report.support_changes:
-            lines.append("### Browser Engine Support Changes (`@mdn/browser-compat-data`)")
-            lines.append("")
-            for sc_line in report.support_changes:
-                lines.append(f"* {sc_line}")
-            lines.append("")
+            act_s = _truncate_span(wf.actual_or_error)
+            lines.append(f"* `[{wf.suite}]` `{wf.target}` `{raw_s}`: {exp_str}, {act_s}")
+        if len(report.wpt_failures) > _MAX_SECTION_ITEMS:
+            lines.append(f"* ... (+{len(report.wpt_failures) - _MAX_SECTION_ITEMS} more)")
 
-        if report.unit_changes:
-            lines.append("### Unit Table Changes (`src/stixis/_generated/units.py`)")
-            lines.append("")
-            for utype, diff in report.unit_changes.items():
-                lines.append(f"* `{utype}`: added `{diff['added']}`, removed `{diff['removed']}`")
-            lines.append("")
-
-        if report.syntax_changes:
-            lines.append("### CSS Grammar Changes (`@webref/css`)")
-            lines.append("")
-            for sc in report.syntax_changes:
-                if sc.change_type == "added":
-                    lines.append(
-                        f"* **[ADDED]** `{sc.target}` ({sc.kind}): `{sc.new_syntax}` "
-                        f"({'resolvable' if sc.resolvable else 'UNRESOLVED'})"
-                    )
-                elif sc.change_type == "modified":
-                    lines.append(
-                        f"* **[MODIFIED]** `{sc.target}` ({sc.kind}): `{sc.old_syntax}` -> `{sc.new_syntax}` "
-                        f"({'resolvable' if sc.resolvable else 'UNRESOLVED'})"
-                    )
-                elif sc.change_type == "removed":
-                    lines.append(
-                        f"* **[REMOVED]** `{sc.target}` ({sc.kind}): was `{sc.old_syntax}`"
-                    )
-            lines.append("")
-
-        lines.append("### WPT Vector Counts (`tests/_generated/`)")
-        lines.append("")
-        for key, new_val in report.wpt_counts_new.items():
-            old_val = report.wpt_counts_old.get(key, new_val)
-            delta = new_val - old_val
-            delta_str = f" ({delta:+d})" if delta else ""
-            lines.append(f"* `{key}`: {old_val} -> {new_val}{delta_str}")
-        lines.append("")
-
-    lines.extend(
-        [
-            "## What Needs Agent Implementation?",
-            "",
-        ]
-    )
-
-    if not report.needs_agent_intervention:
-        lines.append(
-            "* All properties, descriptors, and value definitions resolve cleanly, and all extracted WPT vectors pass."
-        )
-        lines.append("")
-    else:
-        if report.unresolved_targets:
-            lines.append("### 1. Unresolved Non-Terminals or Grammar Constructs")
-            lines.append("")
-            lines.append(
-                "Add missing prose non-terminals to `[values]` in `codegen/spec_patches.toml`, "
-                "or extend `src/stixis/_grammar/` if a new Value Definition Syntax combinator was introduced:"
-            )
-            lines.append("")
-            for ut in report.unresolved_targets:
-                if ut.compile_error:
-                    lines.append(
-                        f"* `{ut.target}` (`{ut.new_syntax}`): compile error `{ut.compile_error}`"
-                    )
-                else:
-                    refs = ", ".join(f"`{r}`" for r in ut.unresolved_refs)
-                    lines.append(
-                        f"* `{ut.target}` (`{ut.new_syntax}`): unresolved references {refs}"
-                    )
-            lines.append("")
-
-        if report.wpt_failures:
-            lines.append("### 2. Failing WPT Conformance Vectors")
-            lines.append("")
-            lines.append(
-                "Inspect the target grammar with `uv run stixis inspect <target> --json` and reproduce with "
-                "`uv run stixis check <target> <raw_css>`:"
-            )
-            lines.append("")
-            for wf in report.wpt_failures[:50]:
-                exp_str = (
-                    f"expected `{wf.expected}`"
-                    if wf.expected is not None
-                    else "expected `StixisError`"
-                )
-                lines.append(
-                    f"* `[{wf.suite}]` `{wf.target}` input `{wf.raw_css}`: {exp_str}, {wf.actual_or_error}"
-                )
-            if len(report.wpt_failures) > 50:
-                lines.append(f"* ... and {len(report.wpt_failures) - 50} more WPT failures.")
-            lines.append("")
-
-    lines.extend(
-        [
-            "## How Should an Agent Complete This Update?",
-            "",
-            "1. Read `AGENTS.md` and `.agents/docs/grammar-and-codegen.md`.",
-            "2. If unresolved references are listed above, add declarative entries to `codegen/spec_patches.toml` (under `[values]`, `[properties]`, or `[atrule_descriptors]`) or update `src/stixis/_grammar/` / `src/stixis/microsyntax/`.",
-            "3. Regenerate the specification tables, `TypedDict` definitions, WPT test suites, and baseline metadata:",
-            "",
-            "```bash",
-            "uv run python codegen/gen_specs.py --webref-dir <path-to-webref-ed-css>",
-            "uv run python codegen/gen_wpt_tests.py --wpt-dir <path-to-wpt-css>",
-            "uv run python codegen/check_upstream.py --webref-dir <path-to-webref-ed-css> --wpt-dir <path-to-wpt-css> --update-baseline",
-            "```",
-            "",
-            "4. Verify all checks pass before opening a pull request:",
-            "",
-            "```bash",
-            "uv run python codegen/gen_specs.py --check --webref-dir <path-to-webref-ed-css>",
-            "uv run python codegen/gen_wpt_tests.py --check --wpt-dir <path-to-wpt-css>",
-            "uv run pytest",
-            "uv run ruff check",
-            "```",
-            "",
-        ]
-    )
-    return "\n".join(lines)
+    rendered = "\n".join(lines) + "\n"
+    if len(rendered) > _MAX_ISSUE_BODY_CHARS:
+        suffix = "\n\n* ... (truncated to fit GitHub Issue body limit)\n"
+        cutoff = rendered.rfind("\n", 0, _MAX_ISSUE_BODY_CHARS - len(suffix))
+        if cutoff == -1:
+            cutoff = _MAX_ISSUE_BODY_CHARS - len(suffix)
+        rendered = rendered[:cutoff] + suffix
+    return rendered
 
 
 def main(argv: list[str] | None = None) -> int:
