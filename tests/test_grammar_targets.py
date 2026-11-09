@@ -349,5 +349,5 @@ def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_desc
     skill_text = (repo_root / "skills" / "stixis" / "SKILL.md").read_text(encoding="utf-8")
     assert "browser-compat-data" in readme_text
     assert "min_engines" in readme_text
-    assert "partial_implementation" in readme_text
+    assert "partial_implementation" in skill_text
     assert "min_engines" in skill_text
