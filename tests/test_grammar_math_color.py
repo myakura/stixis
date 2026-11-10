@@ -387,10 +387,21 @@ def test_canonical_grammars_not_overwritten_by_unshipped_or_umbrella_drafts() ->
         canonicalize("color", "if(style(--dark: 1): black; else: white;)")
         == "if(style(--dark: 1): black; else: white)"
     )
+    assert canonicalize("color", "if(style(): red; else: blue)") == "if(style(): red; else: blue)"
+    assert (
+        canonicalize("color", "if(media(): red; supports(): green; else: blue)")
+        == "if(media(): red; supports(): green; else: blue)"
+    )
     assert (
         canonicalize("width", "calc(10px + if(style(--x: 1): 5px; else: 20px))")
         == "calc(10px + if(style(--x: 1): 5px; else: 20px))"
     )
+    deep_font_style = "var(--x, " + "(" * 1100 + "normal" + ")" * 1100 + ")"
+    assert canonicalize("font-style", deep_font_style) == deep_font_style
+    deep_nested_if = "if(else: " * 1100 + "red" + ")" * 1100
+    assert canonicalize("color", deep_nested_if) == deep_nested_if
+    with pytest.raises(StixisValidationError):
+        canonicalize("font-style", "oblique calc(" + "(" * 1100 + "10deg" + ")" * 1100 + ")")
     assert canonicalize("content", "content()") == "content()"
     assert canonicalize("content", "content(marker)") == "content(marker)"
     assert canonicalize("stroke-opacity", "50%", options=opts_all) == "50%"

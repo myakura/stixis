@@ -1593,12 +1593,17 @@ def evaluate_canonicalize(
             and at_rule is None
         ):
             return non_ws[0].value.lower()
-        if _contains_global_substitution(non_ws) and at_rule is None:
-            rendered_sub = _format_tokens_with_if_validation(non_ws, options=options)
-            if rendered_sub is None:
-                raise StixisValidationError(target, syntax, css_text)
-            return rendered_sub
-        matches = matcher._match_font_style_tokens(0, is_descriptor=(at_rule == "@font-face"))
+        try:
+            if _contains_global_substitution(non_ws) and at_rule is None:
+                rendered_sub = _format_tokens_with_if_validation(non_ws, options=options)
+                if rendered_sub is None:
+                    raise StixisValidationError(target, syntax, css_text)
+                return rendered_sub
+            matches = matcher._match_font_style_tokens(0, is_descriptor=(at_rule == "@font-face"))
+        except RecursionError as exc:
+            raise StixisValidationError(
+                target, syntax, css_text, "Maximum nesting depth exceeded"
+            ) from exc
         for end_p, rendered in matches:
             if end_p == len(non_ws):
                 return rendered

@@ -900,63 +900,8 @@ def _is_math_function_token(
     return f"{fn_name}({', '.join(rendered_args)})", next_pos
 
 
-def _normalize_if_decl_slice(
-    slice_tokens: Sequence[CssToken],
-    *,
-    allow_empty: bool,
-    in_condition: bool = False,
-) -> list[CssToken] | None:
-    """Validate a `<declaration-value>` slice inside `if(...)` and normalize any nested `if(...)` calls."""
-    non_ws = [t for t in slice_tokens if t.kind != "whitespace"]
-    if not non_ws:
-        return [] if allow_empty else None
-    out: list[CssToken] = []
-    pos = 0
-    matching = {"(": ")", "[": "]", "{": "}"}
-    while pos < len(non_ws):
-        tok = non_ws[pos]
-        if tok.kind == "semicolon" or (tok.kind == "delim" and tok.value == "!"):
-            return None
-        if tok.kind in (")", "]", "}"):
-            return None
-        if tok.kind == "function":
-            grouped = _consume_balanced_group(non_ws, pos + 1, ")")
-            if grouped is None:
-                return None
-            inner_fn, next_pos = grouped
-            fn_low = tok.value.lower()
-            if in_condition and fn_low in ("style", "media", "supports") and not inner_fn:
-                return None
-            if fn_low == "if":
-                norm_inner = _normalize_if_inner_tokens(inner_fn)
-            else:
-                norm_inner = _normalize_tokens_with_if_validation(inner_fn)
-            if norm_inner is None:
-                return None
-            out.append(tok)
-            out.extend(norm_inner)
-            out.append(non_ws[next_pos - 1])
-            pos = next_pos
-        elif tok.kind in matching:
-            grouped = _consume_balanced_group(non_ws, pos + 1, matching[tok.kind])
-            if grouped is None:
-                return None
-            inner_grp, next_pos = grouped
-            norm_grp = _normalize_tokens_with_if_validation(inner_grp)
-            if norm_grp is None:
-                return None
-            out.append(tok)
-            out.extend(norm_grp)
-            out.append(non_ws[next_pos - 1])
-            pos = next_pos
-        else:
-            out.append(tok)
-            pos += 1
-    return out
-
-
-def _normalize_if_inner_tokens(inner_tokens: Sequence[CssToken]) -> list[CssToken] | None:
-    """Validate `<if-args>` (`[ <if-args-branch> ; ]* <if-args-branch> ;?`) and strip optional trailing `;`."""
+def _validate_flat_if_branches(inner_tokens: Sequence[CssToken]) -> list[CssToken] | None:
+    """Validate flat `<if-args>` (`[ <if-args-branch> ; ]* <if-args-branch> ;?`) assuming nested `if(...)` calls are normalized."""
     non_ws = [t for t in inner_tokens if t.kind != "whitespace"]
     if not non_ws:
         return None
@@ -1007,67 +952,74 @@ def _normalize_if_inner_tokens(inner_tokens: Sequence[CssToken]) -> list[CssToke
                 if not b_stack or b_stack[-1] != tok.kind:
                     return None
                 b_stack.pop()
-            elif not b_stack and tok.kind == "colon":
-                colon_idx = idx
-                break
-        if colon_idx is None:
-            return None
-        norm_cond = _normalize_if_decl_slice(
-            branch[:colon_idx], allow_empty=False, in_condition=True
-        )
-        if norm_cond is None:
-            return None
-        norm_val = _normalize_if_decl_slice(branch[colon_idx + 1 :], allow_empty=True)
-        if norm_val is None:
+            elif not b_stack:
+                if tok.kind == "delim" and tok.value == "!":
+                    return None
+                if tok.kind == "colon" and colon_idx is None:
+                    colon_idx = idx
+        if b_stack or colon_idx is None or colon_idx == 0:
             return None
         if b_idx > 0:
             normalized_tokens.append(CssToken("semicolon", ";"))
-        normalized_tokens.extend(norm_cond)
+        normalized_tokens.extend(branch[:colon_idx])
         normalized_tokens.append(branch[colon_idx])
-        normalized_tokens.extend(norm_val)
+        normalized_tokens.extend(branch[colon_idx + 1 :])
 
     return normalized_tokens
 
 
 def _normalize_tokens_with_if_validation(tokens: Sequence[CssToken]) -> list[CssToken] | None:
-    """Validate and normalize all `if(...)` calls at any nesting depth within `tokens`."""
+    """Iteratively validate and normalize all `if(...)` calls at any nesting depth within `tokens`."""
     non_ws = [t for t in tokens if t.kind != "whitespace"]
-    out: list[CssToken] = []
-    pos = 0
     matching = {"(": ")", "[": "]", "{": "}"}
-    while pos < len(non_ws):
-        tok = non_ws[pos]
+    closing = {")", "]", "}"}
+
+    if not any(t.kind == "function" and t.value.lower() == "if" for t in non_ws):
+        stack: list[str] = []
+        for tok in non_ws:
+            if tok.kind == "function":
+                stack.append(")")
+            elif tok.kind in matching:
+                stack.append(matching[tok.kind])
+            elif tok.kind in closing:
+                if not stack or stack[-1] != tok.kind:
+                    return None
+                stack.pop()
+        return None if stack else non_ws
+
+    frames: list[tuple[list[CssToken], list[str]]] = [([], [])]
+    for tok in non_ws:
         if tok.kind == "function":
-            grouped = _consume_balanced_group(non_ws, pos + 1, ")")
-            if grouped is None:
-                return None
-            inner_fn, next_pos = grouped
             if tok.value.lower() == "if":
-                norm_inner = _normalize_if_inner_tokens(inner_fn)
+                frames.append(([], []))
             else:
-                norm_inner = _normalize_tokens_with_if_validation(inner_fn)
-            if norm_inner is None:
-                return None
-            out.append(tok)
-            out.extend(norm_inner)
-            out.append(non_ws[next_pos - 1])
-            pos = next_pos
+                frames[-1][0].append(tok)
+                frames[-1][1].append(")")
         elif tok.kind in matching:
-            grouped = _consume_balanced_group(non_ws, pos + 1, matching[tok.kind])
-            if grouped is None:
-                return None
-            inner_grp, next_pos = grouped
-            norm_grp = _normalize_tokens_with_if_validation(inner_grp)
-            if norm_grp is None:
-                return None
-            out.append(tok)
-            out.extend(norm_grp)
-            out.append(non_ws[next_pos - 1])
-            pos = next_pos
+            frames[-1][0].append(tok)
+            frames[-1][1].append(matching[tok.kind])
+        elif tok.kind in closing:
+            if frames[-1][1]:
+                if frames[-1][1][-1] != tok.kind:
+                    return None
+                frames[-1][1].pop()
+                frames[-1][0].append(tok)
+            else:
+                if len(frames) == 1 or tok.kind != ")":
+                    return None
+                if_inner, _ = frames.pop()
+                norm_if = _validate_flat_if_branches(if_inner)
+                if norm_if is None:
+                    return None
+                frames[-1][0].append(CssToken("function", "if"))
+                frames[-1][0].extend(norm_if)
+                frames[-1][0].append(tok)
         else:
-            out.append(tok)
-            pos += 1
-    return out
+            frames[-1][0].append(tok)
+
+    if len(frames) != 1 or frames[0][1]:
+        return None
+    return frames[0][0]
 
 
 def _validate_and_format_if_function(
@@ -1076,7 +1028,10 @@ def _validate_and_format_if_function(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str | None:
     """Validate `if(...)` inner tokens per CSS Values 5 `<if-args>` and return canonical `if(...)` text."""
-    norm_inner = _normalize_if_inner_tokens(inner_tokens)
+    norm_nested = _normalize_tokens_with_if_validation(inner_tokens)
+    if norm_nested is None:
+        return None
+    norm_inner = _validate_flat_if_branches(norm_nested)
     if norm_inner is None:
         return None
     return f"if({format_token_sequence(norm_inner, options=options)})"
