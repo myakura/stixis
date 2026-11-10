@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_PATCHES_PATH = REPO_ROOT / "codegen" / "spec_patches.toml"
+UPSTREAM_WEBREF_CSS_DIR = REPO_ROOT / ".upstream" / "webref" / "ed" / "css"
+UPSTREAM_BCD_CSS_DIR = REPO_ROOT / ".upstream" / "bcd" / "css"
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from stixis._grammar.vds import (
@@ -59,21 +62,45 @@ def _extract_subvalue_keywords(subvalues: list[dict[str, Any]]) -> list[str]:
 def _collect_nested_types(
     items: list[dict[str, Any]],
     values_map: dict[str, str],
+    value_owners: dict[str, str] | None = None,
+    spec_name: str = "",
+    superseded_by: dict[str, set[str]] | None = None,
 ) -> None:
+    def _can_set(key: str) -> bool:
+        if value_owners is None or superseded_by is None:
+            return True
+        cur = value_owners.get(key)
+        return cur is None or cur not in superseded_by.get(spec_name, ())
+
     for sv in items:
         vname = sv.get("name", "")
         vtype = sv.get("type", "")
         if vtype in ("type", "function") and vname:
             if sv.get("value"):
-                values_map[vname] = sv["value"]
+                if _can_set(vname):
+                    values_map[vname] = sv["value"]
+                    if value_owners is not None:
+                        value_owners[vname] = spec_name
                 if not vname.startswith("<"):
-                    values_map[f"<{vname}>"] = sv["value"]
+                    ang = f"<{vname}>"
+                    if _can_set(ang):
+                        values_map[ang] = sv["value"]
+                        if value_owners is not None:
+                            value_owners[ang] = spec_name
             elif vname.startswith("<") and vname not in values_map and sv.get("values"):
                 kws = _extract_subvalue_keywords(sv["values"])
                 if kws:
                     values_map[vname] = " | ".join(kws)
+                    if value_owners is not None:
+                        value_owners[vname] = spec_name
         if "values" in sv:
-            _collect_nested_types(sv["values"], values_map)
+            _collect_nested_types(
+                sv["values"],
+                values_map,
+                value_owners=value_owners,
+                spec_name=spec_name,
+                superseded_by=superseded_by,
+            )
 
 
 def _is_shipping_unprefixed_statement(stmt: Any) -> bool:
@@ -153,7 +180,17 @@ def load_and_merge_specs(
     if not json_files:
         raise FileNotFoundError(f"No JSON files found in {webref_dir}")
 
-    priority_order: list[str] = patches.get("delta_merges", {}).get("order", [])
+    delta_cfg = patches.get("delta_merges", {})
+    priority_order: list[str] = delta_cfg.get("order", [])
+    supersedes_cfg: dict[str, list[str]] = delta_cfg.get("supersedes", {})
+    superseded_by: dict[str, set[str]] = {}
+    for auth_spec, old_specs in supersedes_cfg.items():
+        for old_spec in old_specs:
+            superseded_by.setdefault(old_spec, set()).add(auth_spec)
+
+    def _can_overwrite(current_owner: str | None, new_owner: str) -> bool:
+        return current_owner is None or current_owner not in superseded_by.get(new_owner, ())
+
     json_files.sort(key=lambda p: _spec_sort_key(p, priority_order))
 
     units_by_type: dict[str, set[str]] = {
@@ -171,13 +208,19 @@ def load_and_merge_specs(
         units_by_type.setdefault(unit_type, set()).update(extra_list)
 
     properties: dict[str, str] = {}
-    property_new_values: dict[str, list[str]] = {}
+    property_owners: dict[str, str] = {}
+    property_new_values: dict[str, list[tuple[str, str]]] = {}
     values: dict[str, str] = {}
-    value_new_values: dict[str, list[str]] = {}
+    value_owners: dict[str, str] = {}
+    value_new_values: dict[str, list[tuple[str, str]]] = {}
     atrules: dict[str, dict[str, Any]] = {}
+    atrule_syntax_owners: dict[str, str] = {}
+    descriptor_owners: dict[tuple[str, str], str] = {}
     relative_color_channels: dict[str, set[str]] = {}
+    channel_owners: dict[str, str] = {}
 
     for jf in json_files:
+        spec_name = jf.name
         data = json.loads(jf.read_text(encoding="utf-8"))
 
         # 1. Values & units
@@ -200,34 +243,56 @@ def load_and_merge_specs(
                     for kw in _extract_subvalue_keywords(v.get("values", []))
                     if kw.isascii() and kw.isalpha()
                 ]
-                if ch_kws:
+                if ch_kws and _can_overwrite(channel_owners.get(fn_name), spec_name):
                     relative_color_channels[fn_name] = set(ch_kws)
+                    channel_owners[fn_name] = spec_name
 
             if v.get("value"):
-                values[vname] = v["value"]
+                if _can_overwrite(value_owners.get(vname), spec_name):
+                    values[vname] = v["value"]
+                    value_owners[vname] = spec_name
                 if not vname.startswith("<"):
-                    values[f"<{vname}>"] = v["value"]
+                    ang_name = f"<{vname}>"
+                    if _can_overwrite(value_owners.get(ang_name), spec_name):
+                        values[ang_name] = v["value"]
+                        value_owners[ang_name] = spec_name
             elif v.get("newValues"):
-                value_new_values.setdefault(vname, []).append(v["newValues"])
+                value_new_values.setdefault(vname, []).append((spec_name, v["newValues"]))
             elif vname.startswith("<") and vname not in values and v.get("values"):
                 kws = _extract_subvalue_keywords(v["values"])
                 if kws:
                     values[vname] = " | ".join(kws)
+                    value_owners[vname] = spec_name
 
-            _collect_nested_types(v.get("values", []), values)
+            _collect_nested_types(
+                v.get("values", []),
+                values,
+                value_owners=value_owners,
+                spec_name=spec_name,
+                superseded_by=superseded_by,
+            )
 
         # 2. Properties
         for p in data.get("properties", []):
             pname = p["name"]
             if p.get("value"):
-                properties[pname] = p["value"]
+                if _can_overwrite(property_owners.get(pname), spec_name):
+                    properties[pname] = p["value"]
+                    property_owners[pname] = spec_name
             elif p.get("newValues"):
-                property_new_values.setdefault(pname, []).append(p["newValues"])
-            elif p.get("legacyAliasOf"):
+                property_new_values.setdefault(pname, []).append((spec_name, p["newValues"]))
+            elif p.get("legacyAliasOf") and _can_overwrite(property_owners.get(pname), spec_name):
                 alias_target = p["legacyAliasOf"]
                 properties[pname] = f"<'{alias_target}'>"
+                property_owners[pname] = spec_name
 
-            _collect_nested_types(p.get("values", []), values)
+            _collect_nested_types(
+                p.get("values", []),
+                values,
+                value_owners=value_owners,
+                spec_name=spec_name,
+                superseded_by=superseded_by,
+            )
 
         # 3. At-rules & descriptors
         for a in data.get("atrules", []):
@@ -240,27 +305,51 @@ def load_and_merge_specs(
                     "descriptors": {},
                 },
             )
-            if a.get("value"):
+            if a.get("value") and _can_overwrite(atrule_syntax_owners.get(aname), spec_name):
                 entry["syntax"] = a["value"]
+                atrule_syntax_owners[aname] = spec_name
             for d in a.get("descriptors", []):
                 if d.get("type") == "at-rule":
                     continue
                 dname = d["name"]
+                dkey = (aname, dname)
                 if d.get("value"):
-                    entry["descriptors"][dname] = d["value"]
-                elif d.get("newValues") and dname in entry["descriptors"]:
+                    if _can_overwrite(descriptor_owners.get(dkey), spec_name):
+                        entry["descriptors"][dname] = d["value"]
+                        descriptor_owners[dkey] = spec_name
+                elif (
+                    d.get("newValues")
+                    and dname in entry["descriptors"]
+                    and _can_overwrite(descriptor_owners.get(dkey), spec_name)
+                ):
                     entry["descriptors"][dname] += " | " + d["newValues"]
-                _collect_nested_types(d.get("values", []), values)
-            _collect_nested_types(a.get("values", []), values)
+                _collect_nested_types(
+                    d.get("values", []),
+                    values,
+                    value_owners=value_owners,
+                    spec_name=spec_name,
+                    superseded_by=superseded_by,
+                )
+            _collect_nested_types(
+                a.get("values", []),
+                values,
+                value_owners=value_owners,
+                spec_name=spec_name,
+                superseded_by=superseded_by,
+            )
 
     for vname, nv_list in value_new_values.items():
-        for nv in nv_list:
+        for nv_owner, nv in nv_list:
+            if not _can_overwrite(value_owners.get(vname), nv_owner):
+                continue
             values[vname] = _merge_new_values(values.get(vname, ""), nv)
             if not vname.startswith("<"):
                 values[f"<{vname}>"] = values[vname]
 
     for pname, nv_list in property_new_values.items():
-        for nv in nv_list:
+        for nv_owner, nv in nv_list:
+            if not _can_overwrite(property_owners.get(pname), nv_owner):
+                continue
             properties[pname] = _merge_new_values(properties.get(pname, ""), nv)
 
     # Apply declarative patches from `spec_patches.toml`
@@ -637,6 +726,24 @@ def _write_or_check(path: Path, content: str, check: bool) -> bool:
     return True
 
 
+def resolve_default_webref_dir(patches: dict[str, Any], *, explicit_patches: bool) -> Path:
+    if not explicit_patches and UPSTREAM_WEBREF_CSS_DIR.is_dir():
+        return UPSTREAM_WEBREF_CSS_DIR
+    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
+    return raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+
+
+def resolve_default_bcd_dir(patches: dict[str, Any], *, explicit_patches: bool) -> Path | None:
+    if not explicit_patches and (UPSTREAM_BCD_CSS_DIR / "properties").is_dir():
+        return UPSTREAM_BCD_CSS_DIR
+    if "bcd_css_dir" in patches.get("meta", {}):
+        raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
+        candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
+        if (candidate_bcd / "properties").is_dir():
+            return candidate_bcd
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="gen_specs.py",
@@ -649,7 +756,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--patches",
-        default=str(REPO_ROOT / "codegen" / "spec_patches.toml"),
+        default=None,
         help="Path to spec_patches.toml.",
     )
     parser.add_argument(
@@ -666,7 +773,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    patches_path = Path(args.patches)
+    explicit_patches = args.patches is not None
+    patches_path = Path(args.patches) if explicit_patches else DEFAULT_PATCHES_PATH
     if not patches_path.is_file():
         print(f"{patches_path}:1: missing spec_patches.toml", file=sys.stderr)
         return 4
@@ -675,28 +783,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.webref_dir is not None:
         webref_dir = args.webref_dir.expanduser()
     else:
-        raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-        webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+        webref_dir = resolve_default_webref_dir(patches, explicit_patches=explicit_patches)
     if not webref_dir.is_dir():
         print(f"{patches_path}:1: missing webref_css_dir {webref_dir}", file=sys.stderr)
         return 4
 
     bcd_dir: Path | None = None
-    candidate_bcd: Path | None = None
     if args.bcd_dir is not None:
         cand = args.bcd_dir.expanduser()
         if not (cand / "properties").is_dir():
             print(f"{patches_path}:1: missing bcd_css_dir {cand}", file=sys.stderr)
             return 4
         bcd_dir = cand
-    elif "bcd_css_dir" in patches.get("meta", {}):
-        raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
-        candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
-        if (candidate_bcd / "properties").is_dir():
-            bcd_dir = candidate_bcd
+    else:
+        bcd_dir = resolve_default_bcd_dir(patches, explicit_patches=explicit_patches)
 
     if bcd_dir is None and args.check:
-        missing_desc = candidate_bcd if candidate_bcd is not None else "bcd_css_dir"
+        missing_desc: Path | str = "bcd_css_dir"
+        if "bcd_css_dir" in patches.get("meta", {}):
+            raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
+            missing_desc = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
         print(
             f"{patches_path}:1: missing bcd_css_dir {missing_desc} (required with --check)",
             file=sys.stderr,

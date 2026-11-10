@@ -371,3 +371,63 @@ def test_math_functions_and_token_formatting_have_no_dead_entries() -> None:
     assert " sibling-index" not in MATH_FUNCTIONS
     assert format_token_sequence(tokenize_css("calc(10px + 20px / 2)")) == "calc(10px + 20px / 2)"
     assert serialize_url("https://example.com/\x01a") == r'url("https://example.com/\1 a")'
+
+
+def test_canonical_grammars_not_overwritten_by_unshipped_or_umbrella_drafts() -> None:
+    """Issue #101: canonical shipped/base grammars must not be overwritten by excluded or superseded drafts."""
+    from stixis._generated.specs import PROPERTY_SYNTAXES, VALUE_SYNTAXES
+
+    opts_all = SerializationOptions(min_engines=0)
+    assert canonicalize("color", "contrast-color(white)") == "contrast-color(white)"
+    assert (
+        canonicalize("color", "if(style(--dark: 1): black; else: white)")
+        == "if(style(--dark: 1): black; else: white)"
+    )
+    assert (
+        canonicalize("color", "if(style(--dark: 1): black; else: white;)")
+        == "if(style(--dark: 1): black; else: white)"
+    )
+    assert canonicalize("color", "if(style(): red; else: blue)") == "if(style(): red; else: blue)"
+    assert (
+        canonicalize("color", "if(media(): red; supports(): green; else: blue)")
+        == "if(media(): red; supports(): green; else: blue)"
+    )
+    assert (
+        canonicalize("width", "calc(10px + if(style(--x: 1): 5px; else: 20px))")
+        == "calc(10px + if(style(--x: 1): 5px; else: 20px))"
+    )
+    deep_font_style = "var(--x, " + "(" * 1100 + "normal" + ")" * 1100 + ")"
+    assert canonicalize("font-style", deep_font_style) == deep_font_style
+    deep_nested_if = "if(else: " * 1100 + "red" + ")" * 1100
+    assert canonicalize("color", deep_nested_if) == deep_nested_if
+    with pytest.raises(StixisValidationError):
+        canonicalize("font-style", "oblique calc(" + "(" * 1100 + "10deg" + ")" * 1100 + ")")
+    assert canonicalize("content", "content()") == "content()"
+    assert canonicalize("content", "content(marker)") == "content(marker)"
+    assert canonicalize("stroke-opacity", "50%", options=opts_all) == "50%"
+    assert canonicalize("stroke-width", "2", options=opts_all) == "2"
+    assert canonicalize("fill", "rebeccapurple", options=opts_all) == "rebeccapurple"
+    assert canonicalize("stroke", "none", options=opts_all) == "none"
+
+    assert VALUE_SYNTAXES["<contrast-color()>"] == "contrast-color( <color> )"
+    assert VALUE_SYNTAXES["<if()>"] == "if( [ <if-branch> ; ]* <if-branch> ;? )"
+    assert (
+        VALUE_SYNTAXES["<content()>"]
+        == "content( [ text | before | after | first-letter | marker ]? )"
+    )
+    assert PROPERTY_SYNTAXES["border-start-start-radius"] == "<border-radius>"
+    assert PROPERTY_SYNTAXES["border-block-start-width"] == "<line-width>"
+
+    for prop, bad_val in (
+        ("color", "contrast-color(white tbd-fg)"),
+        ("color", "if(true, black, white)"),
+        ("color", "if(true then black else white)"),
+        ("color", "if()"),
+        ("color", "if(style())"),
+        ("color", "if(: white)"),
+        ("color", "if(style(--x: 3) !)"),
+        ("color", "if(style(--x: 3): black; else: white!)"),
+        ("stroke-opacity", "1px"),
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize(prop, bad_val, options=opts_all)

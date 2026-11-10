@@ -11,8 +11,10 @@ from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis._grammar.calc import (
     _consume_balanced_group,
     _contains_global_substitution,
+    _format_tokens_with_if_validation,
     _is_math_function_token,
     _parse_calc_sum,
+    _validate_and_format_if_function,
 )
 from stixis._grammar.color import (
     extract_relative_color_rest_node,
@@ -138,7 +140,7 @@ class _TokenMatcher:
                 forbid_top_level_bang=True,
                 forbid_top_level_semicolon=True,
             )
-            return format_token_sequence(self.tokens, options=self.options)
+            return _format_tokens_with_if_validation(self.tokens, options=self.options)
 
         for pos, rendered in self.match_node(node, 0):
             if pos == len(self.tokens) and rendered != "":
@@ -301,6 +303,12 @@ class _TokenMatcher:
             return []
         inner_tokens, next_pos = grouped
         fn_name = serialize_ident(tok.value.lower())
+
+        if fn_name == "if" and node.name.lower() == "if":
+            rendered_if = _validate_and_format_if_function(inner_tokens, options=self.options)
+            if rendered_if is None:
+                return []
+            return [(next_pos, rendered_if)]
 
         if node.arg is None:
             if not inner_tokens:
@@ -1585,9 +1593,17 @@ def evaluate_canonicalize(
             and at_rule is None
         ):
             return non_ws[0].value.lower()
-        if _contains_global_substitution(non_ws) and at_rule is None:
-            return format_token_sequence(non_ws, options=options)
-        matches = matcher._match_font_style_tokens(0, is_descriptor=(at_rule == "@font-face"))
+        try:
+            if _contains_global_substitution(non_ws) and at_rule is None:
+                rendered_sub = _format_tokens_with_if_validation(non_ws, options=options)
+                if rendered_sub is None:
+                    raise StixisValidationError(target, syntax, css_text)
+                return rendered_sub
+            matches = matcher._match_font_style_tokens(0, is_descriptor=(at_rule == "@font-face"))
+        except RecursionError as exc:
+            raise StixisValidationError(
+                target, syntax, css_text, "Maximum nesting depth exceeded"
+            ) from exc
         for end_p, rendered in matches:
             if end_p == len(non_ws):
                 return rendered

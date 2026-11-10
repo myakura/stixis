@@ -16,7 +16,15 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = REPO_ROOT / "tests" / "_generated"
-DEFAULT_WPT_CSS_DIR = Path.home() / "resources" / "tests" / "wpt" / "css"
+UPSTREAM_WPT_CSS_DIR = REPO_ROOT / ".upstream" / "wpt" / "css"
+FALLBACK_WPT_CSS_DIR = Path.home() / "resources" / "tests" / "wpt" / "css"
+
+
+def resolve_default_wpt_css_dir() -> Path:
+    return UPSTREAM_WPT_CSS_DIR if UPSTREAM_WPT_CSS_DIR.is_dir() else FALLBACK_WPT_CSS_DIR
+
+
+DEFAULT_WPT_CSS_DIR = resolve_default_wpt_css_dir()
 
 _VALID_CALL_RE = re.compile(
     r"test_valid_value\(\s*(['\"])([^'\"]+)\1\s*,\s*(['\"])((?:\\.|(?!\3).)*)\3"
@@ -872,7 +880,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--wpt-dir",
         type=Path,
-        default=DEFAULT_WPT_CSS_DIR,
+        default=None,
         help="Path to WPT css/ directory.",
     )
     parser.add_argument(
@@ -888,7 +896,9 @@ def main(argv: list[str] | None = None) -> int:
     default_min = getattr(_gen_specs, "DEFAULT_MIN_ENGINES", 2)
     eff_min = default_min if args.min_engines is None else args.min_engines
 
-    wpt_dir: Path = args.wpt_dir
+    wpt_dir: Path = (
+        resolve_default_wpt_css_dir() if args.wpt_dir is None else args.wpt_dir.expanduser()
+    )
     if not wpt_dir.is_dir():
         print(f"Error: WPT directory not found at {wpt_dir}", file=sys.stderr)
         return 1

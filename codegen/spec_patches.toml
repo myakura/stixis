@@ -17,7 +17,11 @@ allow_properties = [
     "font-stretch",
     "font-synthesis-position",
 ]
-exclude_specs = []
+exclude_specs = [
+    "css-color-6.json",
+    "css-conditional-values.json",
+    "svg-strokes.json",
+]
 
 # Additional container query and speech units defined in prose or pending reffy extraction
 [extra_units]
@@ -25,17 +29,24 @@ exclude_specs = []
 "<decibel>" = ["dB"]
 "<semitones>" = ["st"]
 
-# Explicit Delta specs whose descriptor and value definitions override or extend base specs
+# Superseded umbrella/legacy specs merged before main specs, plus explicit owner-superseding rules
 [delta_merges]
 order = [
     "CSS.json",
-    "css-values.json",
-    "css-values-5.json",
-    "css-color.json",
-    "css-color-5.json",
-    "css-fonts.json",
-    "css-fonts-5.json",
+    "fill-stroke.json",
+    "css-logical.json",
+    "css-gcpm.json",
+    "css-flexbox.json",
 ]
+
+[delta_merges.supersedes]
+"SVG.json" = ["fill-stroke.json"]
+"css-align.json" = ["css-flexbox.json"]
+"css-borders.json" = ["css-logical.json"]
+"css-content.json" = ["css-gcpm.json"]
+"css-images-4.json" = ["css-gcpm.json"]
+"css-position.json" = ["css-logical.json"]
+"css-sizing.json" = ["css-logical.json"]
 
 # Prose-defined or missing non-terminal value definitions (`<type>`)
 [values]
@@ -108,8 +119,6 @@ order = [
 [properties]
 "font-stretch" = "<'font-width'>"
 "font-synthesis" = "none | [ weight || [ style | oblique-only ] || small-caps || position ]"
-"align-content" = "normal | <baseline-position> | <content-distribution> | <overflow-position>? <content-position>"
-"justify-content" = "normal | <content-distribution> | <overflow-position>? [ <content-position> | left | right ]"
 "align-items" = "<overflow-position>? [ normal | <self-position> ] | stretch | <baseline-position>"
 "align-self" = "auto | <overflow-position>? [ normal | <self-position> ] | stretch | <baseline-position> | anchor-center"
 "justify-items" = "<overflow-position>? [ normal | <self-position> | left | right ] | stretch | <baseline-position> | legacy | legacy && [ left | right | center ]"

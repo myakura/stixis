@@ -19,7 +19,7 @@ from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
 # CSS-wide keywords + CSS Variables / substitution functions that are valid on any property
 GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset(
-    {"var", "env", "attr", "first-valid", "inherit"}
+    {"var", "env", "attr", "first-valid", "inherit", "if"}
 )
 MATH_FUNCTIONS: frozenset[str] = frozenset(
     {
@@ -536,6 +536,15 @@ def _parse_calc_value_node(
                 if end_p == len(slice_toks):
                     return _CalcAtom(rendered), next_pos
             return None
+        if fn_low == "if":
+            grouped = _consume_balanced_group(tokens, pos + 1, ")")
+            if grouped is None:
+                return None
+            inner_toks, next_pos = grouped
+            rendered_if = _validate_and_format_if_function(inner_toks, options=options)
+            if rendered_if is None:
+                return None
+            return _CalcAtom(rendered_if), next_pos
         if fn_low in GLOBAL_SUBSTITUTION_FUNCTIONS:
             grouped = _consume_balanced_group(tokens, pos + 1, ")")
             if grouped is None:
@@ -891,8 +900,157 @@ def _is_math_function_token(
     return f"{fn_name}({', '.join(rendered_args)})", next_pos
 
 
+def _validate_flat_if_branches(inner_tokens: Sequence[CssToken]) -> list[CssToken] | None:
+    """Validate flat `<if-args>` (`[ <if-args-branch> ; ]* <if-args-branch> ;?`) assuming nested `if(...)` calls are normalized."""
+    non_ws = [t for t in inner_tokens if t.kind != "whitespace"]
+    if not non_ws:
+        return None
+
+    matching = {"(": ")", "[": "]", "{": "}"}
+    closing = {")", "]", "}"}
+    branches: list[list[CssToken]] = []
+    current: list[CssToken] = []
+    stack: list[str] = []
+
+    for tok in non_ws:
+        if tok.kind == "function":
+            stack.append(")")
+            current.append(tok)
+        elif tok.kind in matching:
+            stack.append(matching[tok.kind])
+            current.append(tok)
+        elif tok.kind in closing:
+            if not stack or stack[-1] != tok.kind:
+                return None
+            stack.pop()
+            current.append(tok)
+        elif not stack and tok.kind == "semicolon":
+            if not current:
+                return None
+            branches.append(current)
+            current = []
+        else:
+            current.append(tok)
+
+    if stack:
+        return None
+    if current:
+        branches.append(current)
+    if not branches:
+        return None
+
+    normalized_tokens: list[CssToken] = []
+    for b_idx, branch in enumerate(branches):
+        colon_idx: int | None = None
+        b_stack: list[str] = []
+        for idx, tok in enumerate(branch):
+            if tok.kind == "function":
+                b_stack.append(")")
+            elif tok.kind in matching:
+                b_stack.append(matching[tok.kind])
+            elif tok.kind in closing:
+                if not b_stack or b_stack[-1] != tok.kind:
+                    return None
+                b_stack.pop()
+            elif not b_stack:
+                if tok.kind == "delim" and tok.value == "!":
+                    return None
+                if tok.kind == "colon" and colon_idx is None:
+                    colon_idx = idx
+        if b_stack or colon_idx is None or colon_idx == 0:
+            return None
+        if b_idx > 0:
+            normalized_tokens.append(CssToken("semicolon", ";"))
+        normalized_tokens.extend(branch[:colon_idx])
+        normalized_tokens.append(branch[colon_idx])
+        normalized_tokens.extend(branch[colon_idx + 1 :])
+
+    return normalized_tokens
+
+
+def _normalize_tokens_with_if_validation(tokens: Sequence[CssToken]) -> list[CssToken] | None:
+    """Iteratively validate and normalize all `if(...)` calls at any nesting depth within `tokens`."""
+    non_ws = [t for t in tokens if t.kind != "whitespace"]
+    matching = {"(": ")", "[": "]", "{": "}"}
+    closing = {")", "]", "}"}
+
+    if not any(t.kind == "function" and t.value.lower() == "if" for t in non_ws):
+        stack: list[str] = []
+        for tok in non_ws:
+            if tok.kind == "function":
+                stack.append(")")
+            elif tok.kind in matching:
+                stack.append(matching[tok.kind])
+            elif tok.kind in closing:
+                if not stack or stack[-1] != tok.kind:
+                    return None
+                stack.pop()
+        return None if stack else non_ws
+
+    frames: list[tuple[list[CssToken], list[str]]] = [([], [])]
+    for tok in non_ws:
+        if tok.kind == "function":
+            if tok.value.lower() == "if":
+                frames.append(([], []))
+            else:
+                frames[-1][0].append(tok)
+                frames[-1][1].append(")")
+        elif tok.kind in matching:
+            frames[-1][0].append(tok)
+            frames[-1][1].append(matching[tok.kind])
+        elif tok.kind in closing:
+            if frames[-1][1]:
+                if frames[-1][1][-1] != tok.kind:
+                    return None
+                frames[-1][1].pop()
+                frames[-1][0].append(tok)
+            else:
+                if len(frames) == 1 or tok.kind != ")":
+                    return None
+                if_inner, _ = frames.pop()
+                norm_if = _validate_flat_if_branches(if_inner)
+                if norm_if is None:
+                    return None
+                frames[-1][0].append(CssToken("function", "if"))
+                frames[-1][0].extend(norm_if)
+                frames[-1][0].append(tok)
+        else:
+            frames[-1][0].append(tok)
+
+    if len(frames) != 1 or frames[0][1]:
+        return None
+    return frames[0][0]
+
+
+def _validate_and_format_if_function(
+    inner_tokens: Sequence[CssToken],
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str | None:
+    """Validate `if(...)` inner tokens per CSS Values 5 `<if-args>` and return canonical `if(...)` text."""
+    norm_nested = _normalize_tokens_with_if_validation(inner_tokens)
+    if norm_nested is None:
+        return None
+    norm_inner = _validate_flat_if_branches(norm_nested)
+    if norm_inner is None:
+        return None
+    return f"if({format_token_sequence(norm_inner, options=options)})"
+
+
+def _format_tokens_with_if_validation(
+    tokens: Sequence[CssToken],
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str | None:
+    """Validate any `if(...)` calls in `tokens` and format the full token sequence."""
+    norm = _normalize_tokens_with_if_validation(tokens)
+    if norm is None:
+        return None
+    return format_token_sequence(norm, options=options)
+
+
 def _contains_global_substitution(tokens: Sequence[CssToken]) -> bool:
-    """Return True if `tokens` contains `var(...)`, `env(...)`, or `first-valid(...)`."""
+    """Return True if `tokens` contains `var(...)`, `env(...)`, `attr(...)`, `first-valid(...)`, `inherit(...)`, or `if(...)`."""
     for tok in tokens:
         if tok.kind == "function" and tok.value.lower() in GLOBAL_SUBSTITUTION_FUNCTIONS:
             return True
