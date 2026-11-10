@@ -60,6 +60,16 @@ def test_family_name_vs_generic_family_boundary() -> None:
     )
 
 
+def test_cssom_multiword_family_name_with_reserved_or_generic_keyword_stays_quoted() -> None:
+    cssom = SerializationOptions.cssom()
+    for fam in ("foo inherit", "initial bar", "foo default", "foo serif", "Noto sans-serif"):
+        expected = f'"{fam}"'
+        assert serialize_value("font-family", fam, options=cssom) == expected
+        got = canonicalize("font-family", expected, options=cssom)
+        assert got == expected
+        assert canonicalize("font-family", got, options=cssom) == expected
+
+
 def test_value_wrappers_eager_validation_and_dimension_unit_formatting() -> None:
     from stixis import Dimension
     from stixis._syntax.tokenizer import tokenize_css
