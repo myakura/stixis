@@ -7,7 +7,12 @@ from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Context, Decimal
 from typing import Any
 
-from stixis._syntax.tokenizer import CssToken, validate_token_stream_safety
+from stixis._syntax.tokenizer import (
+    CssToken,
+    _is_ident_code_point,
+    _is_ident_start_char,
+    validate_token_stream_safety,
+)
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
@@ -27,6 +32,7 @@ RESERVED_CUSTOM_IDENT_KEYWORDS: frozenset[str] = CSS_WIDE_KEYWORDS | frozenset({
 __all__ = [
     "CSS_WIDE_KEYWORDS",
     "RESERVED_CUSTOM_IDENT_KEYWORDS",
+    "_is_valid_dimension_unit",
     "_serialize_dimension_unit",
     "canonicalize_unit",
     "check_numeric_bounds",
@@ -420,8 +426,25 @@ def serialize_dimension(
     return f"{num_str}{canon_unit}"
 
 
+def _is_valid_dimension_unit(unit: str) -> bool:
+    """Return True if `unit` is a valid unescaped CSS dimension unit identifier."""
+    if not isinstance(unit, str) or not unit:
+        return False
+    if unit[0] == "-":
+        if len(unit) < 2 or not (_is_ident_start_char(unit[1]) or unit[1] == "-"):
+            return False
+        start = 2
+    elif _is_ident_start_char(unit[0]):
+        start = 1
+    else:
+        return False
+    return all(_is_ident_code_point(ch) for ch in unit[start:])
+
+
 def _serialize_dimension_unit(unit: str) -> str:
     """Serialize a dimension unit identifier, escaping a leading `e`/`E` when followed by a digit or `-[0-9]`."""
+    if not isinstance(unit, str) or unit == "":
+        raise StixisValidationError("<dimension>", "<dimension>", unit)
     if (
         len(unit) >= 2
         and unit[0] in ("e", "E")

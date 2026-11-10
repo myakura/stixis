@@ -1501,7 +1501,14 @@ def _serialize_primitive_python_value(
             if not isinstance(value, bool) and isinstance(value, (int, float)):
                 return serialize_number(value)
             if isinstance(value, (Dimension, Percentage, Keyword, Url)):
-                return str(value)
+                rendered = str(value)
+                validate_token_stream_safety(
+                    rendered,
+                    forbid_top_level_semicolon=(kind == "<declaration-value>"),
+                    forbid_top_level_bang=(kind == "<declaration-value>"),
+                    target=kind,
+                )
+                return rendered
             return None
 
         if kind == "<dimension>":
@@ -1514,7 +1521,8 @@ def _serialize_primitive_python_value(
                 and isinstance(value[0], (int, float))
                 and isinstance(value[1], str)
             ):
-                return f"{serialize_number(value[0], min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value[1])}"
+                dim = Dimension(value[0], value[1])
+                return f"{serialize_number(dim.value, min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(dim.unit)}"
             return None
 
         if kind == "<hex-color>":

@@ -60,9 +60,37 @@ def test_family_name_vs_generic_family_boundary() -> None:
     )
 
 
-def test_local_font_and_generic_family_str_do_not_raise() -> None:
-    assert str(LocalFont("")) == 'local("")'
-    assert str(GenericFamily("not-a-generic")) == "not-a-generic"
+def test_value_wrappers_eager_validation_and_dimension_unit_formatting() -> None:
+    from stixis import Dimension
+    from stixis._syntax.tokenizer import tokenize_css
+
+    for bad_unit in ("", "px;color:red", "px ", " px", "px{}", "2px", "-2px", "-", "%"):
+        with pytest.raises(StixisValidationError):
+            Dimension(10, bad_unit)
+
+    assert str(Dimension(10, "px")) == "10px"
+    assert str(Dimension(1, "e3")) == r"1\65 3"
+    toks = [t for t in tokenize_css(str(Dimension(1, "e3"))) if t.kind != "whitespace"]
+    assert len(toks) == 1 and toks[0].kind == "dimension" and toks[0].unit == "e3"
+
+    with pytest.raises(StixisValidationError):
+        serialize_value("<dimension>", (10, "px;color:red"))
+
+    for bad_kw in ("", "   ", "\t\n", 123):
+        with pytest.raises(StixisValidationError):
+            Keyword(bad_kw)  # type: ignore[arg-type]
+    assert str(Keyword("auto")) == "auto"
+
+    for bad_fam in ("", "   ", 123):
+        with pytest.raises(StixisValidationError):
+            LocalFont(bad_fam)  # type: ignore[arg-type]
+    assert str(LocalFont("Inter")) == 'local("Inter")'
+
+    for bad_gen in ("", "   ", "not-a-generic", "generic(unknown)", 123):
+        with pytest.raises(StixisValidationError):
+            GenericFamily(bad_gen)  # type: ignore[arg-type]
+    assert str(GenericFamily("serif")) == "serif"
+    assert str(GenericFamily("generic(kai)")) == "generic(kai)"
 
 
 def test_value_wrapper_subclasses_accepted() -> None:

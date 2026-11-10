@@ -14,33 +14,10 @@ from stixis._syntax.serialize import (
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.values import (
+    GENERIC_FAMILY_KEYWORDS,
+    GENERIC_SCRIPT_KEYWORDS,
     GenericFamily,
     Keyword,
-)
-
-GENERIC_FAMILY_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "serif",
-        "sans-serif",
-        "cursive",
-        "fantasy",
-        "monospace",
-        "system-ui",
-        "math",
-        "ui-serif",
-        "ui-sans-serif",
-        "ui-monospace",
-        "ui-rounded",
-    }
-)
-
-GENERIC_SCRIPT_KEYWORDS: frozenset[str] = frozenset(
-    {
-        "fangsong",
-        "kai",
-        "khmer-mul",
-        "nastaliq",
-    }
 )
 
 _UNQUOTED_WORD_RE = re.compile(r"^-?[a-zA-Z_\x80-\U0010ffff][a-zA-Z0-9_\-\x80-\U0010ffff]*$")
