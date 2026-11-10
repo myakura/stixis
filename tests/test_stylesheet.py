@@ -313,3 +313,30 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     assert hash(r_tpl) == hash(r_tpl)
     assert "/* ['foo'] */" in r_tpl.format(options=SerializationOptions.cleome())
     assert "content: '[\\'foo\\']';" in r_tpl.format(options=SerializationOptions.cleome())
+
+
+def test_custom_property_and_raw_declaration_reject_dimension_injection() -> None:
+    from stixis import Dimension, RawDeclaration, serialize_value
+
+    with pytest.raises(StixisValidationError):
+        StyleRule(":root", {"--x": Dimension(10, "px;color:red")})
+    with pytest.raises(StixisValidationError):
+        StyleRule(":root", [RawDeclaration("--x", Dimension(10, "px;color:red"))])
+    with pytest.raises(StixisValidationError):
+        serialize_value("<any-value>", Dimension(10, "px;color:red"))
+
+    class UnescapedDimension(Dimension):
+        raw_css: str = ""
+
+        def __str__(self) -> str:
+            return self.raw_css
+
+    bad_semi = UnescapedDimension(10, "px")
+    object.__setattr__(bad_semi, "raw_css", "10px;color:red")
+    with pytest.raises(StixisValidationError):
+        StyleRule(":root", {"--x": bad_semi})
+
+    bad_brace = UnescapedDimension(10, "px")
+    object.__setattr__(bad_brace, "raw_css", "10px}body{color:red")
+    with pytest.raises(StixisValidationError):
+        serialize_value("<any-value>", bad_brace)

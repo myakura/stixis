@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from stixis._syntax.serialize import (
     CSS_WIDE_KEYWORDS,
     RESERVED_CUSTOM_IDENT_KEYWORDS,
+    _is_valid_dimension_unit,
+    _serialize_dimension_unit,
     serialize_ident,
     serialize_number,
     serialize_string,
@@ -16,8 +18,35 @@ from stixis._syntax.serialize import (
 )
 from stixis.errors import StixisValidationError
 
+GENERIC_FAMILY_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "serif",
+        "sans-serif",
+        "cursive",
+        "fantasy",
+        "monospace",
+        "system-ui",
+        "math",
+        "ui-serif",
+        "ui-sans-serif",
+        "ui-monospace",
+        "ui-rounded",
+    }
+)
+
+GENERIC_SCRIPT_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "fangsong",
+        "kai",
+        "khmer-mul",
+        "nastaliq",
+    }
+)
+
 __all__ = [
     "CSS_WIDE_KEYWORDS",
+    "GENERIC_FAMILY_KEYWORDS",
+    "GENERIC_SCRIPT_KEYWORDS",
     "RESERVED_CUSTOM_IDENT_KEYWORDS",
     "Deg",
     "Dimension",
@@ -40,6 +69,10 @@ class Keyword:
 
     value: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, str) or self.value == "":
+            raise StixisValidationError("<ident>", "<ident>", self.value)
+
     def __str__(self) -> str:
         return serialize_ident(self.value)
 
@@ -49,6 +82,18 @@ class GenericFamily:
     """Explicit `<generic-family>` value for `font-family` (e.g., `serif`, `generic(kai)`)."""
 
     name: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str):
+            raise StixisValidationError("<generic-family>", "<generic-family>", self.name)
+        lower = self.name.strip().lower()
+        if lower in GENERIC_FAMILY_KEYWORDS:
+            return
+        if lower.startswith("generic(") and lower.endswith(")"):
+            inner = lower[8:-1].strip()
+            if inner in GENERIC_SCRIPT_KEYWORDS:
+                return
+        raise StixisValidationError("<generic-family>", "<generic-family>", self.name)
 
     def __str__(self) -> str:
         lower = self.name.strip().lower()
@@ -88,6 +133,10 @@ class LocalFont:
 
     family: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.family, str) or self.family == "":
+            raise StixisValidationError("<font-src>", "<font-src>", self.family)
+
     def __str__(self) -> str:
         return f"local({serialize_string(self.family)})"
 
@@ -112,11 +161,11 @@ class Dimension:
             raise StixisValidationError("<dimension>", "<dimension>", self.value) from exc
         if not is_finite:
             raise StixisValidationError("<dimension>", "<dimension>", self.value)
-        if not isinstance(self.unit, str) or not self.unit:
+        if not _is_valid_dimension_unit(self.unit):
             raise StixisValidationError("<dimension>", "<dimension>", self.unit)
 
     def __str__(self) -> str:
-        return f"{serialize_number(self.value)}{self.unit}"
+        return f"{serialize_number(self.value)}{_serialize_dimension_unit(self.unit)}"
 
 
 @dataclass(frozen=True, slots=True)
