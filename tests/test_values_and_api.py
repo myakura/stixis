@@ -76,15 +76,17 @@ def test_value_wrappers_eager_validation_and_dimension_unit_formatting() -> None
     with pytest.raises(StixisValidationError):
         serialize_value("<dimension>", (10, "px;color:red"))
 
-    for bad_kw in ("", "   ", "\t\n", 123):
+    for bad_kw in ("", 123):
         with pytest.raises(StixisValidationError):
             Keyword(bad_kw)  # type: ignore[arg-type]
     assert str(Keyword("auto")) == "auto"
+    assert str(Keyword("   ")) == r"\ \ \ "
 
-    for bad_fam in ("", "   ", 123):
+    for bad_fam in ("", 123):
         with pytest.raises(StixisValidationError):
             LocalFont(bad_fam)  # type: ignore[arg-type]
     assert str(LocalFont("Inter")) == 'local("Inter")'
+    assert str(LocalFont("   ")) == 'local("   ")'
 
     for bad_gen in ("", "   ", "not-a-generic", "generic(unknown)", 123):
         with pytest.raises(StixisValidationError):

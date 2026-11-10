@@ -70,7 +70,7 @@ class Keyword:
     value: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.value, str) or not self.value.strip():
+        if not isinstance(self.value, str) or self.value == "":
             raise StixisValidationError("<ident>", "<ident>", self.value)
 
     def __str__(self) -> str:
@@ -134,7 +134,7 @@ class LocalFont:
     family: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.family, str) or not self.family.strip():
+        if not isinstance(self.family, str) or self.family == "":
             raise StixisValidationError("<font-src>", "<font-src>", self.family)
 
     def __str__(self) -> str:
