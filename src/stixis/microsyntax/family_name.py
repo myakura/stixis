@@ -38,9 +38,7 @@ def is_valid_unquoted_family_name(name: str) -> bool:
             return False
         if w.startswith("--"):
             return False
-
-    if len(words) == 1:
-        lower = words[0].lower()
+        lower = w.lower()
         if lower in RESERVED_CUSTOM_IDENT_KEYWORDS or lower in GENERIC_FAMILY_KEYWORDS:
             return False
     return True
