@@ -71,3 +71,72 @@ def test_pep750_template_integration_and_context_escaping() -> None:
     assert render_css_template(t"image-url({arg})") == "image-url(test)"
     assert render_css_template(t"my-url({arg})") == "my-url(test)"
     assert render_css_template(t"url({arg})") == 'url("test")'
+
+
+def test_pep750_template_partial_and_multi_slot_url_escaping() -> None:
+    from stixis import SerializationOptions, StyleRule
+    from stixis._syntax import render_css_template
+
+    slug = "Noto Sans"
+    base = "https://example.com"
+
+    # Single-slot url(...) with optional whitespace continues rendering as quoted url("...")
+    assert render_css_template(t"url({base})") == 'url("https://example.com")'
+    assert render_css_template(t"url( {base} )") == 'url( "https://example.com" )'
+    assert serialize_value("<url>", t"url( {base} )") == 'url("https://example.com")'
+
+    # Static prefix/suffix around an interpolation inside unquoted url(...)
+    assert (
+        serialize_value("<url>", t"url(https://example.com/{slug}.woff2)")
+        == 'url("https://example.com/Noto Sans.woff2")'
+    )
+    assert serialize_value("<url>", t"url({slug}.woff2)") == 'url("Noto Sans.woff2")'
+    assert (
+        serialize_value("<url>", t"url(https://example.com/{slug})")
+        == 'url("https://example.com/Noto Sans")'
+    )
+
+    # Multiple interpolations inside unquoted url(...)
+    assert (
+        serialize_value("<url>", t"url({base}/{slug}.woff2)")
+        == 'url("https://example.com/Noto Sans.woff2")'
+    )
+    assert (
+        serialize_value("<any-value>", t"url({base}/{slug}.woff2)")
+        == 'url("https://example.com/Noto Sans.woff2")'
+    )
+    assert (
+        serialize_value(
+            "<url>",
+            t"url({base}/{slug}.woff2)",
+            options=SerializationOptions.cleome(),
+        )
+        == "url('https://example.com/Noto Sans.woff2')"
+    )
+
+    # StyleRule and FontFace integration
+    rule = StyleRule("div", {"background-image": t"url(https://example.com/{slug}.woff2)"})
+    assert 'background-image: url("https://example.com/Noto Sans.woff2");' in dumps(rule)
+
+    ff = FontFace(font_family="Inter", src=t"url(/fonts/{slug}.woff2) format(woff2)")
+    assert 'src: url("/fonts/Noto Sans.woff2") format(woff2);' in dumps(ff)
+
+    # Unsafe <url-token> characters across slots (quotes, parens, backslashes, whitespace, controls, comments)
+    tricky_dir = "a\"b'c(d)e\\f"
+    tricky_file = "g h\ti\nj/*k*/l\x00\x1f\x7f"
+    rendered = render_css_template(t"url(/assets/{tricky_dir}/{tricky_file}.woff2)")
+    assert "/*" not in rendered
+    assert "*/" not in rendered
+    assert serialize_value("<url>", t"url(/assets/{tricky_dir}/{tricky_file}.woff2)") == (
+        'url("/assets/a\\"b\'c(d)e\\\\f/g h\\9 i\\a j/*k*/l\ufffd\\1f \\7f .woff2")'
+    )
+
+    # Explicitly quoted url("...") and url('...') with multiple slots
+    assert (
+        serialize_value("<url>", t'url("{base}/{slug}.woff2")')
+        == 'url("https://example.com/Noto Sans.woff2")'
+    )
+    assert (
+        serialize_value("<url>", t"url('{base}/{slug}.woff2')")
+        == 'url("https://example.com/Noto Sans.woff2")'
+    )
