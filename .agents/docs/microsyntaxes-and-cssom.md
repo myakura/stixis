@@ -17,7 +17,7 @@ All primitive serializers implement W3C CSSOM section 2.1 (`Common Serializing I
 * **Numbers, integers, percentages, and dimensions (`serialize_number`, `serialize_integer`, `serialize_percentage`, `serialize_dimension`).**
   * Rejects `bool` (`isinstance(v, bool)`) and non-finite floats (`nan`, `inf`, `-inf`).
   * Formats numbers as shortest decimal strings without scientific notation, rounded to at most 6 fractional digits with trailing zeros stripped (`400.0` formats as `"400"`, `-0.0` formats as `"0"`).
-  * Enforces bracketed bounds (`[min, max]`) and validates units against `src/stixis/_generated/units.py`, normalizing unit names to their canonical form (`Hz`, `kHz`, `Q`, `dB`, `st`, or lowercase).
+  * Enforces bracketed bounds (`[min, max]`) and validates units against `src/stixis/_generated/units.py`, normalizing unit names to their canonical form (`Hz`, `kHz`, `Q`, `dB`, `st`, or lowercase). `Dimension` validates `unit` as an unescaped CSS identifier in `__post_init__` (`_is_valid_dimension_unit`) and formats units via `_serialize_dimension_unit`. `Keyword`, `LocalFont`, and `GenericFamily` likewise validate inputs eagerly in `__post_init__`.
 
 ## Five microsyntaxes (`src/stixis/microsyntax/`)
 
