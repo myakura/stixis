@@ -17,15 +17,14 @@ from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 _CSS_WHITESPACE = (" ", "\t", "\n", "\r", "\f")
 
 
-def _is_followed_by_url_close(items: list[str | Interpolation], start_idx: int) -> bool:
-    """Return True if only optional CSS whitespace separates `start_idx` from a closing `)`."""
+def _is_standalone_url_slot(items: list[str | Interpolation], start_idx: int) -> bool:
+    """Return True if the slot before `start_idx` is followed by `)`, whitespace (e.g. `<url-modifier>`), or `/*`."""
     for item in items[start_idx:]:
         if isinstance(item, Interpolation):
             return False
-        for ch in item:
-            if ch in _CSS_WHITESPACE:
-                continue
-            return ch == ")"
+        if not item:
+            continue
+        return item[0] == ")" or item[0] in _CSS_WHITESPACE or item.startswith("/*")
     return False
 
 
@@ -142,8 +141,8 @@ def render_css_template(
                 out.append(escaped)
             elif in_unquoted_url:
                 text = format(val, item.format_spec) if item.format_spec else str(val)
-                if not url_has_content and _is_followed_by_url_close(items, idx + 1):
-                    # Single-slot url({val}) renders as a quoted string inside url("...")
+                if not url_has_content and _is_standalone_url_slot(items, idx + 1):
+                    # Standalone url({val}) (optionally followed by modifiers/comments) renders quoted
                     out.append(serialize_string(text, options=options))
                     in_unquoted_url = False
                     url_has_content = False

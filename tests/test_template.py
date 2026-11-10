@@ -80,10 +80,19 @@ def test_pep750_template_partial_and_multi_slot_url_escaping() -> None:
     slug = "Noto Sans"
     base = "https://example.com"
 
-    # Single-slot url(...) with optional whitespace continues rendering as quoted url("...")
+    # Single-slot url(...) with optional whitespace, <url-modifier>, or trailing comments stays quoted
     assert render_css_template(t"url({base})") == 'url("https://example.com")'
     assert render_css_template(t"url( {base} )") == 'url( "https://example.com" )'
     assert serialize_value("<url>", t"url( {base} )") == 'url("https://example.com")'
+    font_path = "font.woff2"
+    assert (
+        serialize_value("<url>", t"url({font_path} type(font))") == 'url("font.woff2" type(font))'
+    )
+    assert (
+        serialize_value("<url>", t"url({font_path} crossorigin)") == 'url("font.woff2" crossorigin)'
+    )
+    assert serialize_value("<url>", t"url({font_path} /* comment */)") == 'url("font.woff2")'
+    assert serialize_value("<url>", t"url({font_path}/* comment */)") == 'url("font.woff2")'
 
     # Static prefix/suffix around an interpolation inside unquoted url(...)
     assert (
