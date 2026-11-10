@@ -10,7 +10,11 @@ from stixis._syntax.serialize import (
     serialize_number,
     serialize_string,
 )
-from stixis._syntax.tokenizer import _is_ident_code_point
+from stixis._syntax.tokenizer import (
+    _consume_ident_sequence,
+    _is_ident_code_point,
+    _starts_an_ident_sequence,
+)
 from stixis.errors import StixisSyntaxError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
@@ -103,18 +107,34 @@ def render_css_template(
                         in_comment = True
                         i += 2
                         continue
-                    if ch == "\\" and i + 1 < n and item[i + 1] not in ("\n", "\r", "\f"):
-                        i += 2
-                        continue
                     if ch in ('"', "'"):
                         in_quote = ch
-                    elif i >= 3 and item[i - 3 : i + 1].lower() == "url(":
-                        before_url = item[i - 4] if i >= 4 else prev_tail
-                        if not before_url or (
-                            not _is_ident_code_point(before_url) and before_url != "\\"
+                        i += 1
+                        continue
+                    if _starts_an_ident_sequence(item, i):
+                        before_ident = item[i - 1] if i > 0 else prev_tail
+                        ident, next_i = _consume_ident_sequence(item, i)
+                        if (
+                            next_i < n
+                            and item[next_i] == "("
+                            and ident.lower() == "url"
+                            and not (
+                                before_ident
+                                and (
+                                    _is_ident_code_point(before_ident)
+                                    or before_ident in ("#", "@", "\\")
+                                )
+                            )
                         ):
                             in_unquoted_url = True
                             url_has_content = False
+                            i = next_i + 1
+                            continue
+                        i = next_i
+                        continue
+                    if ch == "\\" and i + 1 < n and item[i + 1] not in ("\n", "\r", "\f"):
+                        i += 2
+                        continue
                 i += 1
         elif isinstance(item, Interpolation):
             val = convert(item.value, item.conversion)

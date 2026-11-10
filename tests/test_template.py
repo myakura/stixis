@@ -149,3 +149,16 @@ def test_pep750_template_partial_and_multi_slot_url_escaping() -> None:
         serialize_value("<url>", t"url('{base}/{slug}.woff2')")
         == 'url("https://example.com/Noto Sans.woff2")'
     )
+
+    # Escaped CSS `url(` spellings (`\url(...)`, `u\72 l(...)`) preserve URL context escaping
+    breakout = "a),url(b"
+    assert serialize_value("<url>", t"\\url({slug}.woff2)") == 'url("Noto Sans.woff2")'
+    assert (
+        serialize_value("<url>", t"\\url({font_path} crossorigin)")
+        == 'url("font.woff2" crossorigin)'
+    )
+    assert serialize_value("background-image", t"\\url({breakout})") == 'url("a),url(b")'
+    assert (
+        serialize_value("background-image", t"u\\72 l(/assets/{breakout})")
+        == 'url("/assets/a),url(b")'
+    )
