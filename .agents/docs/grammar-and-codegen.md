@@ -8,12 +8,12 @@ Stixis separates build-time specification ingestion (`codegen/`) from its runtim
 
 `compile_value_syntax(syntax_str)` compiles W3C CSS Value Definition Syntax strings (`css-values-4` section 5) into an immutable `ValueNode` tree:
 
-* `KeywordNode(name)` and `DelimNode(delim)`: literal keywords (matched case-insensitively, serialized in ASCII lowercase) and punctuation delimiters (`,`, `/`, `:`).
+* `KeywordNode(name)` and `DelimNode(delim, omissible)`: literal keywords (matched case-insensitively, serialized in ASCII lowercase) and punctuation delimiters (`,`, `/`, `:`). Unquoted `,` tokens set `omissible=True` (`css-values-4` §2.2.1) whereas single-quoted `','` tokens set `omissible=False`.
 * `PrimitiveNode(kind, min_val, max_val, min_unit, max_unit)`: terminal and microsyntax types (`<number>`, `<integer>`, `<length>`, `<angle>`, `<time>`, `<frequency>`, `<resolution>`, `<percentage>`, `<string>`, `<url>`, `<ident>`, `<custom-ident>`, `<dashed-ident>`, `<urange>`, `<opentype-tag>`, `<feature-tag-value>`, `<family-name>`, `<generic-family>`, `<font-src>`, `<font-src-list>`, `<font-format>`, `<font-tech>`, `<hex-color>`, `<declaration-value>`, `<any-value>`), including bracketed range constraints such as `<number [1,1000]>` or `<angle [-90deg,90deg]>`.
-* `RefNode(name, is_property, min_val, max_val)`: non-terminal references (`<color>`) and property references (`<'font-width'>`), resolved lazily by `lookup_value_node` with cycle tracking (`_active_refs`).
+* `RefNode(name, is_property, min_val, max_val, type_param)`: non-terminal references (`<color>`), parameterized non-terminals (`<boolean-expr[ <if-test> ]>` compiled via `compile_boolean_expr`), and property references (`<'font-width'>`), resolved lazily by `lookup_value_node` with cycle tracking (`_active_refs`).
 * `FunctionNode(name, arg)`: typed CSS functions (`generic(...)`, `palette-mix(...)`, `fit-content(...)`).
 * Combinators:
-  * `JuxtaposeNode(items)`: ordered sequence `A B`.
+  * `JuxtaposeNode(items)`: ordered sequence `A B`. When interior `DelimNode(",", omissible=True)` separators partition `items` into non-empty clauses (`_split_juxtapose_omissible_commas`), omitted nullable clauses elide their separating comma (`css-values-4` §2.2.1) and leading, trailing, or consecutive unseparated commas are rejected.
   * `AllOfNode(items)`: unordered conjunction `A && B`. Matches branches in any input order, allows optional `MultiplierNode(min_count=0)` branches to be omitted, and serializes matched branches in grammar order `0 .. k-1`.
   * `AnyOrderNode(items)`: unordered inclusive-or `A || B`. Requires at least one branch and serializes matched branches in grammar order `0 .. k-1`.
   * `ExclusiveOrNode(items)`: ordered choice `A | B`.
