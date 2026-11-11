@@ -331,3 +331,73 @@ def test_default_is_rejected_as_css_wide_keyword_but_excluded_from_custom_ident(
         canonicalize("<custom-ident>", "default")
     with pytest.raises(StixisValidationError):
         serialize_value("<custom-ident>", "default")
+
+
+def test_serialize_value_function_node_and_mapping_key_validation() -> None:
+    """Issue #100: `FunctionNode` handling and `Mapping` key validation in `serialize_value`."""
+    from stixis import Dimension
+
+    # 1. Direct typed Python inputs targeting VDS `<fn()>` function nodes
+    assert serialize_value("<rotateX()>", Deg(30)) == "rotatex(30deg)"
+    assert serialize_value("<blur()>", Dimension(4, "px")) == "blur(4px)"
+    assert serialize_value("<fit-content()>", Pct(50)) == "fit-content(50%)"
+    assert (
+        serialize_value("<translate()>", (Dimension(10, "px"), Dimension(20, "px")))
+        == "translate(10px, 20px)"
+    )
+
+    # 2. Named `Mapping` and `(fn_name, ...)` tuples on properties with `FunctionNode` branches
+    assert serialize_value("width", {"fit_content": Dimension(120, "px")}) == "fit-content(120px)"
+    assert serialize_value("width", ("fit-content", Pct(50))) == "fit-content(50%)"
+    assert serialize_value("filter", {"blur": Dimension(4, "px")}) == "blur(4px)"
+    assert serialize_value("filter", {"blur": ()}) == "blur()"
+    assert (
+        serialize_value(
+            "transform",
+            [
+                {"translate": (Dimension(10, "px"), Dimension(20, "px"))},
+                ("rotate", Deg(45)),
+            ],
+        )
+        == "translate(10px, 20px) rotate(45deg)"
+    )
+    assert serialize_value("width", Dimension(120, "px")) == "120px"
+    with pytest.raises(StixisValidationError):
+        serialize_value("filter", Dimension(4, "px"))
+    with pytest.raises(StixisValidationError):
+        serialize_value("width", {"bogus_fn": Dimension(120, "px")})
+    with pytest.raises(StixisValidationError):
+        serialize_value("width", {"fit_content": ()})
+
+    # 3. `Mapping` keys on `&&` / `||` shorthands are validated and bound to matching branches
+    assert (
+        serialize_value(
+            "border",
+            {"color": "red", "style": "solid", "width": Dimension(1, "px")},
+        )
+        == "1px solid red"
+    )
+    assert (
+        serialize_value(
+            "border",
+            {"border_width": Dimension(2, "px"), "border_style": "dashed"},
+        )
+        == "2px dashed"
+    )
+    assert (
+        serialize_value(
+            "outline",
+            {"outline_color": "blue", "style": "dashed", "width": Dimension(2, "px")},
+        )
+        == "2px dashed blue"
+    )
+    for bad_border_map in (
+        {"totally_bogus_key": Dimension(1, "px")},
+        {"width": Dimension(1, "px"), "totally_bogus_key": None},
+        {"color": Dimension(1, "px")},
+        {"width": Dimension(1, "px"), "border_width": Dimension(2, "px")},
+        {"width": False},
+        {},
+    ):
+        with pytest.raises(StixisValidationError):
+            serialize_value("border", bad_border_map)

@@ -121,4 +121,6 @@ def test_wpt_urange_invalid(raw_css: str) -> None:
     with pytest.raises(StixisError):
         parse_urange(raw_css)
     with pytest.raises(StixisError):
+        canonicalize("<urange>", raw_css)
+    with pytest.raises(StixisError):
         canonicalize("unicode-range", raw_css, at_rule="@font-face")

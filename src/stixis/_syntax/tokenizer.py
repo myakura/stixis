@@ -19,6 +19,7 @@ class CssToken:
     unit: str = ""
     hash_type: str = "unrestricted"  # "id" or "unrestricted"
     ws_around: bool = field(default=True, compare=False)
+    ws_before: bool = field(default=False, compare=False)
 
 
 def _consume_escape(text: str, pos: int) -> tuple[str, int]:
@@ -243,11 +244,11 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
 
         # CDO `<!--` and CDC `-->`
         if normalized.startswith("<!--", pos):
-            tokens.append(CssToken("CDO", "<!--"))
+            tokens.append(CssToken("CDO", "<!--", ws_before=cur_ws_before))
             pos += 4
             continue
         if normalized.startswith("-->", pos):
-            tokens.append(CssToken("CDC", "-->"))
+            tokens.append(CssToken("CDC", "-->", ws_before=cur_ws_before))
             pos += 3
             continue
 
@@ -278,7 +279,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     pos += 1
             if not closed:
                 raise StixisSyntaxError(f"Unclosed CSS string literal starting with {quote!r}")
-            tokens.append(CssToken("string", "".join(chars)))
+            tokens.append(CssToken("string", "".join(chars), ws_before=cur_ws_before))
             continue
 
         # Hash `#`
@@ -291,9 +292,9 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     "id" if _starts_an_ident_sequence(normalized, pos + 1) else "unrestricted"
                 )
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
-                tokens.append(CssToken("hash", ident, hash_type=hash_type))
+                tokens.append(CssToken("hash", ident, hash_type=hash_type, ws_before=cur_ws_before))
             else:
-                tokens.append(CssToken("delim", "#"))
+                tokens.append(CssToken("delim", "#", ws_before=cur_ws_before))
                 pos += 1
             continue
 
@@ -303,13 +304,36 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             if _starts_an_ident_sequence(normalized, pos):
                 unit, pos = _consume_ident_sequence(normalized, pos)
                 tokens.append(
-                    CssToken("dimension", repr_str, num=num_val, is_integer=is_int, unit=unit)
+                    CssToken(
+                        "dimension",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        unit=unit,
+                        ws_before=cur_ws_before,
+                    )
                 )
             elif pos < n and normalized[pos] == "%":
                 pos += 1
-                tokens.append(CssToken("percentage", repr_str, num=num_val, is_integer=is_int))
+                tokens.append(
+                    CssToken(
+                        "percentage",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        ws_before=cur_ws_before,
+                    )
+                )
             else:
-                tokens.append(CssToken("number", repr_str, num=num_val, is_integer=is_int))
+                tokens.append(
+                    CssToken(
+                        "number",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        ws_before=cur_ws_before,
+                    )
+                )
             continue
 
         # Ident-like tokens
@@ -323,38 +347,38 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         look += 1
                     if look < n and normalized[look] not in ('"', "'"):
                         url_val, pos = _consume_unquoted_url(normalized, look)
-                        tokens.append(CssToken("url", url_val))
+                        tokens.append(CssToken("url", url_val, ws_before=cur_ws_before))
                         continue
-                tokens.append(CssToken("function", ident))
+                tokens.append(CssToken("function", ident, ws_before=cur_ws_before))
             else:
-                tokens.append(CssToken("ident", ident))
+                tokens.append(CssToken("ident", ident, ws_before=cur_ws_before))
             continue
 
         # At-keyword
         if ch == "@":
             if _starts_an_ident_sequence(normalized, pos + 1):
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
-                tokens.append(CssToken("at-keyword", ident))
+                tokens.append(CssToken("at-keyword", ident, ws_before=cur_ws_before))
             else:
-                tokens.append(CssToken("delim", "@"))
+                tokens.append(CssToken("delim", "@", ws_before=cur_ws_before))
                 pos += 1
             continue
 
         # Single-character punctuation tokens
         if ch in ("(", ")", "[", "]", "{", "}"):
-            tokens.append(CssToken(ch, ch))
+            tokens.append(CssToken(ch, ch, ws_before=cur_ws_before))
             pos += 1
             continue
         if ch == ",":
-            tokens.append(CssToken("comma", ","))
+            tokens.append(CssToken("comma", ",", ws_before=cur_ws_before))
             pos += 1
             continue
         if ch == ":":
-            tokens.append(CssToken("colon", ":"))
+            tokens.append(CssToken("colon", ":", ws_before=cur_ws_before))
             pos += 1
             continue
         if ch == ";":
-            tokens.append(CssToken("semicolon", ";"))
+            tokens.append(CssToken("semicolon", ";", ws_before=cur_ws_before))
             pos += 1
             continue
 
@@ -363,6 +387,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 "delim",
                 ch,
                 ws_around=(cur_ws_before and _has_ws_after(normalized, pos + 1)),
+                ws_before=cur_ws_before,
             )
         )
         pos += 1

@@ -7,6 +7,7 @@ from collections.abc import Callable, Mapping, Sequence
 from string.templatelib import Template
 from typing import Any
 
+from stixis._generated.specs import PROPERTY_SYNTAXES
 from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis._grammar.calc import (
     _consume_balanced_group,
@@ -20,6 +21,7 @@ from stixis._grammar.color import (
     extract_relative_color_rest_node,
     narrow_predefined_color_param_channels,
 )
+from stixis._grammar.targets import normalize_identifier_key
 from stixis._grammar.vds import (
     AllOfNode,
     AnyOrderNode,
@@ -88,7 +90,12 @@ from stixis.microsyntax.ranges import (
     serialize_font_width,
     serialize_metric_override,
 )
-from stixis.microsyntax.urange import format_urange
+from stixis.microsyntax.urange import (
+    consume_urange_tokens,
+    format_single_urange,
+    format_urange,
+    serialize_single_urange,
+)
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 from stixis.values import (
     Dimension,
@@ -608,12 +615,10 @@ class _TokenMatcher:
             return [(len(self.tokens), format_token_sequence(rest, options=self.options))]
 
         if kind in ("<unicode-range-token>", "<urange>"):
-            # `unicode-range` uses raw_text parsing via `format_urange` at the root
-            if pos == 0 and self.raw_text:
-                try:
-                    return [(len(self.tokens), format_urange(self.raw_text, options=self.options))]
-                except StixisValidationError:
-                    return []
+            consumed = consume_urange_tokens(self.tokens, pos)
+            if consumed is not None:
+                (start, end), next_pos = consumed
+                return [(next_pos, format_single_urange(start, end, options=self.options))]
             return []
 
         if pos >= len(self.tokens):
@@ -1039,6 +1044,203 @@ def _join_serialized_parts(parts: Sequence[str]) -> str:
     return "".join(out)
 
 
+def _normalize_mapping_key(raw_key: Any) -> str | None:
+    if not isinstance(raw_key, str):
+        return None
+    try:
+        return normalize_identifier_key(raw_key)
+    except StixisValidationError:
+        return None
+
+
+def _collect_branch_mapping_keys(
+    branch: ValueNode,
+    context_target: str | None,
+) -> frozenset[str]:
+    """Return valid normalized `Mapping` keys for a shorthand/combinator `branch`."""
+    keys: set[str] = set()
+    ctx_low = context_target.lower() if context_target else None
+
+    def visit(n: ValueNode) -> None:
+        if isinstance(n, (MultiplierNode, NonEmptyGroupNode)):
+            visit(n.child)
+            return
+        if isinstance(n, (ExclusiveOrNode, JuxtaposeNode, AllOfNode, AnyOrderNode)):
+            for item in n.items:
+                visit(item)
+            return
+        if isinstance(n, RefNode):
+            if n.is_property:
+                prop_low = n.name.lower()
+                keys.add(prop_low)
+                if ctx_low and prop_low.startswith(f"{ctx_low}-"):
+                    keys.add(prop_low[len(ctx_low) + 1 :])
+                if prop_low.endswith("-start") and prop_low[:-6] in PROPERTY_SYNTAXES:
+                    base_prop = prop_low[:-6]
+                    keys.add(base_prop)
+                    if ctx_low and base_prop.startswith(f"{ctx_low}-"):
+                        keys.add(base_prop[len(ctx_low) + 1 :])
+            else:
+                type_stem = n.name.strip("<>").lower()
+                if not type_stem.endswith("()"):
+                    keys.add(type_stem)
+                if ctx_low:
+                    candidates = [type_stem]
+                    if "-" in type_stem:
+                        candidates.append(type_stem.rsplit("-", 1)[-1])
+                    for cand in candidates:
+                        full_prop = f"{ctx_low}-{cand}"
+                        if full_prop in PROPERTY_SYNTAXES:
+                            keys.add(full_prop)
+                            keys.add(cand)
+            return
+        if isinstance(n, PrimitiveNode):
+            prim_stem = n.kind.strip("<>").lower()
+            keys.add(prim_stem)
+            if ctx_low and f"{ctx_low}-{prim_stem}" in PROPERTY_SYNTAXES:
+                keys.add(f"{ctx_low}-{prim_stem}")
+            return
+        if isinstance(n, KeywordNode) and n.name:
+            kw_low = n.name.lower()
+            keys.add(kw_low)
+            if ctx_low and f"{ctx_low}-{kw_low}" in PROPERTY_SYNTAXES:
+                keys.add(f"{ctx_low}-{kw_low}")
+
+    visit(branch)
+    return frozenset(keys)
+
+
+def _match_function_python_value(
+    node: FunctionNode,
+    value: Any,
+    *,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    options: SerializationOptions,
+    forbidden_custom_idents: frozenset[str],
+    min_override: float | None,
+    max_override: float | None,
+    active_refs: set[tuple[str, bool, str]],
+    allow_bare_arg: bool,
+) -> str | None:
+    if isinstance(value, GenericFamily) and node.name.lower() == "generic":
+        rendered_gen = serialize_generic_family(value)
+        return rendered_gen if rendered_gen.startswith("generic(") else None
+
+    def render_arg(fn_name: str, arg_val: Any) -> str | None:
+        if isinstance(arg_val, bool):
+            return None
+        if node.arg is None:
+            return f"{fn_name}()" if arg_val in (None, (), []) else None
+        if arg_val in (None, (), []):
+            return f"{fn_name}()" if _is_node_nullable(node.arg, specs_lookup) else None
+        rendered = _node_matches_single_value(
+            node.arg,
+            arg_val,
+            specs_lookup,
+            options,
+            forbidden_custom_idents,
+            min_override,
+            max_override,
+            active_refs,
+            context_target=None,
+            allow_bare_function_arg=False,
+        )
+        if rendered is None:
+            return None
+        return f"{fn_name}({rendered})"
+
+    expected_fn = None if node.name == "<function-token>" else serialize_ident(node.name.lower())
+
+    if isinstance(value, Mapping):
+        if len(value) != 1:
+            return None
+        raw_k, arg_val = next(iter(value.items()))
+        norm_k = _normalize_mapping_key(raw_k)
+        if norm_k is None:
+            return None
+        if expected_fn is not None:
+            if norm_k != expected_fn:
+                return None
+            return render_arg(expected_fn, arg_val)
+        return render_arg(norm_k, arg_val)
+
+    if isinstance(value, tuple) and len(value) >= 1 and isinstance(value[0], (str, Keyword)):
+        raw_head = value[0].value if isinstance(value[0], Keyword) else value[0]
+        stripped_head = raw_head.strip().removesuffix("()")
+        norm_head = _normalize_mapping_key(stripped_head)
+        if norm_head is not None and (expected_fn is None or norm_head == expected_fn):
+            fn_name = expected_fn if expected_fn is not None else norm_head
+            if len(value) == 1:
+                return render_arg(fn_name, ())
+            if len(value) == 2:
+                return render_arg(fn_name, value[1])
+            if any(isinstance(elem, bool) for elem in value[1:]):
+                return None
+            return render_arg(fn_name, value[1:])
+
+    if allow_bare_arg and expected_fn is not None and not isinstance(value, (str, bytes, bool)):
+        return render_arg(expected_fn, value)
+
+    return None
+
+
+def _match_mapping_against_juxtapose(
+    items: Sequence[ValueNode],
+    value: Mapping[Any, Any],
+    *,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    options: SerializationOptions,
+    forbidden_custom_idents: frozenset[str],
+    min_override: float | None,
+    max_override: float | None,
+    active_refs: set[tuple[str, bool, str]],
+    context_target: str | None,
+) -> str | None:
+    if not value:
+        return None
+    item_keys = [_collect_branch_mapping_keys(item, context_target) for item in items]
+    bound_values: dict[int, Any] = {}
+    claimed: set[int] = set()
+    for raw_k, v in value.items():
+        if isinstance(v, bool):
+            return None
+        norm_k = _normalize_mapping_key(raw_k)
+        if norm_k is None:
+            return None
+        matches = [idx for idx, ks in enumerate(item_keys) if norm_k in ks]
+        if len(matches) != 1:
+            return None
+        idx = matches[0]
+        if idx in claimed:
+            return None
+        claimed.add(idx)
+        if v is not None:
+            bound_values[idx] = v
+    if not bound_values:
+        return None
+    parts: list[str] = []
+    for idx, item in enumerate(items):
+        if idx in bound_values:
+            r = _node_matches_single_value(
+                item,
+                bound_values[idx],
+                specs_lookup,
+                options,
+                forbidden_custom_idents,
+                min_override,
+                max_override,
+                active_refs,
+                context_target=context_target,
+                allow_bare_function_arg=False,
+            )
+            if r is None:
+                return None
+            parts.append(r)
+        elif not _is_node_nullable(item, specs_lookup):
+            return None
+    return _join_serialized_parts(parts) if parts else None
+
+
 def _node_matches_single_value(
     node: ValueNode,
     value: Any,
@@ -1048,6 +1250,9 @@ def _node_matches_single_value(
     min_override: float | None = None,
     max_override: float | None = None,
     active_refs: set[tuple[str, bool, str]] | None = None,
+    *,
+    context_target: str | None = None,
+    allow_bare_function_arg: bool = False,
 ) -> str | None:
     """Try to serialize a structured Python `value` directly against `node`, returning `None` if it does not match."""
     if active_refs is None:
@@ -1080,6 +1285,19 @@ def _node_matches_single_value(
             max_override,
         )
 
+    if isinstance(node, FunctionNode):
+        return _match_function_python_value(
+            node,
+            value,
+            specs_lookup=specs_lookup,
+            options=options,
+            forbidden_custom_idents=forbidden_custom_idents,
+            min_override=min_override,
+            max_override=max_override,
+            active_refs=active_refs,
+            allow_bare_arg=allow_bare_function_arg,
+        )
+
     if isinstance(node, RefNode):
         eff_min = node.min_val if node.min_val is not None else min_override
         eff_max = node.max_val if node.max_val is not None else max_override
@@ -1092,6 +1310,7 @@ def _node_matches_single_value(
             target_node = specs_lookup(node.name, node.is_property)
         if target_node is None:
             return None
+        next_context = node.name if node.is_property else context_target
         active_refs.add(key)
         try:
             return _node_matches_single_value(
@@ -1103,6 +1322,8 @@ def _node_matches_single_value(
                 eff_min,
                 eff_max,
                 active_refs,
+                context_target=next_context,
+                allow_bare_function_arg=allow_bare_function_arg,
             )
         finally:
             active_refs.discard(key)
@@ -1117,6 +1338,8 @@ def _node_matches_single_value(
             min_override,
             max_override,
             active_refs,
+            context_target=context_target,
+            allow_bare_function_arg=allow_bare_function_arg,
         )
         return res if res else None
 
@@ -1148,6 +1371,8 @@ def _node_matches_single_value(
                         min_override,
                         max_override,
                         active_refs,
+                        context_target=context_target,
+                        allow_bare_function_arg=False,
                     )
                     if res is not None:
                         return res
@@ -1162,6 +1387,8 @@ def _node_matches_single_value(
                 min_override,
                 max_override,
                 active_refs,
+                context_target=context_target,
+                allow_bare_function_arg=False,
             )
             if res is not None:
                 return res
@@ -1179,6 +1406,8 @@ def _node_matches_single_value(
                 min_override,
                 max_override,
                 active_refs,
+                context_target=context_target,
+                allow_bare_function_arg=False,
             )
             if single is not None:
                 return single
@@ -1199,6 +1428,8 @@ def _node_matches_single_value(
                     min_override,
                     max_override,
                     active_refs,
+                    context_target=context_target,
+                    allow_bare_function_arg=False,
                 )
                 if r is None:
                     return None
@@ -1220,6 +1451,7 @@ def _node_matches_single_value(
                     min_override=min_override,
                     max_override=max_override,
                     active_refs=active_refs,
+                    context_target=context_target,
                 )
                 if matched_clauses is not None:
                     return matched_clauses
@@ -1238,13 +1470,30 @@ def _node_matches_single_value(
                         min_override,
                         max_override,
                         active_refs,
+                        context_target=context_target,
+                        allow_bare_function_arg=False,
                     )
                     if r:
                         return r
             return None
 
+        if isinstance(value, Mapping):
+            mapped_jux = _match_mapping_against_juxtapose(
+                node.items,
+                value,
+                specs_lookup=specs_lookup,
+                options=options,
+                forbidden_custom_idents=forbidden_custom_idents,
+                min_override=min_override,
+                max_override=max_override,
+                active_refs=active_refs,
+                context_target=context_target,
+            )
+            if mapped_jux is not None:
+                return mapped_jux
+
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            # Try matching sequence items via token stream or positional matching
+            # Try matching sequence items via positional matching, nullable single-child, or token stream
             if len(value) == len(node.items):
                 parts: list[str] = []
                 ok = True
@@ -1258,6 +1507,8 @@ def _node_matches_single_value(
                         min_override,
                         max_override,
                         active_refs,
+                        context_target=context_target,
+                        allow_bare_function_arg=False,
                     )
                     if r is None:
                         ok = False
@@ -1265,7 +1516,23 @@ def _node_matches_single_value(
                     parts.append(r)
                 if ok:
                     return _join_serialized_parts(parts)
-            # Or convert sequence elements to CSS tokens and match through _TokenMatcher
+            nullable_seq_items = [_is_node_nullable(c, specs_lookup) for c in node.items]
+            for idx, item in enumerate(node.items):
+                if all(nullable_seq_items[j] for j in range(len(node.items)) if j != idx):
+                    r = _node_matches_single_value(
+                        item,
+                        value,
+                        specs_lookup,
+                        options,
+                        forbidden_custom_idents,
+                        min_override,
+                        max_override,
+                        active_refs,
+                        context_target=context_target,
+                        allow_bare_function_arg=False,
+                    )
+                    if r:
+                        return r
             return _match_sequence_via_tokens(
                 node, value, specs_lookup, options, forbidden_custom_idents
             )
@@ -1281,6 +1548,8 @@ def _node_matches_single_value(
                     min_override,
                     max_override,
                     active_refs,
+                    context_target=context_target,
+                    allow_bare_function_arg=False,
                 )
                 if r:
                     return r
@@ -1289,18 +1558,36 @@ def _node_matches_single_value(
     if isinstance(node, (AllOfNode, AnyOrderNode)):
         require_all = isinstance(node, AllOfNode)
         if isinstance(value, Mapping):
-            # Match mapping keys/values or values against branches in canonical order
-            items_to_match = [v for k, v in value.items() if v is not None and v is not False]
-            return _match_unordered_python_items(
+            mapped_res = _match_mapping_against_unordered(
                 node.items,
-                items_to_match,
+                value,
                 require_all=require_all,
                 specs_lookup=specs_lookup,
                 options=options,
                 forbidden_custom_idents=forbidden_custom_idents,
                 min_override=min_override,
                 max_override=max_override,
+                context_target=context_target,
             )
+            if mapped_res is not None:
+                return mapped_res
+            if not require_all and len(value) == 1:
+                for branch in node.items:
+                    r = _node_matches_single_value(
+                        branch,
+                        value,
+                        specs_lookup,
+                        options,
+                        forbidden_custom_idents,
+                        min_override,
+                        max_override,
+                        active_refs,
+                        context_target=context_target,
+                        allow_bare_function_arg=False,
+                    )
+                    if r is not None:
+                        return r
+            return None
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             res = _match_unordered_python_items(
                 node.items,
@@ -1311,6 +1598,7 @@ def _node_matches_single_value(
                 forbidden_custom_idents=forbidden_custom_idents,
                 min_override=min_override,
                 max_override=max_override,
+                context_target=context_target,
             )
             if res is not None:
                 return res
@@ -1329,12 +1617,80 @@ def _node_matches_single_value(
                     min_override,
                     max_override,
                     active_refs,
+                    context_target=context_target,
+                    allow_bare_function_arg=False,
                 )
                 if r is not None:
                     return r
         return None
 
     return None
+
+
+def _match_mapping_against_unordered(
+    branches: Sequence[ValueNode],
+    value: Mapping[Any, Any],
+    *,
+    require_all: bool,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    options: SerializationOptions,
+    forbidden_custom_idents: frozenset[str],
+    min_override: float | None,
+    max_override: float | None,
+    context_target: str | None,
+) -> str | None:
+    if not value:
+        return None
+    branch_keys = [_collect_branch_mapping_keys(b, context_target) for b in branches]
+    items_to_match: list[Any] = []
+    allowed_branches: list[frozenset[int]] = []
+    claimed_single_branches: set[int] = set()
+    juxtapose_bundles: dict[int, dict[str, Any]] = {}
+
+    for raw_k, v in value.items():
+        if isinstance(v, bool):
+            return None
+        norm_k = _normalize_mapping_key(raw_k)
+        if norm_k is None:
+            return None
+        matching = frozenset(i for i, bks in enumerate(branch_keys) if norm_k in bks)
+        if not matching:
+            return None
+        if len(matching) == 1:
+            sole_idx = next(iter(matching))
+            if isinstance(branches[sole_idx], JuxtaposeNode):
+                bundle = juxtapose_bundles.setdefault(sole_idx, {})
+                if norm_k in bundle:
+                    return None
+                bundle[norm_k] = v
+                continue
+            if sole_idx in claimed_single_branches:
+                return None
+            claimed_single_branches.add(sole_idx)
+        if v is not None:
+            items_to_match.append(v)
+            allowed_branches.append(matching)
+
+    for j_idx, bundle in juxtapose_bundles.items():
+        if any(val is not None for val in bundle.values()):
+            items_to_match.append(bundle)
+            allowed_branches.append(frozenset({j_idx}))
+
+    if not items_to_match:
+        return None
+
+    return _match_unordered_python_items(
+        branches,
+        items_to_match,
+        require_all=require_all,
+        specs_lookup=specs_lookup,
+        options=options,
+        forbidden_custom_idents=forbidden_custom_idents,
+        min_override=min_override,
+        max_override=max_override,
+        context_target=context_target,
+        allowed_branches=allowed_branches,
+    )
 
 
 def _match_unordered_python_items(
@@ -1347,13 +1703,18 @@ def _match_unordered_python_items(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None,
     max_override: float | None,
+    context_target: str | None = None,
+    allowed_branches: Sequence[frozenset[int]] | None = None,
 ) -> str | None:
     if not values:
         return None
     k = len(branches)
     if len(values) > k:
         return None
-    if require_all and len(values) != k:
+    required_indices = {
+        idx for idx, b in enumerate(branches) if not _is_node_nullable(b, specs_lookup)
+    }
+    if require_all and len(values) < len(required_indices):
         return None
 
     # Find assignment of `values` to distinct branch indices `0..k-1`
@@ -1361,10 +1722,13 @@ def _match_unordered_python_items(
 
     def backtrack(v_idx: int) -> bool:
         if v_idx == len(values):
-            return True
+            return (not require_all) or required_indices.issubset(matched.keys())
         val = values[v_idx]
+        allowed_for_v = allowed_branches[v_idx] if allowed_branches is not None else None
         for b_idx, branch in enumerate(branches):
             if b_idx in matched:
+                continue
+            if allowed_for_v is not None and b_idx not in allowed_for_v:
                 continue
             r = _node_matches_single_value(
                 branch,
@@ -1374,6 +1738,8 @@ def _match_unordered_python_items(
                 forbidden_custom_idents,
                 min_override,
                 max_override,
+                context_target=context_target,
+                allow_bare_function_arg=False,
             )
             if r is not None:
                 matched[b_idx] = r
@@ -1397,6 +1763,7 @@ def _match_clauses_subsequence(
     min_override: float | None,
     max_override: float | None,
     active_refs: set[tuple[str, bool, str]],
+    context_target: str | None = None,
 ) -> str | None:
     if not values or len(values) > len(clauses):
         return None
@@ -1416,6 +1783,8 @@ def _match_clauses_subsequence(
             min_override,
             max_override,
             active_refs,
+            context_target=context_target,
+            allow_bare_function_arg=False,
         )
         if r:
             rest = dfs(c_idx + 1, v_idx + 1)
@@ -1620,7 +1989,7 @@ def _serialize_primitive_python_value(
             return None
 
         if kind in ("<unicode-range-token>", "<urange>"):
-            return format_urange(value, options=options)
+            return serialize_single_urange(value, options=options, target=kind)
 
         if kind == "<font-src>":
             return serialize_single_font_src(value, options=options)
@@ -1717,8 +2086,10 @@ def evaluate_canonicalize(
         raise StixisValidationError(target, syntax, css_text)
 
     # Dedicated microsyntax fast-paths for exact WPT conformance
-    if target in ("unicode-range", "<urange>", "<unicode-range-token>"):
+    if target == "unicode-range":
         return format_urange(css_text, options=options)
+    if target in ("<urange>", "<unicode-range-token>"):
+        return serialize_single_urange(css_text, options=options, target=target)
 
     tokens = validate_token_stream_safety(
         css_text,
@@ -1829,8 +2200,10 @@ def evaluate_serialize_value(
     is_font_face = at_rule == "@font-face"
 
     # Dedicated microsyntax handlers for structured Python inputs
-    if target in ("unicode-range", "<urange>", "<unicode-range-token>"):
+    if target == "unicode-range":
         return format_urange(value, options=options)
+    if target in ("<urange>", "<unicode-range-token>"):
+        return serialize_single_urange(value, options=options, target=target)
 
     if target in ("font-family", "<family-name>", "<font-family-name>"):
         if target in ("<family-name>", "<font-family-name>") or is_font_face:
@@ -1989,8 +2362,17 @@ def evaluate_serialize_value(
             return raw_kw.strip().lower()
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
+    ctx_target = target if _is_property_target(target, at_rule) else None
     try:
-        direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
+        direct = _node_matches_single_value(
+            node,
+            value,
+            specs_lookup,
+            options,
+            forbidden_idents,
+            context_target=ctx_target,
+            allow_bare_function_arg=True,
+        )
     except RecursionError as exc:
         raise StixisValidationError(
             target, syntax, value, "Maximum nesting depth exceeded"
