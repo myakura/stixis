@@ -1,19 +1,27 @@
 # Stixis
 
-Stixis (`stixis`) is a CSS serializer and validator for Python 3.14+ with zero runtime dependencies. It generates its grammar tables and `TypedDict` definitions from W3C `@webref/css` (`ed/css/*.json`), derives property browser-support counts from `@mdn/browser-compat-data` (`css/properties/*.json`), and builds its test suite from Web Platform Tests (WPT) and Hypothesis.
+Stixis (`stixis`) builds and validates everyday static CSS from Python 3.14+ data with zero runtime dependencies. Pass computed numbers, units, sequences, URLs, or font metadata from build scripts or asset pipelines to author stylesheets (`StyleSheet`, `StyleRule`, `AtRule`, `FontFace`), custom properties, and `@font-face` / `unicode-range` subsets, or validate external CSS value strings against grammars generated from W3C `@webref/css` and browser-support counts from `@mdn/browser-compat-data`.
+
+## Scope and principles
+
+* **Non-goals.**
+  * General-purpose CSS template engine that infers lexical context across arbitrary string fragments.
+  * Browser computed-value, layout, or optimization engine (unit conversion, color-space conversion, shorthand collapsing, or per-item error-recovery dropping). *(Current status: `canonicalize` implements context-free CSS Values 4 §10.10 math simplification today; Stixis does not aim to expand algebraic expression rewriting or constant folding further.)*
+  * General-purpose CSS parser, AST rewriter, or preprocessor for existing CSS files.
+* **Design principles.**
+  1. **Structured values for data needing escaping; direct strings where unambiguous.** Use structured types (`Url`, `FontSrc`, `LocalFont`, and `<string>` or `<family-name>` strings) for data that requires quoting or escaping. Targets that accept `<string>` or `<family-name>` treat a plain `str` as literal string data rather than a CSS expression (for example, `font_family="var(--font)"` quotes a family name); elsewhere, completed CSS values are generally accepted without a dedicated wrapper and validated for their target, normalizing spacing and quotes without preserving verbatim source text.
+  2. **Comment-only `Template` scope.** PEP 750 `Template` (`t"..."`) belongs only in comment bodies (`CommentNode`, `comment=`, `header_comment=`), with CSS syntax positions rejecting `Template` by type rather than lexing partial tokens. *(Current status: CSS value, selector, and prelude positions still accept `Template` at runtime and are deprecated pending removal.)*
+  3. **One recommended form, without ambiguous inference or high-maintenance aliases.** Keep clear typed shorthands (`Px`, `Rem`, `Pct`) alongside explicit wrappers (`Dimension`, `Percentage`), while avoiding positional tuple aliases whose meaning is not self-evident or implicit conversions that guess caller intent.
+  4. **Separate grammar validation from expression rewriting.** Within the supported scope, validate syntactic correctness separately from rewriting or simplifying expressions. Out-of-scope Web Platform Tests (WPT) cases may be excluded with a stated reason or marked `xfail` when useful; Stixis does not aim to track every browser WPT assertion.
+  5. **Bounded compatibility with explicit migration.** Do not grow context inference or parser state machines unboundedly to preserve incidental behavior. When changing behavior or public APIs, check downstream impact and document the migration path.
 
 ## What it does
 
-* **Serializes and canonicalizes CSS values against W3C Value Definition Syntax (`serialize_value`, `canonicalize`, and the CLI).** `serialize_value` formats structured Python values and PEP 750 `Template` strings, and `canonicalize` validates and normalizes raw CSS token streams (including relative color syntax and context-free CSS Values 4 math simplification) against `@webref/css` grammars. All three entry points resolve standard CSS properties, custom properties (`--*`), `@at-rule` descriptors (`@font-face/src` or `at_rule="@font-face"`), and `<type>` syntax targets; unknown `<...>` targets are rejected with `StixisValidationError` (exit `4` on the CLI).
-* **Gates experimental CSS properties by engine support (`SerializationOptions(min_engines=...)` and `--min-engines`).** By default (`SerializationOptions(min_engines=2)`), Stixis enables CSS properties shipped unprefixed in at least 2 core browser engines (Blink, Gecko, WebKit) according to `@mdn/browser-compat-data`, plus an explicit allowlist in `codegen/spec_patches.toml`. Pass `SerializationOptions(min_engines=1)`, `extra_properties=frozenset({"prop-name"})`, or `--min-engines 1` (`0..3`) on the CLI to opt into single-engine properties.
-* **Validates AST nodes and primitives on construction.** `FontFace`, `StyleRule`, `AtRule`, `StyleSheet`, `CommentNode`, `RawDeclaration`, `FontSrc`, `Url`, `Dimension`, `Percentage`, `Keyword`, `LocalFont`, and `GenericFamily` are frozen, hashable dataclasses (`dataclass(frozen=True, slots=True)`) that validate selectors, preludes, descriptors, declarations, comments, units, keywords, generic families, and URL modifiers in `__post_init__`, snapshot mutable container inputs into immutable tuples, and raise `StixisValidationError` or `StixisSyntaxError` on invalid input.
-* **Escapes PEP 750 `Template` (`t"..."`) slots by context (`serialize_value` and AST nodes).** Passing a `Template` to `serialize_value` or an AST node field (`FontFace`, `StyleRule`, `AtRule`, `CommentNode`) escapes comments (`/* ... */`), strings, `url(...)`, and numbers according to the surrounding CSS token context and validates the rendered tokens against the target grammar.
-* **Handles five CSS microsyntaxes.**
-  1. `<urange>`: `parse_urange`, `format_urange`, and `compact_urange` for cascade-shadowing range compaction.
-  2. `<opentype-tag>`: `font-feature-settings`, `font-variation-settings`, and `font-language-override`.
-  3. `<font-src-list>`: `FontSrc`, `Url`, and `LocalFont`, enforcing `format()` before `tech()`.
-  4. `<family-name>` and `<generic-family>`: quotes Python `str` family names by default, requires `generic("serif")` or `Keyword("serif")` for generic families, and matches WPT `font-family-serialization-001.html`.
-  5. `{1,2}` descriptor and property ranges: `font-weight`, `font-width` and `font-stretch`, `font-style: oblique`, and metric overrides.
+* **Serializes Python values and validates CSS text (`serialize_value`, `canonicalize`, and the CLI).** Resolves standard CSS properties, custom properties (`--*`), `@at-rule` descriptors (`@font-face/src` or `at_rule="@font-face"`), and `<type>` syntax targets against `@webref/css` grammars; unknown `<...>` targets raise `StixisValidationError` (exit `4` on the CLI).
+* **Gates experimental CSS properties by engine support (`SerializationOptions(min_engines=...)` and `--min-engines`).** Enables CSS properties shipped unprefixed in at least 2 core browser engines (Blink, Gecko, WebKit) by default (`min_engines=2`), plus an explicit allowlist in `codegen/spec_patches.toml`. Pass `min_engines=1`, `extra_properties=frozenset({"prop-name"})`, or `--min-engines 1` (`0..3`) to opt into single-engine properties.
+* **Validates AST nodes and primitives on construction.** `FontFace`, `StyleRule`, `AtRule`, `StyleSheet`, `CommentNode`, `RawDeclaration`, `FontSrc`, `Url`, `Dimension`, `Percentage`, `Keyword`, `LocalFont`, and `GenericFamily` are frozen, hashable dataclasses that validate inputs in `__post_init__` and raise `StixisValidationError` or `StixisSyntaxError` on invalid input.
+* **Sanitizes PEP 750 `Template` (`t"..."`) comments.** `CommentNode`, `comment=`, and `header_comment=` replace `*/` and normalize newlines inside interpolated values so untrusted strings cannot close `/* ... */` early. Passing `Template` in CSS value, selector, or prelude positions is deprecated; use `Url`, `FontSrc`, `LocalFont`, or structured primitives instead.
+* **Handles five CSS microsyntaxes.** `<urange>` (`parse_urange`, `format_urange`, `compact_urange`), `<opentype-tag>` (`font-feature-settings`, `font-variation-settings`, `font-language-override`), `<font-src-list>` (`FontSrc`, `Url`, `LocalFont`), `<family-name>` and `<generic-family>` (quoting plain `str` by default and requiring `generic("serif")` or `Keyword("serif")` for generic families), and `{1,2}` descriptor and property ranges.
 * **Includes a read-only CLI.** `stixis inspect` and `stixis check` exit with `0` for valid input, `1` for a validation error, `2` for a usage error, and `4` for an unknown target.
 
 Only the top-level `stixis` package is public; submodules such as `stixis._syntax`, `stixis._grammar`, `stixis.values`, `stixis.stylesheet`, and `stixis.api` are internal and not part of the public API.
@@ -22,11 +30,13 @@ Only the top-level `stixis` package is public; submodules such as `stixis._synta
 
 ```python
 from stixis import (
+    AtRule,
     Deg,
     FontFace,
     FontSrc,
     Pct,
     Px,
+    Rem,
     SerializationOptions,
     StyleRule,
     StyleSheet,
@@ -49,6 +59,7 @@ if __name__ == "__main__":
     sheet = StyleSheet(
         header_comment="Generated by Stixis",
         rules=[
+            StyleRule(":root", {"--space-md": Rem(1), "--brand": "#2563eb"}),
             FontFace(
                 comment=t"Slice [{slice_id}] ({size_kb:.1f} KB)",
                 font_family="Noto Sans JP",
@@ -56,16 +67,25 @@ if __name__ == "__main__":
                 font_weight=(100, 900),
                 font_width=(Pct(75), Pct(125)),
                 font_display="swap",
-                src=t"url({woff2_url}) format(woff2) tech(variations)",
+                src=FontSrc(url=woff2_url, format="woff2", tech="variations"),
                 unicode_range=urange,
             ),
             StyleRule(
                 "body",
                 {
+                    "max_width": Rem(48),
+                    "width": "100%",
+                    "margin": Px(0),
+                    "padding": "var(--space-md)",
+                    "color": "#111827",
                     "font_family": ["Noto Sans JP", generic("sans-serif")],
                     "font_feature_settings": {"liga": True, "dlig": False},
-                    "margin": Px(0),
                 },
+            ),
+            AtRule(
+                "media",
+                f"(min-width: {Rem(48)})",
+                rules=[StyleRule("body", {"padding": Rem(2)})],
             ),
         ],
     )
