@@ -122,6 +122,17 @@ def test_template_partial_and_multi_slot_url_interpolations() -> None:
         serialize_value("<url>", t"url({base_slash}{unbalanced_tail})")
         == 'url("https://example.com/a) foo(bar")'
     )
+    seg_close = "a)"
+    seg_next = "b"
+    assert (
+        serialize_value("<url>", t"url({base_slash}{seg_close}/{seg_next})")
+        == 'url("https://example.com/a)/b")'
+    )
+    breakout_tail = '), url("evil.png"'
+    assert (
+        serialize_value("background-image", t"url({base_slash}{breakout_tail})")
+        == 'url("https://example.com/), url(\\"evil.png\\"")'
+    )
 
     # Unsafe `<url-token>` characters & comment delimiters (`css-syntax-3` §3.3, §4.3.6, §4.3.7)
     weird = "a\"b'c(d)e\\f g\th\ni/*j*/\x00*"
@@ -187,6 +198,37 @@ def test_template_url_single_slot_modifiers_and_token_boundaries() -> None:
     assert serialize_value("<url>", t"url({path} {ident_mod})") == 'url("font.woff2" crossorigin)'
     assert serialize_value("<url>", t"url({path} type({mime}))") == 'url("font.woff2" type(woff2))'
     assert serialize_value("<url>", t"url({path}/*c*/)") == 'url("font.woff2")'
+
+    # `<url-modifier>` quotes, comments, and nested `url()` split across raw interpolations
+    # (`css-values-4` §4.5, `.agents/docs/grammar-and-codegen.md` template rendering contract, & existing behavior)
+    head = 'type("'
+    tail = '")'
+    c1 = "/* a"
+    c2 = "b */"
+    open_mod = "foo("
+    close_paren = ")"
+    nested_file = "Noto Sans.woff2"
+    nested_slug = "Noto Sans"
+    assert (
+        serialize_value("<url>", t"url({path} {head}woff2{tail})")
+        == 'url("font.woff2" type("woff2"))'
+    )
+    assert (
+        serialize_value("<url>", t"url({path} {head}w)off2{tail})")
+        == 'url("font.woff2" type("w)off2"))'
+    )
+    assert (
+        serialize_value("<url>", t"url({path} {c1}) {c2} crossorigin)")
+        == 'url("font.woff2" crossorigin)'
+    )
+    assert (
+        serialize_value("<url>", t"url({path} {open_mod}url({nested_file}{close_paren}))")
+        == 'url("font.woff2" foo(url("Noto Sans.woff2")))'
+    )
+    assert (
+        serialize_value("<url>", t"url({path} foo(url(https://example.com/*/{nested_slug}.woff2)))")
+        == 'url("font.woff2" foo(url("https://example.com/*/Noto Sans.woff2")))'
+    )
 
     # Escaped `url` function names (`css-syntax-3` §4.3.4 & §4.3.7)
     injected = "a),url(b"
