@@ -80,9 +80,13 @@ from stixis import (
 * **OpenType feature and variation settings.**
   * `font_feature_settings={"liga": True, "dlig": False, "swsh": 2}` formats as `'"liga", "dlig" 0, "swsh" 2'`.
   * `font_variation_settings={"wght": 700, "wdth": 87.5}` or `[("wght", 700), ("wdth", 87.5)]` formats as `'"wght" 700, "wdth" 87.5'`.
-* **`unicode-range` (`<urange>#`) and range compaction.**
-  * `unicode_range=[0x3000, (0x3040, 0x309F)]`, `set[int]`, or `Sequence[int]` formats as `"U+3000, U+3040-309F"`. Contiguous integers in a `set[int]`, `list[int]`, or `tuple[int, ...]` merge into ranges (`[0x3041, 0x3042, 0x3043]` formats as `"U+3041-3043"`). Pass `coalesce=True` to `format_urange` or `parse_urange` to sort and merge intervals across mixed sequences or raw CSS strings.
+* **`unicode-range` (`<urange>#`) vs singular `<urange>` and range compaction.**
+  * `@font-face` `unicode_range=[0x3000, (0x3040, 0x309F)]`, `set[int]`, or `Sequence[int]` (`<urange>#`) formats as `"U+3000, U+3040-309F"`. Contiguous integers in a `set[int]`, `list[int]`, or `tuple[int, ...]` merge into ranges (`[0x3041, 0x3042, 0x3043]` formats as `"U+3041-3043"`). Pass `coalesce=True` to `format_urange` or `parse_urange` to sort and merge intervals across mixed sequences or raw CSS strings.
+  * Singular `<urange>` / `<unicode-range-token>` targets accept one range (`"u+0041"`, code point `int` `0x41`, or `(0x3040, 0x309F)`) and reject comma-separated strings and multi-item containers with `StixisValidationError`.
   * For multi-slice `@font-face` rules, call `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)`. `forbidden_sorted` is the sorted list of code points present in later slices (`all_font_cps - current_slice_cps`), and `max_gap` is the maximum missing code point count (`cp - prev_end - 1 <= max_gap`). This bridges gaps up to `max_gap` without shadowing code points in later `@font-face` rules.
+* **CSS function values (`<fn()>`) and shorthand `Mapping`s (`&&` / `||`).**
+  * Direct `<fn()>` targets accept typed argument values (`serialize_value("<rotateX()>", Deg(30))` formats as `"rotatex(30deg)"`, `serialize_value("<translate()>", (Dimension(10, "px"), Dimension(20, "px")))` formats as `"translate(10px, 20px)"`). On properties with function branches, name the function via a single-entry `Mapping` (`{"fit_content": Dimension(120, "px")}`, `{"blur": ()}`) or a `(fn_name, *args)` tuple (`("fit-content", Pct(50))`, `("rotate", Deg(45))`).
+  * Shorthand `Mapping` values (`serialize_value("border", {"color": "red", "style": "solid", "width": Dimension(1, "px")})` -> `"1px solid red"`) validate `snake_case` or `kebab-case` sub-property keys, shorthand-stripped suffixes, and `<type>` stems against each branch and serialize in canonical grammar order; unknown keys, duplicate branch aliases, `bool` values, and empty mappings raise `StixisValidationError`.
 
 ## PEP 750 `Template` (`t"..."`) usage
 

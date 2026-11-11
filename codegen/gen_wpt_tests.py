@@ -559,6 +559,8 @@ def _render_urange_test_file(
     lines.append("    with pytest.raises(StixisError):")
     lines.append("        parse_urange(raw_css)")
     lines.append("    with pytest.raises(StixisError):")
+    lines.append('        canonicalize("<urange>", raw_css)')
+    lines.append("    with pytest.raises(StixisError):")
     lines.append('        canonicalize("unicode-range", raw_css, at_rule="@font-face")')
     lines.append("")
     return "\n".join(lines)

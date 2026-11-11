@@ -19,6 +19,8 @@ class CssToken:
     unit: str = ""
     hash_type: str = "unrestricted"  # "id" or "unrestricted"
     ws_around: bool = field(default=True, compare=False)
+    ws_before: bool = field(default=False, compare=False)
+    raw: str = field(default="", compare=False)
 
 
 def _consume_escape(text: str, pos: int) -> tuple[str, int]:
@@ -240,15 +242,16 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
 
         cur_ws_before = had_ws_before
         had_ws_before = False
+        tok_start = pos
 
         # CDO `<!--` and CDC `-->`
         if normalized.startswith("<!--", pos):
-            tokens.append(CssToken("CDO", "<!--"))
             pos += 4
+            tokens.append(CssToken("CDO", "<!--", ws_before=cur_ws_before, raw="<!--"))
             continue
         if normalized.startswith("-->", pos):
-            tokens.append(CssToken("CDC", "-->"))
             pos += 3
+            tokens.append(CssToken("CDC", "-->", ws_before=cur_ws_before, raw="-->"))
             continue
 
         # Strings
@@ -278,7 +281,14 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     pos += 1
             if not closed:
                 raise StixisSyntaxError(f"Unclosed CSS string literal starting with {quote!r}")
-            tokens.append(CssToken("string", "".join(chars)))
+            tokens.append(
+                CssToken(
+                    "string",
+                    "".join(chars),
+                    ws_before=cur_ws_before,
+                    raw=normalized[tok_start:pos],
+                )
+            )
             continue
 
         # Hash `#`
@@ -291,10 +301,18 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     "id" if _starts_an_ident_sequence(normalized, pos + 1) else "unrestricted"
                 )
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
-                tokens.append(CssToken("hash", ident, hash_type=hash_type))
+                tokens.append(
+                    CssToken(
+                        "hash",
+                        ident,
+                        hash_type=hash_type,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             else:
-                tokens.append(CssToken("delim", "#"))
                 pos += 1
+                tokens.append(CssToken("delim", "#", ws_before=cur_ws_before, raw="#"))
             continue
 
         # Numeric tokens
@@ -303,13 +321,39 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             if _starts_an_ident_sequence(normalized, pos):
                 unit, pos = _consume_ident_sequence(normalized, pos)
                 tokens.append(
-                    CssToken("dimension", repr_str, num=num_val, is_integer=is_int, unit=unit)
+                    CssToken(
+                        "dimension",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        unit=unit,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
                 )
             elif pos < n and normalized[pos] == "%":
                 pos += 1
-                tokens.append(CssToken("percentage", repr_str, num=num_val, is_integer=is_int))
+                tokens.append(
+                    CssToken(
+                        "percentage",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             else:
-                tokens.append(CssToken("number", repr_str, num=num_val, is_integer=is_int))
+                tokens.append(
+                    CssToken(
+                        "number",
+                        repr_str,
+                        num=num_val,
+                        is_integer=is_int,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             continue
 
         # Ident-like tokens
@@ -323,39 +367,67 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         look += 1
                     if look < n and normalized[look] not in ('"', "'"):
                         url_val, pos = _consume_unquoted_url(normalized, look)
-                        tokens.append(CssToken("url", url_val))
+                        tokens.append(
+                            CssToken(
+                                "url",
+                                url_val,
+                                ws_before=cur_ws_before,
+                                raw=normalized[tok_start:pos],
+                            )
+                        )
                         continue
-                tokens.append(CssToken("function", ident))
+                tokens.append(
+                    CssToken(
+                        "function",
+                        ident,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             else:
-                tokens.append(CssToken("ident", ident))
+                tokens.append(
+                    CssToken(
+                        "ident",
+                        ident,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             continue
 
         # At-keyword
         if ch == "@":
             if _starts_an_ident_sequence(normalized, pos + 1):
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
-                tokens.append(CssToken("at-keyword", ident))
+                tokens.append(
+                    CssToken(
+                        "at-keyword",
+                        ident,
+                        ws_before=cur_ws_before,
+                        raw=normalized[tok_start:pos],
+                    )
+                )
             else:
-                tokens.append(CssToken("delim", "@"))
                 pos += 1
+                tokens.append(CssToken("delim", "@", ws_before=cur_ws_before, raw="@"))
             continue
 
         # Single-character punctuation tokens
         if ch in ("(", ")", "[", "]", "{", "}"):
-            tokens.append(CssToken(ch, ch))
             pos += 1
+            tokens.append(CssToken(ch, ch, ws_before=cur_ws_before, raw=ch))
             continue
         if ch == ",":
-            tokens.append(CssToken("comma", ","))
             pos += 1
+            tokens.append(CssToken("comma", ",", ws_before=cur_ws_before, raw=","))
             continue
         if ch == ":":
-            tokens.append(CssToken("colon", ":"))
             pos += 1
+            tokens.append(CssToken("colon", ":", ws_before=cur_ws_before, raw=":"))
             continue
         if ch == ";":
-            tokens.append(CssToken("semicolon", ";"))
             pos += 1
+            tokens.append(CssToken("semicolon", ";", ws_before=cur_ws_before, raw=";"))
             continue
 
         tokens.append(
@@ -363,6 +435,8 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 "delim",
                 ch,
                 ws_around=(cur_ws_before and _has_ws_after(normalized, pos + 1)),
+                ws_before=cur_ws_before,
+                raw=ch,
             )
         )
         pos += 1

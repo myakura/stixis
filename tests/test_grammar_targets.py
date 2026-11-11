@@ -379,3 +379,104 @@ def test_tokenize_vds_preserves_nested_parameterized_nonterminals() -> None:
     )
     with pytest.raises(StixisValidationError):
         canonicalize("<if-condition>", "123")
+
+
+def test_singular_urange_and_baseline_grammar_patches() -> None:
+    """Issue #100: singular `<urange>`, non-zero position `<urange>` matching, and 4 baseline grammar patches."""
+    from stixis._grammar.matcher import evaluate_canonicalize
+    from stixis._grammar.targets import lookup_value_node
+    from stixis._grammar.vds import compile_value_syntax
+
+    # 1. Singular `<urange>` and `<unicode-range-token>` reject comma lists and multi-item containers,
+    #    while `@font-face/unicode-range` continues to accept `<urange>#` (`css-syntax-3` §8.1).
+    assert canonicalize("<urange>", "u+0041") == "U+41"
+    assert canonicalize("<unicode-range-token>", "u+3040-309f") == "U+3040-309F"
+    assert serialize_value("<urange>", 0x41) == "U+41"
+    assert serialize_value("<urange>", (0x3040, 0x309F)) == "U+3040-309F"
+    assert canonicalize("@font-face/unicode-range", "U+0041, U+0042") == "U+41, U+42"
+    assert canonicalize("<urange>", "u/**/+0/**/-1") == "U+0-1"
+    for bad_singular in (
+        "U+0041, U+0042",
+        "U+0041,U+0042",
+        "U+00/**/41",
+        r"U+\61",
+        r"\75+41",
+        r"u+0\61",
+        r"u+4\31",
+        r"u+0041-\62",
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize("<urange>", bad_singular)
+        with pytest.raises(StixisValidationError):
+            canonicalize("<unicode-range-token>", bad_singular)
+    # CSS Syntax Level 3 §8.1: `<urange>` matches token representations (`raw`), so backslash escapes are invalid
+    for escaped_urange in (r"U+\61", r"\75+41", r"u+0\61", r"u+4\31", r"u+0041-\62"):
+        with pytest.raises(StixisValidationError):
+            canonicalize("unicode-range", escaped_urange, at_rule="@font-face")
+    for bad_py_singular in ("U+0041, U+0042", [0x41, 0x42], {0x41, 0x42}, True):
+        with pytest.raises(StixisValidationError):
+            serialize_value("<urange>", bad_py_singular)
+
+    # 2. `_TokenMatcher._match_primitive` matches `<urange>` at non-zero token offsets and inside functions.
+    seq_syn = "range <urange> <integer>"
+    seq_node = compile_value_syntax(seq_syn)
+    assert (
+        evaluate_canonicalize(
+            "<test-urange-seq>",
+            seq_syn,
+            seq_node,
+            "range u+0041-005a 2",
+            specs_lookup=lookup_value_node,
+        )
+        == "range U+41-5A 2"
+    )
+    for bad_seq in ("range U+41, U+42 2", "range U+00/**/41 2", "range u +41 2"):
+        with pytest.raises(StixisValidationError):
+            evaluate_canonicalize(
+                "<test-urange-seq>",
+                seq_syn,
+                seq_node,
+                bad_seq,
+                specs_lookup=lookup_value_node,
+            )
+
+    fn_syn = "fn( <urange> , <urange> )"
+    fn_node = compile_value_syntax(fn_syn)
+    assert (
+        evaluate_canonicalize(
+            "<test-urange-fn>",
+            fn_syn,
+            fn_node,
+            "fn(u/**/+/**/a/**/?, u+3040-309f)",
+            specs_lookup=lookup_value_node,
+        )
+        == "fn(U+A0-AF, U+3040-309F)"
+    )
+
+    # 3. `box-shadow` (`css-backgrounds-3`: `none | <shadow>#`) rejects `none` inside shadow lists.
+    assert canonicalize("box-shadow", "none") == "none"
+    assert canonicalize("box-shadow", "0 2px 4px black") == "black 0px 2px 4px"
+    with pytest.raises(StixisValidationError):
+        canonicalize("box-shadow", "none, 0 2px 4px black")
+
+    # 4. `<position>` uses shipped CSS Values 4 1/2/4-value syntax (`w3c/csswg-drafts#2140`; WPT
+    #    `object-position-invalid.html`), while `<bg-position>` / `background-position` accepts 3-value syntax.
+    assert canonicalize("<position>", "left 10px top 20px") == "left 10px top 20px"
+    for bad_pos in ("left 10px center", "block-start 10px inline-end 20px"):
+        with pytest.raises(StixisValidationError):
+            canonicalize("<position>", bad_pos)
+    assert canonicalize("<bg-position>", "left 10px center") == "left 10px center"
+    assert canonicalize("background-position", "left 10px center") == "left 10px center"
+
+    # 5. `white-space` and `vertical-align` preserve shipped multi-engine grammars over unshipped drafts.
+    assert canonicalize("white-space", "nowrap") == "nowrap"
+    assert canonicalize("white-space", "preserve nowrap") == "preserve nowrap"
+    for unshipped_ws in ("none", "discard-before", "discard", "preserve-spaces"):
+        with pytest.raises(StixisValidationError):
+            canonicalize("white-space", unshipped_ws)
+
+    assert canonicalize("vertical-align", "middle") == "middle"
+    assert canonicalize("vertical-align", "10px") == "10px"
+    for unshipped_va in ("first sub", "alphabetic", "center"):
+        with pytest.raises(StixisValidationError):
+            canonicalize("vertical-align", unshipped_va)

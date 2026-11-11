@@ -95,6 +95,7 @@ order = [
 # Extend `<font-features-tech>` with `avar2` from `css-fonts-5.json`
 "<font-features-tech>" = "[ features-opentype | features-aat | features-graphite | avar2 ]"
 "<baseline-position>" = "[ first | last ]? baseline"
+"<position>" = "[ [ left | center | right | top | bottom | <length-percentage> ] | [ left | center | right ] && [ top | center | bottom ] | [ left | center | right | <length-percentage> ] [ top | center | bottom | <length-percentage> ] | [ [ left | right ] <length-percentage> ] && [ [ top | bottom ] <length-percentage> ] ]"
 
 # At-rule prelude grammars (`ValueNode` validated when present; `"<condition>"` uses token safety)
 [atrule_preludes]
@@ -127,6 +128,9 @@ order = [
 "inset-inline-start" = "<'top'>"
 "inset-inline-end" = "<'top'>"
 "flex-basis" = "content | auto | <box-size>"
+"box-shadow" = "none | <shadow>#"
+"white-space" = "normal | pre | nowrap | pre-wrap | break-spaces | pre-line | [ collapse | preserve | preserve-breaks | break-spaces ] || <'text-wrap-mode'>"
+"vertical-align" = "baseline | sub | super | top | text-top | middle | bottom | text-bottom | <percentage> | <length>"
 
 # Relative color channel keywords not listed in `@webref/css` function `values` arrays
 # (`rgb()` and `rgba()`: CSS Color 5 §4.2.1; `hsl()` and `hsla()`: CSS Color 5 §4.2.2)
