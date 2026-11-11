@@ -462,3 +462,18 @@ def test_serialize_value_function_node_and_mapping_key_validation() -> None:
         serialize_value("transition", {"property": "opacity", "delay": Dimension(200, "ms")})
     with pytest.raises(StixisValidationError):
         serialize_value("animation", {"name": "fade", "delay": Dimension(100, "ms")})
+
+    # 5. Structured `<if()>` and nested `if(...)` arguments validate `<if-args>` branches (`css-values-5` §8),
+    #    preserving the invalid-CSS error contract shared with `canonicalize`.
+    assert serialize_value("<if()>", ("else", ":", "1px")) == "if(else: 1px)"
+    assert serialize_value("<if()>", ("else", ":", "if(else: 2px)")) == "if(else: if(else: 2px))"
+    for bad_if_arg in (
+        ("else", ":", "if()"),
+        ("else", ":", "if(: 1px)"),
+        ("else", ":", "1px !important"),
+        (),
+    ):
+        with pytest.raises(StixisValidationError):
+            serialize_value("<if()>", bad_if_arg)
+    with pytest.raises(StixisValidationError):
+        serialize_value("<var()>", ("--x", "if()"))

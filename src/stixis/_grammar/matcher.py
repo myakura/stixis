@@ -16,6 +16,7 @@ from stixis._grammar.calc import (
     _contains_global_substitution,
     _format_tokens_with_if_validation,
     _is_math_function_token,
+    _normalize_tokens_with_if_validation,
     _parse_calc_sum,
     _validate_and_format_if_function,
 )
@@ -1232,13 +1233,55 @@ def _match_function_python_value(
         rendered_gen = serialize_generic_family(value)
         return rendered_gen if rendered_gen.startswith("generic(") else None
 
+    def _validate_rendered_fn(fn_name: str, candidate: str) -> str | None:
+        if fn_name == "if":
+            try:
+                toks = [
+                    t
+                    for t in validate_token_stream_safety(
+                        candidate,
+                        forbid_top_level_semicolon=True,
+                        forbid_top_level_bang=True,
+                        forbid_top_level_braces=True,
+                        target="<if()>",
+                    )
+                    if t.kind != "whitespace"
+                ]
+            except StixisValidationError:
+                return None
+            if len(toks) < 2 or toks[0].kind != "function" or toks[-1].kind != ")":
+                return None
+            return _validate_and_format_if_function(toks[1:-1], options=options)
+        if "if(" in candidate.lower():
+            try:
+                toks = validate_token_stream_safety(
+                    candidate,
+                    forbid_top_level_semicolon=True,
+                    forbid_top_level_bang=True,
+                    forbid_top_level_braces=True,
+                    target=f"<{fn_name}()>",
+                )
+            except StixisValidationError:
+                return None
+            if _normalize_tokens_with_if_validation(toks) is None:
+                return None
+        return candidate
+
     def render_arg(fn_name: str, arg_val: Any) -> str | None:
         if isinstance(arg_val, bool):
             return None
         if node.arg is None:
-            return f"{fn_name}()" if arg_val in (None, (), []) else None
+            return (
+                _validate_rendered_fn(fn_name, f"{fn_name}()")
+                if arg_val in (None, (), [])
+                else None
+            )
         if arg_val in (None, (), []):
-            return f"{fn_name}()" if _is_node_nullable(node.arg, specs_lookup) else None
+            return (
+                _validate_rendered_fn(fn_name, f"{fn_name}()")
+                if _is_node_nullable(node.arg, specs_lookup)
+                else None
+            )
         rendered = _node_matches_single_value(
             node.arg,
             arg_val,
@@ -1253,7 +1296,7 @@ def _match_function_python_value(
         )
         if rendered is None:
             return None
-        return f"{fn_name}({rendered})"
+        return _validate_rendered_fn(fn_name, f"{fn_name}({rendered})")
 
     expected_fn = None if node.name == "<function-token>" else serialize_ident(node.name.lower())
 
@@ -2134,31 +2177,37 @@ def _serialize_primitive_python_value(
         if kind in ("<declaration-value>", "<any-value>"):
             if isinstance(value, Template):
                 rendered = render_css_template(value, options=options)
-                validate_token_stream_safety(
+                toks = validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
+                if _normalize_tokens_with_if_validation(toks) is None:
+                    return None
                 return rendered.strip()
             if isinstance(value, str):
-                validate_token_stream_safety(
+                toks = validate_token_stream_safety(
                     value,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
+                if _normalize_tokens_with_if_validation(toks) is None:
+                    return None
                 return value.strip()
             if not isinstance(value, bool) and isinstance(value, (int, float)):
                 return serialize_number(value)
             if isinstance(value, (Dimension, Percentage, Keyword, Url)):
                 rendered = str(value)
-                validate_token_stream_safety(
+                toks = validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
+                if _normalize_tokens_with_if_validation(toks) is None:
+                    return None
                 return rendered
             return None
 
