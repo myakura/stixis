@@ -59,6 +59,16 @@ def _parse_urange_body(
     return (start, end)
 
 
+def _token_repr(tok: CssToken) -> str:
+    if tok.raw:
+        return tok.raw
+    if tok.kind == "dimension":
+        return tok.value + tok.unit
+    if tok.kind == "percentage":
+        return f"{tok.value}%"
+    return tok.value
+
+
 def consume_urange_tokens(
     tokens: Sequence[CssToken],
     pos: int,
@@ -68,7 +78,7 @@ def consume_urange_tokens(
     if pos + 1 >= n:
         return None
     lead = tokens[pos]
-    if lead.kind != "ident" or lead.value.lower() != "u":
+    if lead.kind != "ident" or _token_repr(lead).lower() != "u":
         return None
 
     t1 = tokens[pos + 1]
@@ -76,29 +86,22 @@ def consume_urange_tokens(
         return None
 
     cur = pos + 2
-    body_parts: list[str] = []
     allow_qmarks = False
 
     if t1.kind == "delim" and t1.value == "+":
         if cur < n and not tokens[cur].ws_before and tokens[cur].kind == "ident":
-            body_parts.append(tokens[cur].value)
             cur += 1
         allow_qmarks = True
-    elif t1.kind == "dimension" and t1.value.startswith("+"):
-        body_parts.append(t1.value[1:] + t1.unit)
+    elif t1.kind == "dimension":
         allow_qmarks = True
-    elif t1.kind == "number" and t1.value.startswith("+"):
-        body_parts.append(t1.value[1:])
-        if cur < n and not tokens[cur].ws_before:
-            t2 = tokens[cur]
-            if t2.kind == "number" and t2.value.startswith("-"):
-                body_parts.append(t2.value)
-                cur += 1
-            elif t2.kind == "dimension" and t2.value.startswith("-"):
-                body_parts.append(t2.value + t2.unit)
-                cur += 1
-            else:
-                allow_qmarks = True
+    elif t1.kind == "number":
+        if (
+            cur < n
+            and not tokens[cur].ws_before
+            and tokens[cur].kind in ("number", "dimension")
+            and _token_repr(tokens[cur]).startswith("-")
+        ):
+            cur += 1
         else:
             allow_qmarks = True
     else:
@@ -111,12 +114,12 @@ def consume_urange_tokens(
             and tokens[cur].kind == "delim"
             and tokens[cur].value == "?"
         ):
-            body_parts.append("?")
             cur += 1
 
-    body = "".join(body_parts)
-    if not body:
+    text = "".join(_token_repr(t) for t in tokens[pos + 1 : cur])
+    if not text.startswith("+") or len(text) < 2:
         return None
+    body = text[1:]
     try:
         interval = _parse_urange_body(body, body, target="<urange>", syntax="<urange>")
     except StixisValidationError:

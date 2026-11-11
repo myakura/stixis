@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable, Mapping, Sequence
+from functools import lru_cache
 from string.templatelib import Template
 from typing import Any
 
@@ -1053,13 +1055,55 @@ def _normalize_mapping_key(raw_key: Any) -> str | None:
         return None
 
 
-def _collect_branch_mapping_keys(
+_TYPE_TO_SHORTHAND_PREFIX: dict[str, str] = {
+    "<single-transition>": "transition",
+    "<single-animation>": "animation",
+    "<bg-layer>": "background",
+    "<final-bg-layer>": "background",
+    "<mask-layer>": "mask",
+}
+
+_SYNTAX_NONTERMINAL_RE = re.compile(r"<([A-Za-z][A-Za-z0-9-]*)")
+
+
+def _resolve_shorthand_prefix(context_target: str | None) -> str | None:
+    if not context_target:
+        return None
+    low = context_target.lower()
+    if low in _TYPE_TO_SHORTHAND_PREFIX:
+        return _TYPE_TO_SHORTHAND_PREFIX[low]
+    if low.startswith("<"):
+        return None
+    return low
+
+
+@lru_cache(maxsize=256)
+def _direct_longhands_for_shorthand(
+    shorthand: str,
+) -> tuple[tuple[str, str, frozenset[str]], ...]:
+    prefix = f"{shorthand}-"
+    out: list[tuple[str, str, frozenset[str]]] = []
+    for prop, syn in PROPERTY_SYNTAXES.items():
+        if not prop.startswith(prefix):
+            continue
+        suffix = prop[len(prefix) :]
+        parts = suffix.split("-")
+        if any(
+            f"{shorthand}-{'-'.join(parts[:i])}" in PROPERTY_SYNTAXES for i in range(1, len(parts))
+        ):
+            continue
+        stems = frozenset(m.group(1).lower() for m in _SYNTAX_NONTERMINAL_RE.finditer(syn))
+        if stems:
+            out.append((prop, suffix, stems))
+    return tuple(out)
+
+
+def _collect_single_branch_keys_and_stems(
     branch: ValueNode,
-    context_target: str | None,
-) -> frozenset[str]:
-    """Return valid normalized `Mapping` keys for a shorthand/combinator `branch`."""
+    shorthand: str | None,
+) -> tuple[set[str], set[str]]:
     keys: set[str] = set()
-    ctx_low = context_target.lower() if context_target else None
+    stems: set[str] = set()
 
     def visit(n: ValueNode) -> None:
         if isinstance(n, (MultiplierNode, NonEmptyGroupNode)):
@@ -1073,41 +1117,103 @@ def _collect_branch_mapping_keys(
             if n.is_property:
                 prop_low = n.name.lower()
                 keys.add(prop_low)
-                if ctx_low and prop_low.startswith(f"{ctx_low}-"):
-                    keys.add(prop_low[len(ctx_low) + 1 :])
+                if shorthand and prop_low.startswith(f"{shorthand}-"):
+                    keys.add(prop_low[len(shorthand) + 1 :])
                 if prop_low.endswith("-start") and prop_low[:-6] in PROPERTY_SYNTAXES:
                     base_prop = prop_low[:-6]
                     keys.add(base_prop)
-                    if ctx_low and base_prop.startswith(f"{ctx_low}-"):
-                        keys.add(base_prop[len(ctx_low) + 1 :])
+                    if shorthand and base_prop.startswith(f"{shorthand}-"):
+                        keys.add(base_prop[len(shorthand) + 1 :])
             else:
                 type_stem = n.name.strip("<>").lower()
                 if not type_stem.endswith("()"):
                     keys.add(type_stem)
-                if ctx_low:
-                    candidates = [type_stem]
-                    if "-" in type_stem:
-                        candidates.append(type_stem.rsplit("-", 1)[-1])
+                    stems.add(type_stem)
+                if shorthand:
+                    stripped_single = type_stem.removeprefix("single-")
+                    stripped_ver = re.sub(r"-css[23]$", "", stripped_single)
+                    stripped_val = re.sub(r"-values?$", "", stripped_ver)
+                    candidates = [type_stem, stripped_single, stripped_ver, stripped_val]
+                    if "-" in stripped_val:
+                        candidates.append(stripped_val.rsplit("-", 1)[-1])
                     for cand in candidates:
-                        full_prop = f"{ctx_low}-{cand}"
+                        if cand in PROPERTY_SYNTAXES and cand.startswith(f"{shorthand}-"):
+                            keys.add(cand)
+                            keys.add(cand[len(shorthand) + 1 :])
+                        full_prop = f"{shorthand}-{cand}"
                         if full_prop in PROPERTY_SYNTAXES:
                             keys.add(full_prop)
                             keys.add(cand)
+                            if full_prop == "font-width":
+                                keys.update(("font-stretch", "stretch"))
             return
         if isinstance(n, PrimitiveNode):
             prim_stem = n.kind.strip("<>").lower()
             keys.add(prim_stem)
-            if ctx_low and f"{ctx_low}-{prim_stem}" in PROPERTY_SYNTAXES:
-                keys.add(f"{ctx_low}-{prim_stem}")
+            stems.add(prim_stem)
+            if shorthand and f"{shorthand}-{prim_stem}" in PROPERTY_SYNTAXES:
+                keys.add(f"{shorthand}-{prim_stem}")
             return
         if isinstance(n, KeywordNode) and n.name:
             kw_low = n.name.lower()
             keys.add(kw_low)
-            if ctx_low and f"{ctx_low}-{kw_low}" in PROPERTY_SYNTAXES:
-                keys.add(f"{ctx_low}-{kw_low}")
+            if shorthand and f"{shorthand}-{kw_low}" in PROPERTY_SYNTAXES:
+                keys.add(f"{shorthand}-{kw_low}")
 
     visit(branch)
-    return frozenset(keys)
+    return keys, stems
+
+
+def _collect_branch_list_mapping_keys(
+    branches: Sequence[ValueNode],
+    context_target: str | None,
+) -> tuple[list[frozenset[str]], dict[int, int]]:
+    """Return `(per_branch_keys, prereq_branch_map)` for a shorthand/combinator branch list."""
+    shorthand = _resolve_shorthand_prefix(context_target)
+    key_sets: list[set[str]] = []
+    stem_sets: list[set[str]] = []
+    for b in branches:
+        ks, st = _collect_single_branch_keys_and_stems(b, shorthand)
+        key_sets.append(ks)
+        stem_sets.append(st)
+
+    prereqs: dict[int, int] = {}
+    if shorthand:
+        for sub_prop, short_key, lh_stems in _direct_longhands_for_shorthand(shorthand):
+            matching_b = [idx for idx, st in enumerate(stem_sets) if st & lh_stems]
+            if len(matching_b) == 1:
+                key_sets[matching_b[0]].add(sub_prop)
+                key_sets[matching_b[0]].add(short_key)
+
+        if shorthand == "transition":
+            time_idxs = [idx for idx, st in enumerate(stem_sets) if "time" in st]
+            if len(time_idxs) == 2:
+                key_sets[time_idxs[0]].update(("duration", "transition-duration", "time"))
+                key_sets[time_idxs[1]].discard("time")
+                key_sets[time_idxs[1]].update(("delay", "transition-delay"))
+                prereqs[time_idxs[1]] = time_idxs[0]
+        elif shorthand == "animation":
+            dur_idxs = [idx for idx, ks in enumerate(key_sets) if "duration" in ks]
+            del_idxs = [idx for idx, ks in enumerate(key_sets) if "delay" in ks]
+            if len(dur_idxs) == 1 and len(del_idxs) == 1:
+                prereqs[del_idxs[0]] = dur_idxs[0]
+        elif shorthand == "mask":
+            gbox_idxs = [idx for idx, st in enumerate(stem_sets) if "geometry-box" in st]
+            if len(gbox_idxs) == 2:
+                key_sets[gbox_idxs[0]].update(("origin", "mask-origin", "geometry-box"))
+                key_sets[gbox_idxs[1]].discard("geometry-box")
+                key_sets[gbox_idxs[1]].update(("clip", "mask-clip"))
+
+    return [frozenset(ks) for ks in key_sets], prereqs
+
+
+def _is_composite_mapping_node(node: ValueNode) -> bool:
+    cur = node
+    while isinstance(cur, (MultiplierNode, NonEmptyGroupNode)):
+        if isinstance(cur, MultiplierNode) and cur.max_count != 1:
+            return False
+        cur = cur.child
+    return isinstance(cur, (JuxtaposeNode, AllOfNode, AnyOrderNode))
 
 
 def _match_function_python_value(
@@ -1198,9 +1304,10 @@ def _match_mapping_against_juxtapose(
 ) -> str | None:
     if not value:
         return None
-    item_keys = [_collect_branch_mapping_keys(item, context_target) for item in items]
+    item_keys, _ = _collect_branch_list_mapping_keys(items, context_target)
     bound_values: dict[int, Any] = {}
-    claimed: set[int] = set()
+    composite_bundles: dict[int, dict[str, Any]] = {}
+    claimed_leaf: set[int] = set()
     for raw_k, v in value.items():
         if isinstance(v, bool):
             return None
@@ -1211,11 +1318,20 @@ def _match_mapping_against_juxtapose(
         if len(matches) != 1:
             return None
         idx = matches[0]
-        if idx in claimed:
+        if _is_composite_mapping_node(items[idx]):
+            bundle = composite_bundles.setdefault(idx, {})
+            if norm_k in bundle:
+                return None
+            bundle[norm_k] = v
+            continue
+        if idx in claimed_leaf:
             return None
-        claimed.add(idx)
+        claimed_leaf.add(idx)
         if v is not None:
             bound_values[idx] = v
+    for c_idx, bundle in composite_bundles.items():
+        if any(val is not None for val in bundle.values()):
+            bound_values[c_idx] = bundle
     if not bound_values:
         return None
     parts: list[str] = []
@@ -1236,6 +1352,8 @@ def _match_mapping_against_juxtapose(
             if r is None:
                 return None
             parts.append(r)
+        elif isinstance(item, DelimNode):
+            parts.append(item.delim)
         elif not _is_node_nullable(item, specs_lookup):
             return None
     return _join_serialized_parts(parts) if parts else None
@@ -1641,7 +1759,7 @@ def _match_mapping_against_unordered(
 ) -> str | None:
     if not value:
         return None
-    branch_keys = [_collect_branch_mapping_keys(b, context_target) for b in branches]
+    branch_keys, prereqs = _collect_branch_list_mapping_keys(branches, context_target)
     items_to_match: list[Any] = []
     allowed_branches: list[frozenset[int]] = []
     claimed_single_branches: set[int] = set()
@@ -1658,7 +1776,7 @@ def _match_mapping_against_unordered(
             return None
         if len(matching) == 1:
             sole_idx = next(iter(matching))
-            if isinstance(branches[sole_idx], JuxtaposeNode):
+            if _is_composite_mapping_node(branches[sole_idx]):
                 bundle = juxtapose_bundles.setdefault(sole_idx, {})
                 if norm_k in bundle:
                     return None
@@ -1690,6 +1808,7 @@ def _match_mapping_against_unordered(
         max_override=max_override,
         context_target=context_target,
         allowed_branches=allowed_branches,
+        prereq_branches=prereqs,
     )
 
 
@@ -1705,6 +1824,7 @@ def _match_unordered_python_items(
     max_override: float | None,
     context_target: str | None = None,
     allowed_branches: Sequence[frozenset[int]] | None = None,
+    prereq_branches: Mapping[int, int] | None = None,
 ) -> str | None:
     if not values:
         return None
@@ -1722,7 +1842,13 @@ def _match_unordered_python_items(
 
     def backtrack(v_idx: int) -> bool:
         if v_idx == len(values):
-            return (not require_all) or required_indices.issubset(matched.keys())
+            if require_all and not required_indices.issubset(matched.keys()):
+                return False
+            if prereq_branches:
+                for dep_idx, req_idx in prereq_branches.items():
+                    if dep_idx in matched and req_idx not in matched:
+                        return False
+            return True
         val = values[v_idx]
         allowed_for_v = allowed_branches[v_idx] if allowed_branches is not None else None
         for b_idx, branch in enumerate(branches):
@@ -2362,7 +2488,7 @@ def evaluate_serialize_value(
             return raw_kw.strip().lower()
 
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
-    ctx_target = target if _is_property_target(target, at_rule) else None
+    ctx_target = target if at_rule is None else None
     try:
         direct = _node_matches_single_value(
             node,

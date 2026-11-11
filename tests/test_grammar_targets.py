@@ -394,11 +394,25 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
     assert serialize_value("<urange>", 0x41) == "U+41"
     assert serialize_value("<urange>", (0x3040, 0x309F)) == "U+3040-309F"
     assert canonicalize("@font-face/unicode-range", "U+0041, U+0042") == "U+41, U+42"
-    for bad_singular in ("U+0041, U+0042", "U+0041,U+0042", "U+00/**/41"):
+    assert canonicalize("<urange>", "u/**/+0/**/-1") == "U+0-1"
+    for bad_singular in (
+        "U+0041, U+0042",
+        "U+0041,U+0042",
+        "U+00/**/41",
+        r"U+\61",
+        r"\75+41",
+        r"u+0\61",
+        r"u+4\31",
+        r"u+0041-\62",
+    ):
         with pytest.raises(StixisValidationError):
             canonicalize("<urange>", bad_singular)
         with pytest.raises(StixisValidationError):
             canonicalize("<unicode-range-token>", bad_singular)
+    # CSS Syntax Level 3 §8.1: `<urange>` matches token representations (`raw`), so backslash escapes are invalid
+    for escaped_urange in (r"U+\61", r"\75+41", r"u+0\61", r"u+4\31", r"u+0041-\62"):
+        with pytest.raises(StixisValidationError):
+            canonicalize("unicode-range", escaped_urange, at_rule="@font-face")
     for bad_py_singular in ("U+0041, U+0042", [0x41, 0x42], {0x41, 0x42}, True):
         with pytest.raises(StixisValidationError):
             serialize_value("<urange>", bad_py_singular)

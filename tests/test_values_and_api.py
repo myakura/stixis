@@ -401,3 +401,64 @@ def test_serialize_value_function_node_and_mapping_key_validation() -> None:
     ):
         with pytest.raises(StixisValidationError):
             serialize_value("border", bad_border_map)
+
+    # 4. Shorthand `Mapping` longhand aliases for non-`<'longhand'>` branches (`css-transitions-1` §2.5,
+    #    `css-animations-1` §3.9, `css-backgrounds-3` §3.10, `skills/stixis/SKILL.md` shorthand mappings).
+    assert (
+        serialize_value(
+            "transition",
+            {"property": "color", "duration": Dimension(1, "s")},
+        )
+        == "color 1s"
+    )
+    assert (
+        serialize_value(
+            "transition",
+            {"transition_property": "opacity", "transition_duration": Dimension(200, "ms")},
+        )
+        == "opacity 200ms"
+    )
+    assert (
+        serialize_value(
+            "transition",
+            {
+                "delay": Dimension(200, "ms"),
+                "duration": Dimension(1, "s"),
+                "timing_function": "ease-in",
+                "property": "opacity",
+            },
+        )
+        == "opacity 1s ease-in 200ms"
+    )
+    assert (
+        serialize_value(
+            "<single-transition>",
+            {"property": "transform", "duration": Dimension(300, "ms")},
+        )
+        == "transform 300ms"
+    )
+    assert (
+        serialize_value(
+            "animation",
+            {
+                "name": "fade",
+                "duration": Dimension(500, "ms"),
+                "delay": Dimension(100, "ms"),
+                "timing_function": "linear",
+            },
+        )
+        == "500ms linear 100ms fade"
+    )
+    assert (
+        serialize_value(
+            "background",
+            {"color": "red", "position": "center", "size": "cover", "repeat": "no-repeat"},
+        )
+        == "center / cover no-repeat red"
+    )
+    # CSS Transitions 1 §2.5 / CSS Animations 1 §3.9: first `<time>` in shorthand is always duration,
+    # so `delay` without `duration` cannot be represented unambiguously in the shorthand.
+    with pytest.raises(StixisValidationError):
+        serialize_value("transition", {"property": "opacity", "delay": Dimension(200, "ms")})
+    with pytest.raises(StixisValidationError):
+        serialize_value("animation", {"name": "fade", "delay": Dimension(100, "ms")})
