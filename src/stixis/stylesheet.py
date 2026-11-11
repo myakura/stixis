@@ -22,6 +22,7 @@ from stixis._grammar.targets import (
 )
 from stixis._grammar.vds import compile_value_syntax
 from stixis._syntax.serialize import (
+    _has_option_aware_str,
     serialize_dashed_ident,
     serialize_ident,
     serialize_string,
@@ -278,8 +279,15 @@ def _freeze_interpolation(item: Interpolation) -> Interpolation:
     val = item.value
     if not isinstance(val, bool) and isinstance(val, (int, float, str)):
         return item
-    if item.conversion is None and not item.format_spec and type(val) in (Url, LocalFont):
-        return item
+    if item.conversion is None and not item.format_spec and _has_option_aware_str(val):
+        if type(val) in (Url, LocalFont):
+            return item
+        frozen_val: Url | LocalFont = (
+            Url(str(val.value), tuple(str(m) for m in val.modifiers))
+            if isinstance(val, Url)
+            else LocalFont(str(val.family))
+        )
+        return Interpolation(frozen_val, item.expression, None, "")
     converted = convert(val, item.conversion)
     text = format(converted, item.format_spec) if item.format_spec else str(converted)
     return Interpolation(text, item.expression, None, "")

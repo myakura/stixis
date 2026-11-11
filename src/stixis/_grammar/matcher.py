@@ -39,6 +39,7 @@ from stixis._grammar.vds import (
 from stixis._syntax.serialize import (
     CSS_WIDE_KEYWORDS,
     RESERVED_CUSTOM_IDENT_KEYWORDS,
+    _format_option_aware_value,
     _serialize_dimension_unit,
     format_token_sequence,
     serialize_custom_ident,
@@ -1677,10 +1678,9 @@ def _serialize_primitive_python_value(
             if isinstance(
                 value, (Dimension, Percentage, Keyword, GenericFamily, Url, LocalFont, FontSrc)
             ):
-                if isinstance(value, Url) and type(value).__str__ is Url.__str__:
-                    rendered = serialize_url(value, options=options)
-                elif isinstance(value, LocalFont) and type(value).__str__ is LocalFont.__str__:
-                    rendered = f"local({serialize_string(value.family, options=options)})"
+                opt_rendered = _format_option_aware_value(value, options)
+                if opt_rendered is not None:
+                    rendered = opt_rendered
                 elif isinstance(value, FontSrc):
                     rendered = serialize_single_font_src(value, options=options, target=kind)
                 else:

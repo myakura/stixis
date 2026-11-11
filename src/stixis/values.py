@@ -17,6 +17,7 @@ from stixis._syntax.serialize import (
     serialize_url_modifier,
 )
 from stixis.errors import StixisValidationError
+from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
 GENERIC_FAMILY_KEYWORDS: frozenset[str] = frozenset(
     {
@@ -123,8 +124,11 @@ class Url:
         for mod in self.modifiers:
             serialize_url_modifier(mod)
 
+    def _format_css(self, options: SerializationOptions) -> str:
+        return serialize_url(self.value, modifiers=self.modifiers, options=options)
+
     def __str__(self) -> str:
-        return serialize_url(self.value, modifiers=self.modifiers)
+        return self._format_css(DEFAULT_OPTIONS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,8 +141,11 @@ class LocalFont:
         if not isinstance(self.family, str) or self.family == "":
             raise StixisValidationError("<font-src>", "<font-src>", self.family)
 
+    def _format_css(self, options: SerializationOptions) -> str:
+        return f"local({serialize_string(self.family, options=options)})"
+
     def __str__(self) -> str:
-        return f"local({serialize_string(self.family)})"
+        return self._format_css(DEFAULT_OPTIONS)
 
 
 @dataclass(frozen=True, slots=True)

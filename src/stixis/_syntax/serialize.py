@@ -215,6 +215,25 @@ def _is_values_instance(value: object, class_name: str) -> bool:
     )
 
 
+def _has_option_aware_str(value: object) -> bool:
+    """Return True if `value` is a `stixis.values` instance using an unoverridden `_format_css` hook."""
+    val_cls = type(value)
+    for base in val_cls.__mro__:
+        if getattr(base, "__module__", "") == "stixis.values" and "_format_css" in base.__dict__:
+            return val_cls.__str__ is base.__str__ and val_cls._format_css is base._format_css
+    return False
+
+
+def _format_option_aware_value(
+    value: object,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str | None:
+    """Format `value` with `options` when it uses an unoverridden `_format_css` hook."""
+    if _has_option_aware_str(value):
+        return value._format_css(options)  # type: ignore[attr-defined,no-any-return]
+    return None
+
+
 def serialize_url(
     value: Any,
     *,
