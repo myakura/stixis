@@ -127,6 +127,31 @@ def _has_top_level_semicolon(tokens: Sequence[CssToken]) -> bool:
     return False
 
 
+def _has_top_level_semicolon_or_bang(tokens: Sequence[CssToken]) -> bool:
+    depth = 0
+    for t in tokens:
+        if t.kind in ("function", "(", "[", "{"):
+            depth += 1
+        elif t.kind in (")", "]", "}"):
+            if depth > 0:
+                depth -= 1
+        elif depth == 0 and (t.kind == "semicolon" or (t.kind == "delim" and t.value == "!")):
+            return True
+    return False
+
+
+def _has_top_level_brace(tokens: Sequence[CssToken]) -> bool:
+    depth = 0
+    for t in tokens:
+        if depth == 0 and t.kind == "{":
+            return True
+        if t.kind in ("function", "(", "[", "{"):
+            depth += 1
+        elif t.kind in (")", "]", "}") and depth > 0:
+            depth -= 1
+    return False
+
+
 def _split_top_level_comma_args(tokens: Sequence[CssToken]) -> list[list[CssToken]] | None:
     """Split a non-whitespace token slice at top-level commas (`depth == 0`), rejecting empty segments."""
     args: list[list[CssToken]] = []
@@ -468,7 +493,7 @@ def _parse_calc_value_node(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> tuple[_CalcNode, int] | None:
     """Parse `<calc-value> = <number> | <dimension> | <percentage> | <calc-keyword> | ( <calc-sum> )`."""
     if pos >= len(tokens):
@@ -505,7 +530,7 @@ def _parse_calc_value_node(
             extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
-            allow_substitution=allow_substitution,
+            allowed_substitutions=allowed_substitutions,
         )
         if inner_node is None:
             return None
@@ -529,7 +554,7 @@ def _parse_calc_value_node(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if inner_node is None:
                 return None
@@ -542,7 +567,7 @@ def _parse_calc_value_node(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if math_res is None:
                 return None
@@ -568,14 +593,14 @@ def _parse_calc_value_node(
                 options,
                 calc_context_keywords=extra_keywords,
                 calc_context_functions=extra_functions,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             for end_p, rendered in sub.match_node(fn_node, 0):
                 if end_p == len(slice_toks):
                     return _CalcAtom(rendered), next_pos
             return None
         if fn_low in GLOBAL_SUBSTITUTION_FUNCTIONS:
-            if not allow_substitution:
+            if fn_low not in allowed_substitutions:
                 return None
             grouped = _consume_balanced_group(tokens, pos + 1, ")")
             if grouped is None:
@@ -584,7 +609,7 @@ def _parse_calc_value_node(
             rendered_sub = _format_tokens_with_substitution_validation(
                 tokens[pos:next_pos],
                 options=options,
-                allowed_substitutions=GLOBAL_SUBSTITUTION_FUNCTIONS,
+                allowed_substitutions=allowed_substitutions,
             )
             if rendered_sub is None:
                 return None
@@ -600,7 +625,7 @@ def _parse_calc_product_node(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> tuple[_CalcNode, int] | None:
     """Parse `<calc-product> = <calc-value> [ [ '*' | '/' ] <calc-value> ]*`."""
     first = _parse_calc_value_node(
@@ -610,7 +635,7 @@ def _parse_calc_product_node(
         extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
-        allow_substitution=allow_substitution,
+        allowed_substitutions=allowed_substitutions,
     )
     if first is None:
         return None
@@ -625,7 +650,7 @@ def _parse_calc_product_node(
             extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
-            allow_substitution=allow_substitution,
+            allowed_substitutions=allowed_substitutions,
         )
         if rhs is None:
             return None
@@ -647,7 +672,7 @@ def _parse_calc_sum_node(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> tuple[_CalcNode, int] | None:
     """Parse `<calc-sum> = <calc-product> [ [ '+' | '-' ] <calc-product> ]*` requiring whitespace around `+` and `-`."""
     first = _parse_calc_product_node(
@@ -657,7 +682,7 @@ def _parse_calc_sum_node(
         extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
-        allow_substitution=allow_substitution,
+        allowed_substitutions=allowed_substitutions,
     )
     if first is None:
         return None
@@ -677,7 +702,7 @@ def _parse_calc_sum_node(
             extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
-            allow_substitution=allow_substitution,
+            allowed_substitutions=allowed_substitutions,
         )
         if rhs is None:
             return None
@@ -698,7 +723,7 @@ def _parse_full_calc_sum_node(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> _CalcNode | None:
     non_ws = [t for t in tokens if t.kind != "whitespace"]
     if not non_ws:
@@ -710,7 +735,7 @@ def _parse_full_calc_sum_node(
         extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
-        allow_substitution=allow_substitution,
+        allowed_substitutions=allowed_substitutions,
     )
     if res is None or res[1] != len(non_ws):
         return None
@@ -725,7 +750,7 @@ def _parse_calc_sum(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> tuple[str, int] | None:
     """Parse and simplify `<calc-sum>` into canonical CSSOM string."""
     res = _parse_calc_sum_node(
@@ -735,7 +760,7 @@ def _parse_calc_sum(
         extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
-        allow_substitution=allow_substitution,
+        allowed_substitutions=allowed_substitutions,
     )
     if res is None:
         return None
@@ -749,7 +774,7 @@ def _parse_full_calc_sum(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> str | None:
     node = _parse_full_calc_sum_node(
         tokens,
@@ -757,7 +782,7 @@ def _parse_full_calc_sum(
         extra_functions=extra_functions,
         specs_lookup=specs_lookup,
         options=options,
-        allow_substitution=allow_substitution,
+        allowed_substitutions=allowed_substitutions,
     )
     if node is None:
         return None
@@ -772,7 +797,7 @@ def _is_math_function_token(
     extra_functions: frozenset[str] = frozenset(),
     specs_lookup: Callable[[str, bool], ValueNode | None] | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
-    allow_substitution: bool = False,
+    allowed_substitutions: frozenset[str] = frozenset(),
 ) -> tuple[str, int] | None:
     """If `tokens[pos]` starts a valid CSS math function (`calc(...)`, `min(...)`, etc.), return `(serialized, next_pos)`."""
     if pos >= len(tokens) or tokens[pos].kind != "function":
@@ -822,7 +847,7 @@ def _is_math_function_token(
             extra_functions=extra_functions,
             specs_lookup=specs_lookup,
             options=options,
-            allow_substitution=allow_substitution,
+            allowed_substitutions=allowed_substitutions,
         )
         if s is None:
             return None
@@ -835,7 +860,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s is None:
                 return None
@@ -850,7 +875,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s is None:
                 return None
@@ -865,7 +890,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s is None:
                 return None
@@ -888,7 +913,7 @@ def _is_math_function_token(
                     extra_functions=extra_functions,
                     specs_lookup=specs_lookup,
                     options=options,
-                    allow_substitution=allow_substitution,
+                    allowed_substitutions=allowed_substitutions,
                 )
                 if s is None:
                     return None
@@ -913,7 +938,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s is None:
                 return None
@@ -931,7 +956,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s0 is None:
                 return None
@@ -943,7 +968,7 @@ def _is_math_function_token(
                 extra_functions=extra_functions,
                 specs_lookup=specs_lookup,
                 options=options,
-                allow_substitution=allow_substitution,
+                allowed_substitutions=allowed_substitutions,
             )
             if s1 is None:
                 return None
@@ -1058,21 +1083,61 @@ def _split_first_top_level_comma(
     return head, seen_comma, fallback
 
 
+def _is_only_substitution_calls(
+    tokens: Sequence[CssToken],
+    *,
+    allowed_names: frozenset[str] = GLOBAL_SUBSTITUTION_FUNCTIONS,
+) -> bool:
+    if not tokens:
+        return False
+    pos = 0
+    while pos < len(tokens):
+        tok = tokens[pos]
+        if tok.kind != "function" or tok.value.lower() not in allowed_names:
+            return False
+        grouped = _consume_balanced_group(tokens, pos + 1, ")")
+        if grouped is None:
+            return False
+        pos = grouped[1]
+    return True
+
+
 def _validate_flat_var_or_inherit_args(inner_tokens: Sequence[CssToken]) -> list[CssToken] | None:
-    """Validate `var( <custom-property-name> [, <declaration-value>? ]? )` or `inherit(...)`."""
+    """Validate `var(...)` or `inherit(...)` (allowing `<custom-property-name>`, substitution calls, or `{...}`-wrapped names)."""
     split = _split_first_top_level_comma(inner_tokens)
     if split is None:
         return None
     head_ws, has_comma, fallback_ws = split
     head = [t for t in head_ws if t.kind != "whitespace"]
-    if (
-        len(head) != 1
-        or head[0].kind != "ident"
-        or not head[0].value.startswith("--")
-        or len(head[0].value) < 3
-    ):
+    if not head:
         return None
-    out: list[CssToken] = [head[0]]
+    if head[0].kind == "{":
+        grouped = _consume_balanced_group(head, 1, "}")
+        if grouped is None:
+            return None
+        brace_inner, after_brace = grouped
+        if (
+            after_brace != len(head)
+            or not brace_inner
+            or _has_top_level_semicolon_or_bang(brace_inner)
+        ):
+            return None
+    else:
+        if _has_top_level_brace(head):
+            return None
+        is_custom_prop = (
+            len(head) == 1
+            and head[0].kind == "ident"
+            and head[0].value.startswith("--")
+            and len(head[0].value) >= 3
+        )
+        if not is_custom_prop and not _is_only_substitution_calls(
+            head,
+            allowed_names=GLOBAL_SUBSTITUTION_FUNCTIONS | frozenset({"ident", "random-item"}),
+        ):
+            return None
+
+    out: list[CssToken] = list(head)
     if has_comma:
         out.append(CssToken("comma", ","))
         out.extend(t for t in fallback_ws if t.kind != "whitespace")
@@ -1086,21 +1151,22 @@ def _validate_flat_env_args(inner_tokens: Sequence[CssToken]) -> list[CssToken] 
         return None
     head_ws, has_comma, fallback_ws = split
     head = [t for t in head_ws if t.kind != "whitespace"]
-    if (
-        not head
-        or head[0].kind != "ident"
-        or head[0].value.lower() in RESERVED_CUSTOM_IDENT_KEYWORDS
-    ):
+    if not head or _has_top_level_brace(head):
         return None
-    for idx_tok in head[1:]:
-        if (
-            idx_tok.kind != "number"
-            or not idx_tok.is_integer
-            or idx_tok.num is None
-            or not math.isfinite(idx_tok.num)
-            or idx_tok.num < 0
-        ):
+    if not _is_only_substitution_calls(
+        head, allowed_names=GLOBAL_SUBSTITUTION_FUNCTIONS - frozenset({"env"})
+    ):
+        if head[0].kind != "ident" or head[0].value.lower() in RESERVED_CUSTOM_IDENT_KEYWORDS:
             return None
+        for idx_tok in head[1:]:
+            if (
+                idx_tok.kind != "number"
+                or not idx_tok.is_integer
+                or idx_tok.num is None
+                or not math.isfinite(idx_tok.num)
+                or idx_tok.num < 0
+            ):
+                return None
     out: list[CssToken] = list(head)
     if has_comma:
         out.append(CssToken("comma", ","))
@@ -1134,6 +1200,17 @@ def _validate_flat_first_valid_args(inner_tokens: Sequence[CssToken]) -> list[Cs
         return None
     out: list[CssToken] = []
     for idx, arg in enumerate(args):
+        if arg[0].kind == "{":
+            grouped = _consume_balanced_group(arg, 1, "}")
+            if (
+                grouped is None
+                or grouped[1] != len(arg)
+                or not grouped[0]
+                or _has_top_level_semicolon_or_bang(grouped[0])
+            ):
+                return None
+        elif _has_top_level_brace(arg):
+            return None
         if idx > 0:
             out.append(CssToken("comma", ","))
         out.extend(arg)

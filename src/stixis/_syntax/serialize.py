@@ -469,8 +469,8 @@ def format_token_sequence(
 
         # Determine if space is needed before this token
         need_space = prev is not None and not (
-            prev.kind in ("function", "(", "[")
-            or tok.kind in (")", "]", "comma", "semicolon", "colon")
+            prev.kind in ("function", "(", "[", "{")
+            or tok.kind in (")", "]", "}", "comma", "semicolon", "colon")
         )
 
         if need_space:

@@ -382,7 +382,7 @@ def test_tokenize_vds_preserves_nested_parameterized_nonterminals() -> None:
 
 
 def test_global_substitution_target_and_argument_validation() -> None:
-    """Issue #98: substitution functions enforce target context, argument syntax, and sibling token validity."""
+    """Issue #98: substitution functions enforce target context and argument syntax while deferring pending-substitution sibling checks."""
     for bad_target, bad_css in (
         ("<length>", "var(--x)"),
         ("<length>", "env(safe-area-inset-top)"),
@@ -391,30 +391,43 @@ def test_global_substitution_target_and_argument_validation() -> None:
         ("<length>", "inherit(--x)"),
         ("<length>", "if(else: 10px)"),
         ("<length>", "calc(var(--x) + 1px)"),
+        ("<length>", "calc(env(safe-area-inset-top) + 1px)"),
         ("@font-face/font-weight", "var(--x)"),
-        ("@font-face/font-weight", "env(safe-area-inset-top)"),
         ("@font-face/src", "var(--x)"),
+        ("@font-face/font-style", "var(--x)"),
+        ("@font-face/unicode-range", "var(--x)"),
         ("@property/initial-value", "var(--x)"),
+        ("@font-face/font-weight", "env()"),
+        ("@font-face/font-weight", "env(123)"),
+        ("@font-face/font-weight", "env(var(--name), 400)"),
     ):
         with pytest.raises(StixisValidationError):
             canonicalize(bad_target, bad_css)
 
     for bad_prop, bad_css in (
         ("width", "var()"),
+        ("width", "var({})"),
+        ("width", "var({}, 10px)"),
         ("width", "var(123)"),
         ("width", "var(foo)"),
         ("width", "var(--)"),
         ("width", "var(--x --y)"),
+        ("width", "var(--x {--y})"),
+        ("width", "var({--x} --y)"),
         ("width", "var(, 10px)"),
         ("width", "var(--x, var())"),
         ("width", "inherit()"),
         ("width", "inherit(color)"),
+        ("width", "inherit(!!, foo)"),
+        ("width", "inherit(, foo)"),
         ("width", "env()"),
         ("width", "env(123)"),
         ("width", "env(initial)"),
+        ("width", "env(env(test))"),
         ("width", "env(safe-area-inset-top -1)"),
         ("width", "env(safe-area-inset-top 0.5)"),
         ("width", "first-valid()"),
+        ("width", "first-valid({})"),
         ("width", "first-valid(10px, )"),
         ("width", "attr()"),
         ("width", "attr(123)"),
@@ -422,12 +435,6 @@ def test_global_substitution_target_and_argument_validation() -> None:
         ("width", "attr(data-w type())"),
         ("width", "attr(data-w type(<invalid>))"),
         ("width", "attr(data-w type(< length >))"),
-        ("width", "not-a-length var(--x)"),
-        ("width", "10s var(--x)"),
-        ("width", "calc(not-a-length + var(--x))"),
-        ("font-style", "not-a-style var(--x)"),
-        ("border", "1px bogus-style var(--c)"),
-        ("color", "rgb(from var(--c) bogus g b)"),
     ):
         with pytest.raises(StixisValidationError):
             canonicalize(bad_prop, bad_css)
@@ -435,6 +442,15 @@ def test_global_substitution_target_and_argument_validation() -> None:
     assert canonicalize("width", "var(--x)") == "var(--x)"
     assert canonicalize("width", "var(--x, 10px)") == "var(--x, 10px)"
     assert canonicalize("width", "var(--x, )") == "var(--x,)"
+    assert canonicalize("width", "var(var(--name))") == "var(var(--name))"
+    assert canonicalize("width", "var(attr(data-name type(*)))") == "var(attr(data-name type(*)))"
+    assert (
+        canonicalize("width", "var(if(style(--other: 10px): --other; else: --unset))")
+        == "var(if(style(--other: 10px): --other; else: --unset))"
+    )
+    assert canonicalize("width", "var({--x})") == "var({--x})"
+    assert canonicalize("width", "var({--x}, 10px)") == "var({--x}, 10px)"
+    assert canonicalize("width", "var({--x, --y})") == "var({--x, --y})"
     assert (
         canonicalize("font-family", "var(--f, Arial, sans-serif)") == "var(--f, Arial, sans-serif)"
     )
@@ -443,11 +459,29 @@ def test_global_substitution_target_and_argument_validation() -> None:
         canonicalize("width", "env(viewport-segment-width 0 1, 100px)")
         == "env(viewport-segment-width 0 1, 100px)"
     )
+    assert (
+        canonicalize("@font-face/font-weight", "env(font-weight, 400)") == "env(font-weight, 400)"
+    )
+    assert (
+        canonicalize("@font-face/font-style", "env(font-style, italic)")
+        == "env(font-style, italic)"
+    )
+    assert canonicalize("@font-face/unicode-range", "env(my-range)") == "env(my-range)"
+    assert (
+        canonicalize("@property/initial-value", "env(safe-area-inset-top, 0px)")
+        == "env(safe-area-inset-top, 0px)"
+    )
     assert canonicalize("width", "first-valid(10px, 20px)") == "first-valid(10px, 20px)"
     assert canonicalize("width", "inherit(--w, 10px)") == "inherit(--w, 10px)"
     assert (
         canonicalize("width", "attr(data-w type(<length>), 10px)")
         == "attr(data-w type(<length>), 10px)"
+    )
+    # CSS Variables 1 §3 & CSS Values 5 §7.4: pending-substitution values defer property-grammar checks until substitution
+    assert canonicalize("width", "calc(1px var(--op) 2px)") == "calc(1px var(--op) 2px)"
+    assert (
+        canonicalize("color", "something 3px calc(var(--a) + 1px)")
+        == "something 3px calc(var(--a) + 1px)"
     )
     assert canonicalize("width", "attr(data-w px, 10px)") == "attr(data-w px, 10px)"
     assert canonicalize("height", "attr(data-h %)") == "attr(data-h %)"
