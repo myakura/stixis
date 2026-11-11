@@ -5,17 +5,14 @@ from __future__ import annotations
 from string.templatelib import Interpolation, Template, convert
 from typing import Any
 
-from stixis._syntax.serialize import serialize_number, serialize_string, serialize_url
+from stixis._syntax.serialize import (
+    _format_option_aware_value,
+    serialize_number,
+    serialize_string,
+)
 from stixis._syntax.tokenizer import _is_ident_code_point
 from stixis.errors import StixisSyntaxError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
-
-
-def _is_default_values_instance(value: object, class_name: str) -> bool:
-    for cls in type(value).__mro__:
-        if cls.__name__ == class_name and getattr(cls, "__module__", "") == "stixis.values":
-            return type(value).__str__ is cls.__str__
-    return False
 
 
 def _format_template_value(
@@ -26,11 +23,8 @@ def _format_template_value(
 ) -> str:
     if format_spec:
         return format(val, format_spec)
-    if _is_default_values_instance(val, "Url"):
-        return serialize_url(val, options=options)
-    if _is_default_values_instance(val, "LocalFont"):
-        return f"local({serialize_string(val.family, options=options)})"
-    return str(val)
+    formatted = _format_option_aware_value(val, options)
+    return formatted if formatted is not None else str(val)
 
 
 def render_css_template(

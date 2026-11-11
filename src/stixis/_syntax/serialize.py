@@ -215,6 +215,25 @@ def _is_values_instance(value: object, class_name: str) -> bool:
     )
 
 
+def _has_option_aware_str(value: object) -> bool:
+    """Return True if `value` defines `_format_css` without overriding `__str__`."""
+    val_cls = type(value)
+    for base in val_cls.__mro__:
+        if "_format_css" in base.__dict__:
+            return val_cls.__str__ is base.__str__
+    return False
+
+
+def _format_option_aware_value(
+    value: object,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str | None:
+    """Format `value` with `options` when it uses an unoverridden `_format_css` hook."""
+    if _has_option_aware_str(value):
+        return value._format_css(options)  # type: ignore[attr-defined,no-any-return]
+    return None
+
+
 def serialize_url(
     value: Any,
     *,

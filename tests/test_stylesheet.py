@@ -420,3 +420,21 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
     )
     ff_local_tpl = FontFace(font_family="Inter", src=t"{LocalFont('Inter')}")
     assert "src: local('Inter');" in ff_local_tpl.format(options=cleome)
+
+    class InheritedUrl(Url):
+        pass
+
+    class CustomStrUrl(Url):
+        def __str__(self) -> str:
+            return 'url("https://custom.example/override.woff2")'
+
+    sub_rule = StyleRule(
+        t"a[data-u={InheritedUrl('a.woff2')}][data-c={CustomStrUrl('b.woff2')}]",
+        {"--inh": InheritedUrl("a.woff2"), "--ovr": CustomStrUrl("b.woff2")},
+    )
+    assert sub_rule.format(options=cleome) == (
+        "a[data-u=url('a.woff2')][data-c=url(\"https://custom.example/override.woff2\")] {\n"
+        "  --inh: url('a.woff2');\n"
+        '  --ovr: url("https://custom.example/override.woff2");\n'
+        "}"
+    )
