@@ -21,6 +21,7 @@ class CssToken:
     ws_around: bool = field(default=True, compare=False)
     ws_before: bool = field(default=False, compare=False)
     raw: str = field(default="", compare=False)
+    span: tuple[int, int] = field(default=(0, 0), compare=False)
 
 
 def _consume_escape(text: str, pos: int) -> tuple[str, int]:
@@ -287,6 +288,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     "".join(chars),
                     ws_before=cur_ws_before,
                     raw=normalized[tok_start:pos],
+                    span=(tok_start, pos),
                 )
             )
             continue
@@ -373,6 +375,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                                 url_val,
                                 ws_before=cur_ws_before,
                                 raw=normalized[tok_start:pos],
+                                span=(tok_start, pos),
                             )
                         )
                         continue

@@ -340,3 +340,171 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
     object.__setattr__(bad_brace, "raw_css", "10px}body{color:red")
     with pytest.raises(StixisValidationError):
         serialize_value("<any-value>", bad_brace)
+
+
+def test_at_rule_block_kinds_and_query_features() -> None:
+    from stixis import RawDeclaration, canonicalize
+
+    # Rule-list-only at-rules reject declarations, query features, custom properties, and RawDeclaration
+    for at_name, prelude, bad_descs in (
+        ("@keyframes", "spin", {"color": "red"}),
+        ("@media", "screen", {"hover": "hover"}),
+        ("@media", "screen", {"color": "red"}),
+        ("@media", "screen", {"--x": "1"}),
+        ("@container", "(min-width: 400px)", {"width": Px(500)}),
+        ("@supports", "(display: grid)", {"display": "grid"}),
+        ("@layer", "utilities", {"color": "red"}),
+        ("@starting-style", None, {"opacity": 0}),
+    ):
+        with pytest.raises(StixisValidationError):
+            AtRule(at_name, prelude, descriptors=bad_descs)
+
+    with pytest.raises(StixisValidationError):
+        AtRule("@keyframes", "spin", descriptors=[RawDeclaration("color", "red")])
+    with pytest.raises(StixisValidationError):
+        AtRule(
+            "@keyframes",
+            "spin",
+            descriptors={"color": "red"},
+            options=SerializationOptions(allow_unknown_properties=True),
+        )
+
+    # Statement-only at-rules reject descriptors, child rules, and empty preludes
+    for stmt_at, stmt_pre in (
+        ("@charset", '"utf-8"'),
+        ("@import", '"theme.css"'),
+        ("@namespace", '"http://www.w3.org/1999/xhtml"'),
+        ("@custom-media", "--narrow (max-width: 30rem)"),
+        ("@custom-selector", ":--heading h1, h2"),
+    ):
+        assert str(AtRule(stmt_at, stmt_pre)) == f"{stmt_at} {stmt_pre};"
+        with pytest.raises(StixisValidationError):
+            AtRule(stmt_at)
+        with pytest.raises(StixisValidationError):
+            AtRule(stmt_at, stmt_pre, descriptors={})
+        with pytest.raises(StixisValidationError):
+            AtRule(stmt_at, stmt_pre, descriptors={"color": "red"})
+        with pytest.raises(StixisValidationError):
+            AtRule(stmt_at, stmt_pre, rules=[StyleRule("p", {"color": "red"})])
+
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", "screen", statement=True)
+    with pytest.raises(StixisValidationError):
+        AtRule("@layer", statement=True)
+    assert str(AtRule("@layer", "utilities")) == "@layer utilities;"
+    assert str(AtRule("@layer")) == "@layer {}"
+
+    # Unknown at-rules reject unopted style declarations while keeping empty/rule blocks valid
+    assert str(AtRule("--custom", "screen")) == "@--custom screen {}"
+    with pytest.raises(StixisValidationError):
+        AtRule("@unknown-rule", "foo", descriptors={"color": "red"})
+    with pytest.raises(StixisValidationError):
+        AtRule("@unknown-rule", "foo", descriptors={"--x": "1"})
+
+    # Style-declaration and @page at-rules accept style properties (and @page descriptors / margin rules)
+    pos_try = AtRule(
+        "@position-try",
+        "--below",
+        descriptors={"top": "anchor(bottom)", "margin": Px(4)},
+    )
+    assert str(pos_try) == "@position-try --below {\n  top: anchor(bottom);\n  margin: 4px;\n}"
+    with pytest.raises(StixisValidationError):
+        AtRule("@position-try", "--below", rules=[StyleRule("p", {"color": "red"})])
+
+    scoped = AtRule(
+        "@scope",
+        "(.card)",
+        descriptors={"color": "red"},
+        rules=[StyleRule("h2", {"margin": Px(0)})],
+    )
+    assert str(scoped) == "@scope (.card) {\n  color: red;\n  h2 {\n    margin: 0px;\n  }\n}"
+
+    page = AtRule(
+        "@page",
+        descriptors={"size": "a4", "margin": Px(20)},
+        rules=[AtRule("@top-center", descriptors={"content": "Page"})],
+    )
+    assert (
+        str(page)
+        == '@page {\n  size: a4;\n  margin: 20px;\n  @top-center {\n    content: "Page";\n  }\n}'
+    )
+    with pytest.raises(StixisValidationError):
+        AtRule("@page", rules=[StyleRule("p", {"color": "red"})])
+
+    # Pure descriptor-block at-rules reject nested StyleRules and custom properties (except @function)
+    with pytest.raises(StixisValidationError):
+        AtRule(
+            "@font-face",
+            descriptors={"font_family": "Inter"},
+            rules=[StyleRule("p", {"color": "red"})],
+        )
+    with pytest.raises(StixisValidationError):
+        AtRule(
+            "@property", "--x", descriptors={"syntax": '"*"', "inherits": "false", "--extra": "1"}
+        )
+
+    fn_rule = AtRule(
+        "@function",
+        "--double(--v)",
+        descriptors={"--res": "calc(var(--v) * 2)", "result": "var(--res)"},
+    )
+    assert (
+        str(fn_rule)
+        == "@function --double(--v) {\n  --res: calc(var(--v) * 2);\n  result: var(--res);\n}"
+    )
+
+    # Target resolution and serialize_declarations exclude @media/@container query features
+    with pytest.raises(StixisValidationError):
+        canonicalize("hover", "hover", at_rule="@media")
+    with pytest.raises(StixisValidationError):
+        canonicalize("@container/width", "500px")
+    with pytest.raises(StixisValidationError):
+        serialize_declarations({"hover": "hover"}, at_rule="@media")
+    assert (
+        serialize_declarations({"size": "a4", "margin": Px(10)}, at_rule="@page")
+        == "size: a4; margin: 10px;"
+    )
+    assert serialize_declarations({"top": Px(0)}, at_rule="@position-try") == "top: 0px;"
+
+
+def test_serialization_options_propagate_to_raw_declaration_custom_prop_url_and_template_selector() -> (
+    None
+):
+    from stixis import RawDeclaration, using_options
+
+    opts = SerializationOptions.cleome()
+    u = Url("a.woff2")
+
+    # 1. RawDeclaration re-formats under `.format(options=opts)`, `options=opts`, and `serialize_declarations`
+    raw_rule = StyleRule("p", [RawDeclaration("content", '"hi"')])
+    assert raw_rule.format(options=opts) == "p {\n  content: 'hi';\n}"
+    assert str(StyleRule("p", [RawDeclaration("content", '"hi"')], options=opts)) == (
+        "p {\n  content: 'hi';\n}"
+    )
+    assert (
+        serialize_declarations([RawDeclaration("content", '"hi"')], options=opts)
+        == "content: 'hi';"
+    )
+    assert StyleRule(":root", [RawDeclaration("--u", u)]).format(options=opts) == (
+        ":root {\n  --u: url('a.woff2');\n}"
+    )
+
+    # 2. Custom-property `Url` values honor `options`
+    assert StyleRule(":root", {"--u": u}).format(options=opts) == (
+        ":root {\n  --u: url('a.woff2');\n}"
+    )
+    assert str(StyleRule(":root", {"--u": u}, options=opts)) == (
+        ":root {\n  --u: url('a.woff2');\n}"
+    )
+
+    # 3. `Template` selectors (and preludes) with `Url` or `url(...)` honor `options`
+    assert StyleRule(t"a[data-u={u}]", {"color": "red"}).format(options=opts) == (
+        "a[data-u=url('a.woff2')] {\n  color: red;\n}"
+    )
+    assert str(StyleRule(t"a[data-u={u}]", {"color": "red"}, options=opts)) == (
+        "a[data-u=url('a.woff2')] {\n  color: red;\n}"
+    )
+    with using_options(opts):
+        ctx_rule = StyleRule(t"a[data-u={u}]", {"--u": u})
+    assert str(ctx_rule) == "a[data-u=url('a.woff2')] {\n  --u: url('a.woff2');\n}"
+    assert AtRule("@import", t"{u}").format(options=opts) == "@import url('a.woff2');"

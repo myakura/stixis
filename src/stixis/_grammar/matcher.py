@@ -75,6 +75,7 @@ from stixis.microsyntax.family_name import (
 )
 from stixis.microsyntax.font_src import (
     FONT_TECH_KEYWORDS,
+    FontSrc,
     serialize_font_format,
     serialize_font_src_list,
     serialize_font_tech,
@@ -2020,6 +2021,34 @@ def _match_sequence_via_tokens(
     return matcher.match_root(node, allow_css_wide=False)
 
 
+def _reformat_declaration_text(
+    text: str,
+    toks: Sequence[CssToken],
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
+    """Re-quote `string` and `url` tokens in `text` according to `options` while preserving all other characters."""
+    normalized = (
+        text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").replace("\x00", "\ufffd")
+    )
+    if not any(tok.kind in ("string", "url") for tok in toks):
+        return normalized.strip(" \t\n")
+    parts: list[str] = []
+    cursor = 0
+    for tok in toks:
+        if tok.kind not in ("string", "url"):
+            continue
+        start, end = tok.span
+        parts.append(normalized[cursor:start])
+        if tok.kind == "string":
+            parts.append(serialize_string(tok.value, options=options))
+        else:
+            parts.append(serialize_url(tok.value, options=options))
+        cursor = end
+    parts.append(normalized[cursor:])
+    return "".join(parts).strip(" \t\n")
+
+
 def _serialize_primitive_python_value(
     node: PrimitiveNode,
     value: Any,
@@ -2185,7 +2214,7 @@ def _serialize_primitive_python_value(
                 )
                 if _normalize_tokens_with_if_validation(toks) is None:
                     return None
-                return rendered.strip()
+                return _reformat_declaration_text(rendered, toks, options=options)
             if isinstance(value, str):
                 toks = validate_token_stream_safety(
                     value,
@@ -2195,11 +2224,20 @@ def _serialize_primitive_python_value(
                 )
                 if _normalize_tokens_with_if_validation(toks) is None:
                     return None
-                return value.strip()
+                return _reformat_declaration_text(value, toks, options=options)
             if not isinstance(value, bool) and isinstance(value, (int, float)):
                 return serialize_number(value)
-            if isinstance(value, (Dimension, Percentage, Keyword, Url)):
-                rendered = str(value)
+            if isinstance(
+                value, (Dimension, Percentage, Keyword, Url, LocalFont, FontSrc, GenericFamily)
+            ):
+                if isinstance(value, Url) and type(value).__str__ is Url.__str__:
+                    rendered = serialize_url(value, options=options)
+                elif isinstance(value, LocalFont) and type(value).__str__ is LocalFont.__str__:
+                    rendered = f"local({serialize_string(value.family, options=options)})"
+                elif isinstance(value, FontSrc):
+                    rendered = serialize_single_font_src(value, options=options)
+                else:
+                    rendered = str(value)
                 toks = validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
@@ -2208,7 +2246,7 @@ def _serialize_primitive_python_value(
                 )
                 if _normalize_tokens_with_if_validation(toks) is None:
                     return None
-                return rendered
+                return _reformat_declaration_text(rendered, toks, options=options)
             return None
 
         if kind == "<dimension>":

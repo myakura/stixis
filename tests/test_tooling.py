@@ -554,3 +554,92 @@ def test_load_and_merge_specs_applies_exclude_specs_and_supersedes(tmp_path: Pat
     assert vals["<contrast-color()>"] == "contrast-color( <color> )"
     assert props["border-start-start-radius"] == "<border-radius>"
     assert props["margin-block-start"] == "<'margin-top'>"
+
+
+def test_load_and_merge_specs_excludes_query_features_from_atrule_descriptors(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    from stixis._generated.specs import ATRULE_DESCRIPTORS, VALUE_SYNTAXES
+
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import gen_specs
+
+    (tmp_path / "mediaqueries-5.json").write_text(
+        json.dumps(
+            {
+                "atrules": [
+                    {
+                        "name": "@media",
+                        "value": "@media <media-query-list> { <rule-list> }",
+                        "descriptors": [
+                            {"name": "hover", "type": "discrete", "value": "none | hover"},
+                            {
+                                "name": "grid",
+                                "type": "discrete",
+                                "value": "<mq-boolean>",
+                                "values": [
+                                    {
+                                        "name": "<mq-boolean>",
+                                        "type": "type",
+                                        "value": "<integer [0,1]>",
+                                    }
+                                ],
+                            },
+                            {"name": "width", "type": "range", "value": "<length>"},
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "css-conditional-5.json").write_text(
+        json.dumps(
+            {
+                "atrules": [
+                    {
+                        "name": "@container",
+                        "value": "@container <container-query-list> { <rule-list> }",
+                        "descriptors": [
+                            {"name": "inline-size", "type": "range", "value": "<length>"},
+                            {
+                                "name": "orientation",
+                                "type": "discrete",
+                                "value": "portrait | landscape",
+                            },
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "css-fonts.json").write_text(
+        json.dumps(
+            {
+                "atrules": [
+                    {
+                        "name": "@font-face",
+                        "value": "@font-face { <declaration-list> }",
+                        "descriptors": [
+                            {"name": "font-display", "value": "auto | block | swap"},
+                        ],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _units, _props, vals, atrules, _channels = gen_specs.load_and_merge_specs(tmp_path, {})
+    assert atrules["@media"]["descriptors"] == {}
+    assert atrules["@container"]["descriptors"] == {}
+    assert atrules["@font-face"]["descriptors"] == {"font-display": "auto | block | swap"}
+    assert vals["<mq-boolean>"] == "<integer [0,1]>"
+
+    assert ATRULE_DESCRIPTORS["@media"] == {}
+    assert ATRULE_DESCRIPTORS["@container"] == {}
+    assert "<mq-boolean>" in VALUE_SYNTAXES

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from string.templatelib import Interpolation, Template, convert
 
-from stixis._syntax.serialize import serialize_number, serialize_string
+from stixis._syntax.serialize import (
+    _is_values_instance,
+    serialize_number,
+    serialize_string,
+    serialize_url,
+)
 from stixis._syntax.tokenizer import _is_ident_code_point
 from stixis.errors import StixisSyntaxError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
@@ -94,6 +99,20 @@ def render_css_template(
                 not item.format_spec and not isinstance(val, bool) and isinstance(val, (int, float))
             ):
                 out.append(serialize_number(val))
+            elif item.conversion is None and not item.format_spec:
+                if _is_values_instance(val, "Url"):
+                    out.append(serialize_url(val, options=options))
+                elif _is_values_instance(val, "LocalFont"):
+                    out.append(f"local({serialize_string(val.family, options=options)})")
+                elif (
+                    type(val).__name__ == "FontSrc"
+                    and getattr(type(val), "__module__", "") == "stixis.microsyntax.font_src"
+                ):
+                    from stixis.microsyntax.font_src import serialize_single_font_src
+
+                    out.append(serialize_single_font_src(val, options=options))
+                else:
+                    out.append(str(val))
             else:
                 text = format(val, item.format_spec) if item.format_spec else str(val)
                 out.append(text)

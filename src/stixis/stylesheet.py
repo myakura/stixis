@@ -26,7 +26,16 @@ from stixis._syntax.template import render_css_template
 from stixis._syntax.tokenizer import tokenize_css, validate_token_stream_safety
 from stixis.api import serialize_value
 from stixis.errors import StixisSyntaxError, StixisValidationError
+from stixis.microsyntax.font_src import FontSrc
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions, current_options
+from stixis.values import (
+    Dimension,
+    GenericFamily,
+    Keyword,
+    LocalFont,
+    Percentage,
+    Url,
+)
 
 __all__ = [
     "AtRule",
@@ -48,16 +57,22 @@ class RawDeclaration:
 
     property: str
     value: Any
+    _raw_value: Any = field(init=False, repr=False, compare=False)
+    _effective_options: SerializationOptions = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        opts = current_options()
         norm = normalize_identifier_key(self.property)
+        frozen_raw = _freeze_value(self.value)
         rendered = serialize_value(
             "--raw",
-            self.value,
-            options=current_options(),
+            frozen_raw,
+            options=opts,
         )
         object.__setattr__(self, "property", norm)
         object.__setattr__(self, "value", rendered)
+        object.__setattr__(self, "_raw_value", frozen_raw)
+        object.__setattr__(self, "_effective_options", opts)
 
 
 def _has_leading_newline(comment: str | Template) -> bool:
@@ -228,6 +243,21 @@ def _freeze_interpolation(item: Interpolation) -> Interpolation:
     val = item.value
     if not isinstance(val, bool) and isinstance(val, (int, float, str)):
         return item
+    if (
+        item.conversion is None
+        and not item.format_spec
+        and type(val)
+        in (
+            Dimension,
+            FontSrc,
+            GenericFamily,
+            Keyword,
+            LocalFont,
+            Percentage,
+            Url,
+        )
+    ):
+        return item
     converted = convert(val, item.conversion)
     text = format(converted, item.format_spec) if item.format_spec else str(converted)
     return Interpolation(text, item.expression, None, "")
@@ -274,37 +304,160 @@ def _freeze_declarations(
     return tuple(out)
 
 
+_STATEMENT_ONLY_ATRULES: frozenset[str] = frozenset(
+    {
+        "@charset",
+        "@custom-media",
+        "@custom-selector",
+        "@import",
+        "@namespace",
+    }
+)
+
+_RULE_LIST_ONLY_ATRULES: frozenset[str] = frozenset(
+    {
+        "@-webkit-keyframes",
+        "@container",
+        "@document",
+        "@else",
+        "@keyframes",
+        "@layer",
+        "@media",
+        "@navigation",
+        "@starting-style",
+        "@supports",
+        "@supports-condition",
+        "@when",
+    }
+)
+
+_PAGE_MARGIN_ATRULES: frozenset[str] = frozenset(
+    {
+        "@bottom-center",
+        "@bottom-left",
+        "@bottom-left-corner",
+        "@bottom-right",
+        "@bottom-right-corner",
+        "@left-bottom",
+        "@left-middle",
+        "@left-top",
+        "@right-bottom",
+        "@right-middle",
+        "@right-top",
+        "@top-center",
+        "@top-left",
+        "@top-left-corner",
+        "@top-right",
+        "@top-right-corner",
+    }
+)
+
+_STYLE_DECLARATION_ATRULES: frozenset[str] = (
+    frozenset(
+        {
+            "@apply",
+            "@contents",
+            "@mixin",
+            "@position-try",
+            "@private",
+            "@scope",
+        }
+    )
+    | _PAGE_MARGIN_ATRULES
+)
+
+_FONT_FEATURE_VALUE_SUBRULE_SYNTAXES: dict[str, str] = {
+    "@annotation": "<integer [0,∞]>",
+    "@character-variant": "<integer [0,∞]>{1,2}",
+    "@historical-forms": "<integer [0,∞]>",
+    "@ornaments": "<integer [0,∞]>",
+    "@styleset": "<integer [0,∞]>+",
+    "@stylistic": "<integer [0,∞]>",
+    "@swash": "<integer [0,∞]>",
+}
+
+_DECLARATION_ONLY_BLOCK_ATRULES: frozenset[str] = (
+    frozenset(
+        {
+            "@apply",
+            "@color-profile",
+            "@contents",
+            "@counter-style",
+            "@font-face",
+            "@font-palette-values",
+            "@position-try",
+            "@property",
+            "@view-transition",
+        }
+    )
+    | _PAGE_MARGIN_ATRULES
+    | frozenset(_FONT_FEATURE_VALUE_SUBRULE_SYNTAXES)
+)
+
+_STATEMENT_CAPABLE_KNOWN_ATRULES: frozenset[str] = _STATEMENT_ONLY_ATRULES | frozenset(
+    {"@apply", "@contents", "@layer"}
+)
+
+
+def _normalize_at_rule_name(raw_at_rule: str) -> str:
+    raw_name = raw_at_rule.strip() if isinstance(raw_at_rule, str) else ""
+    if not raw_name or "/*" in raw_name or "*/" in raw_name:
+        raise StixisValidationError("at-rule", "@<ident>", raw_at_rule)
+    at_cand = raw_name if raw_name.startswith("@") else f"@{raw_name}"
+    try:
+        at_toks = tokenize_css(at_cand, preserve_whitespace=True)
+    except StixisSyntaxError as exc:
+        raise StixisValidationError("at-rule", "@<ident>", raw_at_rule) from exc
+    if len(at_toks) != 1 or at_toks[0].kind != "at-keyword" or not at_toks[0].value:
+        raise StixisValidationError("at-rule", "@<ident>", raw_at_rule)
+    at_ident = at_toks[0].value.lower()
+    return (
+        f"@{serialize_dashed_ident(at_ident)}"
+        if at_ident.startswith("--")
+        else f"@{serialize_ident(at_ident)}"
+    )
+
+
 def _validate_and_normalize_declarations(
     declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] | None,
     *,
     at_rule: str | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> tuple[tuple[str, str], ...]:
-    if not declarations:
+    norm_at = _normalize_at_rule_name(at_rule) if at_rule is not None else None
+    if declarations is None:
         return ()
 
     items: list[tuple[str, Any] | RawDeclaration]
     if isinstance(declarations, Mapping):
         items = list(declarations.items())
-    elif isinstance(declarations, Sequence):
+    elif isinstance(declarations, Sequence) and not isinstance(declarations, (str, bytes)):
         items = list(declarations)
     else:
         raise StixisValidationError("declarations", "Mapping[str, Any]", declarations)
 
-    normalized_pairs: list[tuple[str, str]] = []
-    norm_at = (
-        (
-            at_rule.strip().lower()
-            if at_rule.strip().startswith("@")
-            else f"@{at_rule.strip().lower()}"
+    if norm_at in _STATEMENT_ONLY_ATRULES or norm_at in _RULE_LIST_ONLY_ATRULES:
+        raise StixisValidationError(
+            norm_at,
+            "no declarations",
+            declarations,
+            f"{norm_at} does not accept declarations in its block",
         )
-        if at_rule is not None
-        else None
-    )
+
+    if not items:
+        return ()
+
+    effective_at = None if norm_at in _STYLE_DECLARATION_ATRULES else norm_at
+    normalized_pairs: list[tuple[str, str]] = []
 
     for item in items:
         if isinstance(item, RawDeclaration):
-            normalized_pairs.append((item.property, str(item.value)))
+            raw_val_str = (
+                serialize_value("--raw", item._raw_value, options=options)
+                if _formatting_profile(options) != _formatting_profile(item._effective_options)
+                else str(item.value)
+            )
+            normalized_pairs.append((item.property, raw_val_str))
             continue
         if not isinstance(item, tuple) or len(item) != 2:
             raise StixisValidationError("declarations", "(property, value)", item)
@@ -314,12 +467,16 @@ def _validate_and_normalize_declarations(
         prop = normalize_identifier_key(raw_key)
 
         if prop.startswith("--") and len(prop) >= 2:
-            if norm_at is not None and norm_at == "@font-face":
+            if (
+                effective_at is not None
+                and effective_at not in ("@page", "@function")
+                and not options.allow_unknown_properties
+            ):
                 raise StixisValidationError(
-                    f"{norm_at}/{prop}",
-                    "descriptor of @font-face",
+                    f"{effective_at}/{prop}",
+                    f"descriptor of {effective_at}",
                     prop,
-                    "Custom properties are not valid inside @font-face",
+                    f"Custom properties are not valid inside {effective_at}",
                 )
             val_str = evaluate_serialize_value(
                 prop,
@@ -332,8 +489,28 @@ def _validate_and_normalize_declarations(
             normalized_pairs.append((prop, val_str))
             continue
 
-        if norm_at is not None:
-            descs = ATRULE_DESCRIPTORS.get(norm_at, {})
+        if effective_at in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES:
+            sub_syn = _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES[effective_at]
+            val_str = evaluate_serialize_value(
+                f"{effective_at}/{prop}",
+                sub_syn,
+                compile_value_syntax(sub_syn),
+                val,
+                specs_lookup=lookup_value_node,
+                at_rule=effective_at,
+                options=options,
+            )
+            normalized_pairs.append((prop, val_str))
+            continue
+
+        if effective_at == "@page":
+            page_descs = ATRULE_DESCRIPTORS.get("@page", {})
+            if prop in page_descs:
+                val_str = serialize_value(prop, val, at_rule="@page", options=options)
+                normalized_pairs.append((prop, val_str))
+                continue
+        elif effective_at is not None:
+            descs = ATRULE_DESCRIPTORS.get(effective_at, {})
             if prop not in descs:
                 if options.allow_unknown_properties or (
                     options.allow_vendor_prefixes and prop.startswith("-")
@@ -349,13 +526,13 @@ def _validate_and_normalize_declarations(
                     normalized_pairs.append((prop, val_str))
                     continue
                 raise StixisValidationError(
-                    f"{norm_at}/{prop}",
-                    f"descriptor of {norm_at}",
+                    f"{effective_at}/{prop}",
+                    f"descriptor of {effective_at}",
                     val,
-                    f"Unknown descriptor {prop!r} for {norm_at}",
+                    f"Unknown descriptor {prop!r} for {effective_at}",
                 )
-            val_str = serialize_value(prop, val, at_rule=norm_at, options=options)
-            if norm_at == "@font-face" and prop in ("font-width", "font-stretch"):
+            val_str = serialize_value(prop, val, at_rule=effective_at, options=options)
+            if effective_at == "@font-face" and prop in ("font-width", "font-stretch"):
                 if options.font_face_stretch_alias == "font-stretch":
                     normalized_pairs.append(("font-stretch", val_str))
                 elif options.font_face_stretch_alias == "both":
@@ -367,7 +544,7 @@ def _validate_and_normalize_declarations(
                 normalized_pairs.append((prop, val_str))
             continue
 
-        # Standard style rule property
+        # Standard style rule property (including `@page` style declarations)
         if prop in PROPERTY_SYNTAXES and is_property_enabled(prop, options):
             val_str = serialize_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
@@ -421,9 +598,13 @@ def serialize_declarations(
     return " ".join(f"{k}: {v};" for k, v in pairs)
 
 
-def _validate_selector(selector: str | Sequence[str] | Template) -> str:
+def _validate_selector(
+    selector: str | Sequence[str] | Template,
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
     if isinstance(selector, Template):
-        sel_str = render_css_template(selector).strip()
+        sel_str = render_css_template(selector, options=options).strip()
     elif isinstance(selector, str):
         sel_str = selector.strip()
     elif isinstance(selector, Sequence):
@@ -454,7 +635,11 @@ def _validate_at_rule_prelude(
     prelude: Any,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
-    prelude_syntax = ATRULE_PRELUDE_SYNTAXES.get(at_name)
+    prelude_syntax = (
+        ""
+        if at_name in _PAGE_MARGIN_ATRULES or at_name in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES
+        else ATRULE_PRELUDE_SYNTAXES.get(at_name)
+    )
     if prelude is None or prelude == "":
         if (
             prelude_syntax
@@ -577,7 +762,7 @@ class StyleRule:
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
-        sel_s = _validate_selector(self.selector)
+        sel_s = _validate_selector(self.selector, options=opts)
         decls = _validate_and_normalize_declarations(self.declarations, at_rule=None, options=opts)
         rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
@@ -682,30 +867,90 @@ class AtRule:
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
-        raw_name = self.name.strip() if isinstance(self.name, str) else ""
-        if not raw_name or "/*" in raw_name or "*/" in raw_name:
-            raise StixisValidationError("at-rule", "@<ident>", self.name)
-        at_cand = raw_name if raw_name.startswith("@") else f"@{raw_name}"
-        try:
-            at_toks = tokenize_css(at_cand, preserve_whitespace=True)
-        except StixisSyntaxError as exc:
-            raise StixisValidationError("at-rule", "@<ident>", self.name) from exc
-        if len(at_toks) != 1 or at_toks[0].kind != "at-keyword" or not at_toks[0].value:
-            raise StixisValidationError("at-rule", "@<ident>", self.name)
-        at_ident = at_toks[0].value.lower()
-        at_name = (
-            f"@{serialize_dashed_ident(at_ident)}"
-            if at_ident.startswith("--")
-            else f"@{serialize_ident(at_ident)}"
-        )
+        at_name = _normalize_at_rule_name(self.name)
 
         prelude_s = _validate_at_rule_prelude(at_name, self.prelude, options=opts)
+        rules_t = _validate_child_rules(self.rules, options=opts)
+
+        if at_name in _STATEMENT_ONLY_ATRULES:
+            if not prelude_s:
+                raise StixisValidationError(
+                    at_name,
+                    "non-empty prelude",
+                    self.prelude,
+                    f"{at_name} requires a prelude",
+                )
+            if self.descriptors is not None:
+                raise StixisValidationError(
+                    at_name,
+                    "statement at-rule",
+                    self.descriptors,
+                    f"{at_name} is a statement at-rule and does not accept descriptors",
+                )
+            if rules_t:
+                raise StixisValidationError(
+                    at_name,
+                    "statement at-rule",
+                    self.rules,
+                    f"{at_name} is a statement at-rule and does not accept child rules",
+                )
+
+        if self.statement:
+            if self.descriptors is not None or rules_t:
+                raise StixisValidationError(
+                    at_name,
+                    "statement at-rule",
+                    self.descriptors if self.descriptors is not None else self.rules,
+                    "Statement at-rules cannot have descriptors or child rules",
+                )
+            is_known = (
+                at_name in ATRULE_DESCRIPTORS
+                or at_name in ATRULE_PRELUDE_SYNTAXES
+                or at_name in _PAGE_MARGIN_ATRULES
+                or at_name in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES
+                or at_name in _RULE_LIST_ONLY_ATRULES
+            )
+            if is_known and at_name not in _STATEMENT_CAPABLE_KNOWN_ATRULES:
+                raise StixisValidationError(
+                    at_name,
+                    "block at-rule",
+                    self.name,
+                    f"{at_name} requires a block and cannot be serialized with statement=True",
+                )
+            if at_name in ("@layer", "@apply") and not prelude_s:
+                raise StixisValidationError(
+                    at_name,
+                    "non-empty prelude",
+                    self.prelude,
+                    f"{at_name} statement form requires a prelude",
+                )
+
+        if at_name in _DECLARATION_ONLY_BLOCK_ATRULES:
+            for child in rules_t:
+                if not isinstance(child, CommentNode):
+                    raise StixisValidationError(
+                        at_name,
+                        "declarations only",
+                        child,
+                        f"{at_name} cannot contain nested style or at-rules",
+                    )
+        elif at_name == "@page":
+            for child in rules_t:
+                if isinstance(child, StyleRule) or (
+                    isinstance(child, AtRule) and child._at_name not in _PAGE_MARGIN_ATRULES
+                ):
+                    raise StixisValidationError(
+                        "@page",
+                        "margin at-rules",
+                        child,
+                        "@page only accepts margin at-rules in rules",
+                    )
+
         decls = _validate_and_normalize_declarations(
             self.descriptors,
-            at_rule=at_name if ATRULE_DESCRIPTORS.get(at_name) else None,
+            at_rule=at_name,
             options=opts,
         )
-        rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
             if self.comment is not None
@@ -751,12 +996,18 @@ class AtRule:
         inner_pad = "" if minify else ("  " * (indent + 1))
         head = f"{self._at_name} {self._prelude_str}" if self._prelude_str else self._at_name
 
-        is_stmt = self.statement or (
-            not self._decl_pairs
-            and not self._rules_tuple
-            and self.descriptors is None
-            and self._at_name in ("@import", "@charset", "@namespace", "@layer", "@custom-media")
-            and bool(self._prelude_str)
+        is_stmt = (
+            self.statement
+            or self._at_name in _STATEMENT_ONLY_ATRULES
+            or (
+                not self._decl_pairs
+                and not self._rules_tuple
+                and self.descriptors is None
+                and (
+                    (self._at_name in ("@layer", "@apply") and bool(self._prelude_str))
+                    or (self._at_name == "@contents" and not self._prelude_str)
+                )
+            )
         )
         if is_stmt:
             if self._comment_str and not minify:
