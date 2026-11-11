@@ -90,7 +90,7 @@ from stixis import (
 
 Use Python 3.14+ `t"..."` templates when combining static CSS structure with Python variables:
 
-* **URLs.** `src=t"url({slice_filename}) format(woff2)"` quotes and escapes `slice_filename` inside `url(...)`.
+* **URLs.** Single-slot `src=t"url({slice_filename}) format(woff2)"` (and `<url-modifier>` forms separated by CSS whitespace or comments such as `t"url({slice_filename} type(font))"` or `t"url({slice_filename} {modifier})"`) quotes and escapes `slice_filename` inside `url("...")`. Templates with static URL text or adjacent interpolations inside `url(...)` (such as `t"url(https://example.com/{slug}.woff2)"`, `t"url({base}/{slug}.woff2)"`, or `t"url({base_slash}{filename})"`) CSS-escape unsafe `<url-token>` characters across every slot until the closing `)`.
 * **Comments.** `comment=t"[{slice_id}] {description} ({size_kb:.1f} KB)"` replaces `*/` inside interpolated values with `* /` and normalizes newlines to spaces so interpolated strings cannot close `/* ... */` early.
 * **Values.** `font_style=t"oblique {min_angle}deg {max_angle}deg"` formats numbers, rejects `bool`, `nan`, and `inf`, and validates the resulting tokens against the target grammar.
 
