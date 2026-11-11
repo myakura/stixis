@@ -333,132 +333,17 @@ def test_default_is_rejected_as_css_wide_keyword_but_excluded_from_custom_ident(
         serialize_value("<custom-ident>", "default")
 
 
-def test_serialize_value_function_node_and_mapping_key_validation() -> None:
-    """Issue #100: `FunctionNode` handling and `Mapping` key validation in `serialize_value`."""
+def test_serialize_value_rejects_arbitrary_mappings_on_combinators() -> None:
     from stixis import Dimension
 
-    # 1. Direct typed Python inputs targeting VDS `<fn()>` function nodes
-    assert serialize_value("<rotateX()>", Deg(30)) == "rotatex(30deg)"
-    assert serialize_value("<blur()>", Dimension(4, "px")) == "blur(4px)"
-    assert serialize_value("<fit-content()>", Pct(50)) == "fit-content(50%)"
-    assert (
-        serialize_value("<translate()>", (Dimension(10, "px"), Dimension(20, "px")))
-        == "translate(10px, 20px)"
+    assert serialize_value("<generic-font-script-specific>", GenericFamily("generic(kai)")) == (
+        "generic(kai)"
     )
-
-    # 2. Named `Mapping` and `(fn_name, ...)` tuples on properties with `FunctionNode` branches
-    assert serialize_value("width", {"fit_content": Dimension(120, "px")}) == "fit-content(120px)"
-    assert serialize_value("width", ("fit-content", Pct(50))) == "fit-content(50%)"
-    assert serialize_value("filter", {"blur": Dimension(4, "px")}) == "blur(4px)"
-    assert serialize_value("filter", {"blur": ()}) == "blur()"
-    assert (
-        serialize_value(
-            "transform",
-            [
-                {"translate": (Dimension(10, "px"), Dimension(20, "px"))},
-                ("rotate", Deg(45)),
-            ],
-        )
-        == "translate(10px, 20px) rotate(45deg)"
-    )
-    assert serialize_value("width", Dimension(120, "px")) == "120px"
-    with pytest.raises(StixisValidationError):
-        serialize_value("filter", Dimension(4, "px"))
-    with pytest.raises(StixisValidationError):
-        serialize_value("width", {"bogus_fn": Dimension(120, "px")})
-    with pytest.raises(StixisValidationError):
-        serialize_value("width", {"fit_content": ()})
-
-    # 3. `Mapping` keys on `&&` / `||` shorthands are validated and bound to matching branches
-    assert (
-        serialize_value(
-            "border",
-            {"color": "red", "style": "solid", "width": Dimension(1, "px")},
-        )
-        == "1px solid red"
-    )
-    assert (
-        serialize_value(
-            "border",
-            {"border_width": Dimension(2, "px"), "border_style": "dashed"},
-        )
-        == "2px dashed"
-    )
-    assert (
-        serialize_value(
-            "outline",
-            {"outline_color": "blue", "style": "dashed", "width": Dimension(2, "px")},
-        )
-        == "2px dashed blue"
-    )
-    for bad_border_map in (
-        {"totally_bogus_key": Dimension(1, "px")},
-        {"width": Dimension(1, "px"), "totally_bogus_key": None},
-        {"color": Dimension(1, "px")},
-        {"width": Dimension(1, "px"), "border_width": Dimension(2, "px")},
-        {"width": False},
-        {},
+    assert serialize_value("border", [Dimension(1, "px"), "solid", "red"]) == "1px solid red"
+    for target, bad_map in (
+        ("border", {"totally_bogus_key": Dimension(1, "px")}),
+        ("border", {"color": "red", "style": "solid", "width": Dimension(1, "px")}),
+        ("width", {"fit_content": Dimension(120, "px")}),
     ):
         with pytest.raises(StixisValidationError):
-            serialize_value("border", bad_border_map)
-
-    # 4. Shorthand `Mapping` longhand aliases for non-`<'longhand'>` branches (`css-transitions-1` §2.5,
-    #    `css-animations-1` §3.9, `css-backgrounds-3` §3.10, `skills/stixis/SKILL.md` shorthand mappings).
-    assert (
-        serialize_value(
-            "transition",
-            {"property": "color", "duration": Dimension(1, "s")},
-        )
-        == "color 1s"
-    )
-    assert (
-        serialize_value(
-            "transition",
-            {"transition_property": "opacity", "transition_duration": Dimension(200, "ms")},
-        )
-        == "opacity 200ms"
-    )
-    assert (
-        serialize_value(
-            "transition",
-            {
-                "delay": Dimension(200, "ms"),
-                "duration": Dimension(1, "s"),
-                "timing_function": "ease-in",
-                "property": "opacity",
-            },
-        )
-        == "opacity 1s ease-in 200ms"
-    )
-    assert (
-        serialize_value(
-            "<single-transition>",
-            {"property": "transform", "duration": Dimension(300, "ms")},
-        )
-        == "transform 300ms"
-    )
-    assert (
-        serialize_value(
-            "animation",
-            {
-                "name": "fade",
-                "duration": Dimension(500, "ms"),
-                "delay": Dimension(100, "ms"),
-                "timing_function": "linear",
-            },
-        )
-        == "500ms linear 100ms fade"
-    )
-    assert (
-        serialize_value(
-            "background",
-            {"color": "red", "position": "center", "size": "cover", "repeat": "no-repeat"},
-        )
-        == "center / cover no-repeat red"
-    )
-    # CSS Transitions 1 §2.5 / CSS Animations 1 §3.9: first `<time>` in shorthand is always duration,
-    # so `delay` without `duration` cannot be represented unambiguously in the shorthand.
-    with pytest.raises(StixisValidationError):
-        serialize_value("transition", {"property": "opacity", "delay": Dimension(200, "ms")})
-    with pytest.raises(StixisValidationError):
-        serialize_value("animation", {"name": "fade", "delay": Dimension(100, "ms")})
+            serialize_value(target, bad_map)
