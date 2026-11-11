@@ -2,7 +2,7 @@
 
 ## Overview
 
-Stixis separates build-time specification ingestion (`codegen/`) from its runtime evaluator (`src/stixis/_grammar/` and `src/stixis/_syntax/`). `serialize_value`, `canonicalize`, and the CLI all resolve targets through `resolve_target_syntax` (`src/stixis/_grammar/targets.py`: `PROPERTY_SYNTAXES`, custom properties `--*`, `ATRULE_DESCRIPTORS`, `VALUE_SYNTAXES`, and `SUPPORTED_BUILTIN_TYPES`, gating standard properties with `CSS_WIDE_KEYWORDS` and excluding `RESERVED_CUSTOM_IDENT_KEYWORDS` from `<custom-ident>`) and evaluate inputs against the compiled `ValueNode` combinator tree.
+Stixis separates build-time specification ingestion (`codegen/`) from its runtime evaluator (`src/stixis/_grammar/` and `src/stixis/_syntax/`). `serialize_value`, `canonicalize`, and the CLI all resolve targets through `resolve_target_syntax` (`src/stixis/_grammar/targets.py`: `PROPERTY_SYNTAXES`, custom properties `--*`, `ATRULE_DESCRIPTORS` — excluding `type: "at-rule" | "discrete" | "range"` child rules and `@media`/`@container` prelude query features in `codegen/gen_specs.py` while keeping their nested `values` definitions — `VALUE_SYNTAXES`, and `SUPPORTED_BUILTIN_TYPES`, gating standard properties with `CSS_WIDE_KEYWORDS` and excluding `RESERVED_CUSTOM_IDENT_KEYWORDS` from `<custom-ident>`) and evaluate inputs against the compiled `ValueNode` combinator tree.
 
 ## Value Definition Syntax (`src/stixis/_grammar/`)
 

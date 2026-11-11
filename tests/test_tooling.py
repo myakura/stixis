@@ -554,3 +554,64 @@ def test_load_and_merge_specs_applies_exclude_specs_and_supersedes(tmp_path: Pat
     assert vals["<contrast-color()>"] == "contrast-color( <color> )"
     assert props["border-start-start-radius"] == "<border-radius>"
     assert props["margin-block-start"] == "<'margin-top'>"
+
+
+def test_load_and_merge_specs_excludes_discrete_and_range_query_features_from_descriptors(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    repo_root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(repo_root / "codegen"))
+    import gen_specs
+
+    (tmp_path / "mediaqueries-5.json").write_text(
+        json.dumps(
+            {
+                "atrules": [
+                    {
+                        "name": "@media",
+                        "descriptors": [
+                            {
+                                "name": "hover",
+                                "for": "@media",
+                                "type": "discrete",
+                                "value": "none | hover",
+                            },
+                            {
+                                "name": "color",
+                                "for": "@media",
+                                "type": "range",
+                                "value": "<mq-boolean> | <integer [0,∞]>",
+                                "values": [
+                                    {
+                                        "name": "<mq-boolean>",
+                                        "type": "type",
+                                        "value": "<integer [0,1]>",
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                    {
+                        "name": "@font-face",
+                        "descriptors": [
+                            {
+                                "name": "font-display",
+                                "for": "@font-face",
+                                "value": "auto | block | swap | fallback | optional",
+                            }
+                        ],
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _units, _props, vals, atrules, _channels = gen_specs.load_and_merge_specs(tmp_path, {})
+    assert atrules["@media"]["descriptors"] == {}
+    assert vals["<mq-boolean>"] == "<integer [0,1]>"
+    assert atrules["@font-face"]["descriptors"] == {
+        "font-display": "auto | block | swap | fallback | optional"
+    }

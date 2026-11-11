@@ -21,12 +21,23 @@ from stixis._grammar.targets import (
     normalize_identifier_key,
 )
 from stixis._grammar.vds import compile_value_syntax
-from stixis._syntax.serialize import serialize_dashed_ident, serialize_ident
+from stixis._syntax.serialize import (
+    serialize_dashed_ident,
+    serialize_ident,
+    serialize_string,
+    serialize_url,
+)
 from stixis._syntax.template import render_css_template
 from stixis._syntax.tokenizer import tokenize_css, validate_token_stream_safety
 from stixis.api import serialize_value
 from stixis.errors import StixisSyntaxError, StixisValidationError
-from stixis.options import DEFAULT_OPTIONS, SerializationOptions, current_options
+from stixis.options import (
+    DEFAULT_OPTIONS,
+    SerializationOptions,
+    active_or_explicit_options,
+    current_options,
+)
+from stixis.values import LocalFont, Url
 
 __all__ = [
     "AtRule",
@@ -42,22 +53,61 @@ __all__ = [
 ]
 
 
+def _render_raw_declaration_value(
+    prop: str,
+    raw_val: Any,
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
+    if not prop.startswith("--") and isinstance(raw_val, str):
+        normalized = (
+            raw_val.replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .replace("\f", "\n")
+            .replace("\x00", "\ufffd")
+        )
+        tokens = validate_token_stream_safety(
+            normalized,
+            forbid_top_level_semicolon=True,
+            forbid_top_level_bang=True,
+            target="<declaration-value>",
+        )
+        out: list[str] = []
+        cursor = 0
+        for tok in tokens:
+            if tok.kind == "string":
+                out.append(normalized[cursor : tok.start])
+                out.append(serialize_string(tok.value, options=options))
+                cursor = tok.start + len(tok.raw)
+            elif tok.kind == "url":
+                out.append(normalized[cursor : tok.start])
+                out.append(serialize_url(tok.value, options=options))
+                cursor = tok.start + len(tok.raw)
+        if cursor == 0:
+            return raw_val.strip()
+        out.append(normalized[cursor:])
+        return "".join(out).strip()
+    return serialize_value("--raw", raw_val, options=options)
+
+
 @dataclass(frozen=True, slots=True)
 class RawDeclaration:
     """Explicit opt-in declaration for custom or vendor-prefixed properties validated with `<declaration-value>`."""
 
     property: str
     value: Any
+    _raw_value: Any = field(init=False, repr=False, compare=False)
+    _effective_options: SerializationOptions = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        opts = current_options()
         norm = normalize_identifier_key(self.property)
-        rendered = serialize_value(
-            "--raw",
-            self.value,
-            options=current_options(),
-        )
+        frozen_raw = _freeze_value(self.value)
+        rendered = _render_raw_declaration_value(norm, frozen_raw, options=opts)
         object.__setattr__(self, "property", norm)
         object.__setattr__(self, "value", rendered)
+        object.__setattr__(self, "_raw_value", frozen_raw)
+        object.__setattr__(self, "_effective_options", opts)
 
 
 def _has_leading_newline(comment: str | Template) -> bool:
@@ -228,6 +278,8 @@ def _freeze_interpolation(item: Interpolation) -> Interpolation:
     val = item.value
     if not isinstance(val, bool) and isinstance(val, (int, float, str)):
         return item
+    if item.conversion is None and not item.format_spec and type(val) in (Url, LocalFont):
+        return item
     converted = convert(val, item.conversion)
     text = format(converted, item.format_spec) if item.format_spec else str(converted)
     return Interpolation(text, item.expression, None, "")
@@ -279,6 +331,7 @@ def _validate_and_normalize_declarations(
     *,
     at_rule: str | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
+    raw_override_options: SerializationOptions | None = None,
 ) -> tuple[tuple[str, str], ...]:
     if not declarations:
         return ()
@@ -304,7 +357,14 @@ def _validate_and_normalize_declarations(
 
     for item in items:
         if isinstance(item, RawDeclaration):
-            normalized_pairs.append((item.property, str(item.value)))
+            val_s = (
+                str(item.value)
+                if raw_override_options is None or raw_override_options == item._effective_options
+                else _render_raw_declaration_value(
+                    item.property, item._raw_value, options=raw_override_options
+                )
+            )
+            normalized_pairs.append((item.property, val_s))
             continue
         if not isinstance(item, tuple) or len(item) != 2:
             raise StixisValidationError("declarations", "(property, value)", item)
@@ -415,15 +475,22 @@ def serialize_declarations(
 ) -> str:
     """Validate and serialize a mapping of CSS declarations (`prop: value;`)."""
     opts = current_options(options)
-    pairs = _validate_and_normalize_declarations(declarations, at_rule=at_rule, options=opts)
+    raw_override = active_or_explicit_options(options)
+    pairs = _validate_and_normalize_declarations(
+        declarations, at_rule=at_rule, options=opts, raw_override_options=raw_override
+    )
     if minify:
         return ";".join(f"{k}:{v}" for k, v in pairs)
     return " ".join(f"{k}: {v};" for k, v in pairs)
 
 
-def _validate_selector(selector: str | Sequence[str] | Template) -> str:
+def _validate_selector(
+    selector: str | Sequence[str] | Template,
+    *,
+    options: SerializationOptions = DEFAULT_OPTIONS,
+) -> str:
     if isinstance(selector, Template):
-        sel_str = render_css_template(selector).strip()
+        sel_str = render_css_template(selector, options=options).strip()
     elif isinstance(selector, str):
         sel_str = selector.strip()
     elif isinstance(selector, Sequence):
@@ -560,6 +627,19 @@ def _needs_rebuild_for_options(
     return bool(built_opts.allow_unknown_properties and not target_opts.allow_unknown_properties)
 
 
+def _has_mismatched_raw_decl_options(
+    decls: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] | None,
+    target_opts: SerializationOptions,
+) -> bool:
+    if not decls or isinstance(decls, Mapping):
+        return False
+    return any(
+        isinstance(d, RawDeclaration)
+        and _formatting_profile(d._effective_options) != _formatting_profile(target_opts)
+        for d in decls
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
@@ -577,8 +657,11 @@ class StyleRule:
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
-        sel_s = _validate_selector(self.selector)
-        decls = _validate_and_normalize_declarations(self.declarations, at_rule=None, options=opts)
+        raw_override = active_or_explicit_options(self.options)
+        sel_s = _validate_selector(self.selector, options=opts)
+        decls = _validate_and_normalize_declarations(
+            self.declarations, at_rule=None, options=opts, raw_override_options=raw_override
+        )
         rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
@@ -616,7 +699,13 @@ class StyleRule:
         options: SerializationOptions | None = None,
     ) -> str:
         eff_opts = options if options is not None else self.options
-        if options is not None and _needs_rebuild_for_options(self._effective_options, options):
+        if options is not None and (
+            _needs_rebuild_for_options(self._effective_options, options)
+            or (
+                self.options != options
+                and _has_mismatched_raw_decl_options(self.declarations, options)
+            )
+        ):
             rebuilt = StyleRule(
                 self.selector,
                 self.declarations,
@@ -704,6 +793,7 @@ class AtRule:
             self.descriptors,
             at_rule=at_name if ATRULE_DESCRIPTORS.get(at_name) else None,
             options=opts,
+            raw_override_options=active_or_explicit_options(self.options),
         )
         rules_t = _validate_child_rules(self.rules, options=opts)
         comm_s = (
@@ -735,7 +825,13 @@ class AtRule:
         options: SerializationOptions | None = None,
     ) -> str:
         eff_opts = options if options is not None else self.options
-        if options is not None and _needs_rebuild_for_options(self._effective_options, options):
+        if options is not None and (
+            _needs_rebuild_for_options(self._effective_options, options)
+            or (
+                self.options != options
+                and _has_mismatched_raw_decl_options(self.descriptors, options)
+            )
+        ):
             rebuilt = AtRule(
                 self.name,
                 self.prelude,

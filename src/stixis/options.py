@@ -93,16 +93,24 @@ class SerializationOptions:
 
 DEFAULT_OPTIONS = SerializationOptions()
 
-_ACTIVE_OPTIONS: ContextVar[SerializationOptions] = ContextVar(
-    "_ACTIVE_OPTIONS", default=DEFAULT_OPTIONS
+_ACTIVE_OPTIONS: ContextVar[SerializationOptions | None] = ContextVar(
+    "_ACTIVE_OPTIONS", default=None
 )
+
+
+def active_or_explicit_options(
+    options: SerializationOptions | None = None,
+) -> SerializationOptions | None:
+    """Return `options` if provided, otherwise the active context options (or `None` when unset)."""
+    if options is not None:
+        return options
+    return _ACTIVE_OPTIONS.get()
 
 
 def current_options(options: SerializationOptions | None = None) -> SerializationOptions:
     """Return `options` if provided, otherwise the active context options or `DEFAULT_OPTIONS`."""
-    if options is not None:
-        return options
-    return _ACTIVE_OPTIONS.get()
+    resolved = active_or_explicit_options(options)
+    return DEFAULT_OPTIONS if resolved is None else resolved
 
 
 @contextmanager

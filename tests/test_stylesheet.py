@@ -340,3 +340,83 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
     object.__setattr__(bad_brace, "raw_css", "10px}body{color:red")
     with pytest.raises(StixisValidationError):
         serialize_value("<any-value>", bad_brace)
+
+
+def test_query_features_excluded_from_block_descriptors_and_options_propagated() -> None:
+    from stixis import LocalFont, RawDeclaration, canonicalize, serialize_value, using_options
+
+    # 1. `@media` and `@container` prelude query features (`type: "discrete" | "range"` in `@webref/css`)
+    #    are not block descriptors (Issue #99; CSS Media Queries 5 / CSS Conditional 5).
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", "screen", descriptors={"hover": "hover"})
+    with pytest.raises(StixisValidationError):
+        canonicalize("hover", "hover", at_rule="@media")
+    with pytest.raises(StixisValidationError):
+        serialize_value("@container/inline-size", Px(100))
+
+    # CSS Nesting Level 1 conditional rules inside a style rule still accept standard CSS properties.
+    nested_cond = StyleRule(
+        ".card",
+        {"color": "black"},
+        rules=[AtRule("@media", "(width > 40em)", descriptors={"color": "red", "width": Px(100)})],
+    )
+    assert "color: red;" in str(nested_cond)
+    assert "width: 100px;" in str(nested_cond)
+
+    # 2. `RawDeclaration`, custom-property `Url`, and `Template` selectors propagate `SerializationOptions`
+    #    at construction, `using_options`, and `.format(options=...)` (Issue #99; `skills/stixis/SKILL.md`).
+    cleome = SerializationOptions.cleome()
+    raw_rule = StyleRule("p", [RawDeclaration("content", '"hi"')])
+    assert raw_rule.format() == 'p {\n  content: "hi";\n}'
+    assert raw_rule.format(options=cleome) == "p {\n  content: 'hi';\n}"
+    assert (
+        StyleRule("p", [RawDeclaration("content", '"hi"')], options=cleome).format()
+        == "p {\n  content: 'hi';\n}"
+    )
+    with using_options(cleome):
+        assert (
+            str(StyleRule("p", [RawDeclaration("content", '"hi"')])) == "p {\n  content: 'hi';\n}"
+        )
+        raw_from_ctx = RawDeclaration("content", '"hi"')
+        raw_custom_ctx = RawDeclaration("--t", t"url({'a.woff2'})")
+    assert raw_from_ctx.value == "'hi'"
+    assert str(StyleRule("p", [raw_from_ctx])) == "p {\n  content: 'hi';\n}"
+    assert (
+        StyleRule("p", [raw_from_ctx]).format(options=SerializationOptions())
+        == 'p {\n  content: "hi";\n}'
+    )
+    assert str(StyleRule(":root", [raw_custom_ctx])) == ":root {\n  --t: url('a.woff2');\n}"
+
+    # CSS Variables Level 1 §4.1: raw custom-property strings retain their original author representation.
+    assert serialize_value("--x", r'"\41 "', options=cleome) == r'"\41 "'
+    assert serialize_value("--x", "url(a)", options=cleome) == "url(a)"
+    custom_raw = StyleRule(
+        ":root", [RawDeclaration("--x", r'"\41 "'), RawDeclaration("--y", "url(a)")]
+    )
+    assert custom_raw.format(options=cleome) == ':root {\n  --x: "\\41 ";\n  --y: url(a);\n}'
+
+    # Structured `Url` values in custom properties and `RawDeclaration` honor `options.quote_char`.
+    custom_url = StyleRule(
+        ":root",
+        {"--u": Url("a.woff2"), "--t": t"{Url('b.woff2')}"},
+    )
+    assert custom_url.format() == ':root {\n  --u: url("a.woff2");\n  --t: url("b.woff2");\n}'
+    assert (
+        custom_url.format(options=cleome)
+        == ":root {\n  --u: url('a.woff2');\n  --t: url('b.woff2');\n}"
+    )
+    assert (
+        StyleRule(":root", [RawDeclaration("--u", Url("a.woff2"))]).format(options=cleome)
+        == ":root {\n  --u: url('a.woff2');\n}"
+    )
+
+    # `Template` selectors and `FontFace` templates honor `options.quote_char` on `Url` / `LocalFont`.
+    sel_rule = StyleRule(t"a[data-u={Url('a.woff2')}]", {"color": "red"})
+    assert sel_rule.format() == 'a[data-u=url("a.woff2")] {\n  color: red;\n}'
+    assert sel_rule.format(options=cleome) == "a[data-u=url('a.woff2')] {\n  color: red;\n}"
+    assert (
+        StyleRule(t"a[data-u={Url('a.woff2')}]", {"color": "red"}, options=cleome).format()
+        == "a[data-u=url('a.woff2')] {\n  color: red;\n}"
+    )
+    ff_local_tpl = FontFace(font_family="Inter", src=t"{LocalFont('Inter')}")
+    assert "src: local('Inter');" in ff_local_tpl.format(options=cleome)

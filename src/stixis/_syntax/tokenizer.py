@@ -20,6 +20,7 @@ class CssToken:
     hash_type: str = "unrestricted"  # "id" or "unrestricted"
     ws_around: bool = field(default=True, compare=False)
     ws_before: bool = field(default=False, compare=False)
+    start: int = field(default=0, compare=False)
     raw: str = field(default="", compare=False)
 
 
@@ -236,7 +237,14 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             while pos < n and normalized[pos] in (" ", "\t", "\n"):
                 pos += 1
             if preserve_whitespace:
-                tokens.append(CssToken("whitespace", normalized[start:pos]))
+                tokens.append(
+                    CssToken(
+                        "whitespace",
+                        normalized[start:pos],
+                        start=start,
+                        raw=normalized[start:pos],
+                    )
+                )
             had_ws_before = True
             continue
 
@@ -247,11 +255,15 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
         # CDO `<!--` and CDC `-->`
         if normalized.startswith("<!--", pos):
             pos += 4
-            tokens.append(CssToken("CDO", "<!--", ws_before=cur_ws_before, raw="<!--"))
+            tokens.append(
+                CssToken("CDO", "<!--", ws_before=cur_ws_before, start=tok_start, raw="<!--")
+            )
             continue
         if normalized.startswith("-->", pos):
             pos += 3
-            tokens.append(CssToken("CDC", "-->", ws_before=cur_ws_before, raw="-->"))
+            tokens.append(
+                CssToken("CDC", "-->", ws_before=cur_ws_before, start=tok_start, raw="-->")
+            )
             continue
 
         # Strings
@@ -286,6 +298,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                     "string",
                     "".join(chars),
                     ws_before=cur_ws_before,
+                    start=tok_start,
                     raw=normalized[tok_start:pos],
                 )
             )
@@ -307,12 +320,15 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         ident,
                         hash_type=hash_type,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
             else:
                 pos += 1
-                tokens.append(CssToken("delim", "#", ws_before=cur_ws_before, raw="#"))
+                tokens.append(
+                    CssToken("delim", "#", ws_before=cur_ws_before, start=tok_start, raw="#")
+                )
             continue
 
         # Numeric tokens
@@ -328,6 +344,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         is_integer=is_int,
                         unit=unit,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
@@ -340,6 +357,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         num=num_val,
                         is_integer=is_int,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
@@ -351,6 +369,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         num=num_val,
                         is_integer=is_int,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
@@ -372,6 +391,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                                 "url",
                                 url_val,
                                 ws_before=cur_ws_before,
+                                start=tok_start,
                                 raw=normalized[tok_start:pos],
                             )
                         )
@@ -381,6 +401,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         "function",
                         ident,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
@@ -390,6 +411,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         "ident",
                         ident,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
@@ -404,30 +426,35 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                         "at-keyword",
                         ident,
                         ws_before=cur_ws_before,
+                        start=tok_start,
                         raw=normalized[tok_start:pos],
                     )
                 )
             else:
                 pos += 1
-                tokens.append(CssToken("delim", "@", ws_before=cur_ws_before, raw="@"))
+                tokens.append(
+                    CssToken("delim", "@", ws_before=cur_ws_before, start=tok_start, raw="@")
+                )
             continue
 
         # Single-character punctuation tokens
         if ch in ("(", ")", "[", "]", "{", "}"):
             pos += 1
-            tokens.append(CssToken(ch, ch, ws_before=cur_ws_before, raw=ch))
+            tokens.append(CssToken(ch, ch, ws_before=cur_ws_before, start=tok_start, raw=ch))
             continue
         if ch == ",":
             pos += 1
-            tokens.append(CssToken("comma", ",", ws_before=cur_ws_before, raw=","))
+            tokens.append(CssToken("comma", ",", ws_before=cur_ws_before, start=tok_start, raw=","))
             continue
         if ch == ":":
             pos += 1
-            tokens.append(CssToken("colon", ":", ws_before=cur_ws_before, raw=":"))
+            tokens.append(CssToken("colon", ":", ws_before=cur_ws_before, start=tok_start, raw=":"))
             continue
         if ch == ";":
             pos += 1
-            tokens.append(CssToken("semicolon", ";", ws_before=cur_ws_before, raw=";"))
+            tokens.append(
+                CssToken("semicolon", ";", ws_before=cur_ws_before, start=tok_start, raw=";")
+            )
             continue
 
         tokens.append(
@@ -436,6 +463,7 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 ch,
                 ws_around=(cur_ws_before and _has_ws_after(normalized, pos + 1)),
                 ws_before=cur_ws_before,
+                start=tok_start,
                 raw=ch,
             )
         )

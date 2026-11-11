@@ -67,6 +67,7 @@ from stixis.microsyntax.family_name import (
 )
 from stixis.microsyntax.font_src import (
     FONT_TECH_KEYWORDS,
+    FontSrc,
     serialize_font_format,
     serialize_font_src_list,
     serialize_font_tech,
@@ -1673,8 +1674,17 @@ def _serialize_primitive_python_value(
                 return value.strip()
             if not isinstance(value, bool) and isinstance(value, (int, float)):
                 return serialize_number(value)
-            if isinstance(value, (Dimension, Percentage, Keyword, Url)):
-                rendered = str(value)
+            if isinstance(
+                value, (Dimension, Percentage, Keyword, GenericFamily, Url, LocalFont, FontSrc)
+            ):
+                if isinstance(value, Url) and type(value).__str__ is Url.__str__:
+                    rendered = serialize_url(value, options=options)
+                elif isinstance(value, LocalFont) and type(value).__str__ is LocalFont.__str__:
+                    rendered = f"local({serialize_string(value.family, options=options)})"
+                elif isinstance(value, FontSrc):
+                    rendered = serialize_single_font_src(value, options=options, target=kind)
+                else:
+                    rendered = str(value)
                 validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
