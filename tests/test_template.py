@@ -214,3 +214,32 @@ def test_template_url_single_slot_modifiers_and_token_boundaries() -> None:
         *[part for _ in range(200) for part in ("url(", Interpolation("a", "path"), ") ")]
     )
     assert render_css_template(many_urls) == 'url("a") ' * 200
+
+    # Single left-to-right evaluation of stateful `__str__` / `__format__` interpolations (existing PEP 750 behavior)
+    order: list[str] = []
+
+    class OnceValue:
+        def __init__(self, label: str, text: str) -> None:
+            self._label = label
+            self._values = iter([text])
+
+        def __str__(self) -> str:
+            order.append(self._label)
+            return next(self._values)
+
+        def __format__(self, spec: str) -> str:
+            order.append(f"{self._label}:{spec}")
+            return format(next(self._values), spec)
+
+    p1 = OnceValue("p1", "font.woff2")
+    m1 = OnceValue("m1", "crossorigin")
+    assert serialize_value("<url>", t"url({p1} {m1})") == 'url("font.woff2" crossorigin)'
+    assert order == ["p1", "m1"]
+
+    order.clear()
+    p2 = OnceValue("p2", "https://example.com/")
+    f2 = OnceValue("f2", "Noto Sans.woff2")
+    assert (
+        serialize_value("<url>", t"url({p2}{f2:s})") == 'url("https://example.com/Noto Sans.woff2")'
+    )
+    assert order == ["p2", "f2:s"]

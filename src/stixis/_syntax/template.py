@@ -35,30 +35,71 @@ def _is_default_values_instance(value: object, class_name: str) -> bool:
     return False
 
 
-def _format_template_value(
-    val: Any,
-    format_spec: str,
+def _get_converted(
+    idx: int,
+    item: Interpolation,
+    converted_cache: dict[int, Any],
+) -> Any:
+    if idx in converted_cache:
+        return converted_cache[idx]
+    val = convert(item.value, item.conversion)
+    converted_cache[idx] = val
+    return val
+
+
+def _get_raw_str(
+    idx: int,
+    item: Interpolation,
+    converted_cache: dict[int, Any],
+    str_cache: dict[int, str],
+) -> str:
+    if idx in str_cache:
+        return str_cache[idx]
+    val = _get_converted(idx, item, converted_cache)
+    text = format(val, item.format_spec) if item.format_spec else str(val)
+    str_cache[idx] = text
+    return text
+
+
+def _format_template_slot_value(
+    idx: int,
+    item: Interpolation,
     *,
     options: SerializationOptions,
+    converted_cache: dict[int, Any],
+    str_cache: dict[int, str],
 ) -> str:
-    if format_spec:
-        return format(val, format_spec)
+    val = _get_converted(idx, item, converted_cache)
+    if item.format_spec:
+        return _get_raw_str(idx, item, converted_cache, str_cache)
     if _is_default_values_instance(val, "Url"):
         return serialize_url(val, options=options)
     if _is_default_values_instance(val, "LocalFont"):
         return f"local({serialize_string(val.family, options=options)})"
-    return str(val)
+    return _get_raw_str(idx, item, converted_cache, str_cache)
 
 
-def _format_normal_interpolation(
+def _format_normal_slot(
+    idx: int,
     item: Interpolation,
     *,
     options: SerializationOptions,
+    converted_cache: dict[int, Any],
+    str_cache: dict[int, str],
 ) -> str:
-    val = convert(item.value, item.conversion)
+    val = _get_converted(idx, item, converted_cache)
     if not item.format_spec and not isinstance(val, bool) and isinstance(val, (int, float)):
-        return serialize_number(val)
-    return _format_template_value(val, item.format_spec, options=options)
+        prim = (
+            val if type(val) in (int, float) else (int(val) if isinstance(val, int) else float(val))
+        )
+        return serialize_number(prim)
+    return _format_template_slot_value(
+        idx,
+        item,
+        options=options,
+        converted_cache=converted_cache,
+        str_cache=str_cache,
+    )
 
 
 def _preprocess_css_chunk(text: str) -> str:
@@ -240,10 +281,15 @@ def _is_quoted_single_url_slot(
     slot_idx: int,
     *,
     options: SerializationOptions,
+    converted_cache: dict[int, Any],
+    str_cache: dict[int, str],
 ) -> bool:
     num_parts = len(norm_parts)
     if slot_idx >= num_parts:
         return True
+    first_part = norm_parts[slot_idx]
+    if isinstance(first_part, Interpolation):
+        _get_raw_str(slot_idx, first_part, converted_cache, str_cache)
     paren_depth = 1
     in_comment = False
     in_quote: str | None = None
@@ -260,11 +306,27 @@ def _is_quoted_single_url_slot(
                 closed = True
                 break
         elif isinstance(part, Interpolation):
-            if in_comment or in_quote is not None:
+            if in_comment:
+                _format_template_slot_value(
+                    k,
+                    part,
+                    options=options,
+                    converted_cache=converted_cache,
+                    str_cache=str_cache,
+                )
+                continue
+            if in_quote is not None:
+                _get_raw_str(k, part, converted_cache, str_cache)
                 continue
             try:
-                rendered = _format_normal_interpolation(part, options=options)
-            except StixisValidationError, StixisSyntaxError, ValueError, TypeError:
+                rendered = _format_normal_slot(
+                    k,
+                    part,
+                    options=options,
+                    converted_cache=converted_cache,
+                    str_cache=str_cache,
+                )
+            except StixisValidationError:
                 return False
             norm_rendered = _preprocess_css_chunk(rendered)
             end_idx, paren_depth, interp_comment, interp_quote = _advance_url_probe_text(
@@ -299,6 +361,8 @@ def render_css_template(
         _preprocess_css_chunk(p) if isinstance(p, str) else p for p in parts
     ]
     num_parts = len(parts)
+    converted_cache: dict[int, Any] = {}
+    str_cache: dict[int, str] = {}
     out: list[str] = []
     in_comment = start_in_comment
     in_quote: str | None = None
@@ -427,7 +491,11 @@ def render_css_template(
                                 url_mode = (
                                     "quoted_single"
                                     if _is_quoted_single_url_slot(
-                                        norm_parts, part_idx + 1, options=options
+                                        norm_parts,
+                                        part_idx + 1,
+                                        options=options,
+                                        converted_cache=converted_cache,
+                                        str_cache=str_cache,
                                     )
                                     else "unquoted"
                                 )
@@ -449,8 +517,13 @@ def render_css_template(
                 tail = scan_str[tok_start:i] if (i == n and ch in (".", "+", "-", "\\")) else ""
         elif isinstance(item, Interpolation):
             if in_comment:
-                val = convert(item.value, item.conversion)
-                text = _format_template_value(val, item.format_spec, options=options)
+                text = _format_template_slot_value(
+                    part_idx,
+                    item,
+                    options=options,
+                    converted_cache=converted_cache,
+                    str_cache=str_cache,
+                )
                 cleaned = (
                     text.replace("\r\n", " ")
                     .replace("\r", " ")
@@ -461,8 +534,7 @@ def render_css_template(
                     cleaned = cleaned.replace("*/", "* /")
                 out.append(cleaned)
             elif in_quote is not None:
-                val = convert(item.value, item.conversion)
-                text = format(val, item.format_spec) if item.format_spec else str(val)
+                text = _get_raw_str(part_idx, item, converted_cache, str_cache)
                 q_opts = (
                     options
                     if options.quote_char == in_quote
@@ -472,14 +544,12 @@ def render_css_template(
                 escaped = serialize_string(text, options=q_opts)[1:-1]
                 out.append(escaped)
             elif url_mode == "quoted_single":
-                val = convert(item.value, item.conversion)
-                text = format(val, item.format_spec) if item.format_spec else str(val)
+                text = _get_raw_str(part_idx, item, converted_cache, str_cache)
                 out.append(serialize_string(text, options=options))
                 url_mode = None
                 tail = ""
             elif url_mode == "unquoted":
-                val = convert(item.value, item.conversion)
-                text = format(val, item.format_spec) if item.format_spec else str(val)
+                text = _get_raw_str(part_idx, item, converted_cache, str_cache)
                 prev_star = bool(out and out[-1].endswith("*"))
                 next_part = norm_parts[part_idx + 1] if part_idx + 1 < num_parts else None
                 next_star = isinstance(next_part, str) and next_part.startswith("*")
@@ -492,7 +562,13 @@ def render_css_template(
                 )
                 tail = ""
             else:
-                emitted = _format_normal_interpolation(item, options=options)
+                emitted = _format_normal_slot(
+                    part_idx,
+                    item,
+                    options=options,
+                    converted_cache=converted_cache,
+                    str_cache=str_cache,
+                )
                 out.append(emitted)
                 tail = _update_token_tail(tail, emitted)
 
