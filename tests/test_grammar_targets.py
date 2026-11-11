@@ -351,3 +351,31 @@ def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_desc
     assert "min_engines" in readme_text
     assert "partial_implementation" in skill_text
     assert "min_engines" in skill_text
+
+
+def test_tokenize_vds_preserves_nested_parameterized_nonterminals() -> None:
+    """Issue #97: `_tokenize_vds` and `_parse_nonterminal_token` must preserve nested `<...>` and `[...]`."""
+    from stixis._grammar.vds import _tokenize_vds, compile_value_syntax
+
+    toks = _tokenize_vds("<boolean-expr[ <if-test> ]> | else")
+    assert toks == [
+        ("NONTERM", "<boolean-expr[ <if-test> ]>"),
+        ("|", "|"),
+        ("KEYWORD", "else"),
+    ]
+    assert _tokenize_vds("<[-token> | <]-token>") == [
+        ("NONTERM", "<[-token>"),
+        ("|", "|"),
+        ("NONTERM", "<]-token>"),
+    ]
+    node = compile_value_syntax("<boolean-expr[ <if-test> ]> | else")
+    assert node is not None
+    assert canonicalize("<if-condition>", "else") == "else"
+    assert canonicalize("<if-condition>", "style(--x: 1)") == "style(--x: 1)"
+    assert canonicalize("<if-condition>", "not style(--x: 1)") == "not style(--x: 1)"
+    assert (
+        canonicalize("<if-condition>", "style(--x: 1) and media(min-width: 600px)")
+        == "style(--x: 1) and media(min-width: 600px)"
+    )
+    with pytest.raises(StixisValidationError):
+        canonicalize("<if-condition>", "123")

@@ -31,6 +31,8 @@ from stixis._grammar.vds import (
     PrimitiveNode,
     RefNode,
     ValueNode,
+    _split_juxtapose_omissible_commas,
+    compile_boolean_expr,
 )
 
 CSSOM_OPTS = SerializationOptions.cssom()
@@ -112,7 +114,10 @@ def strategy_from_value_node(
         return st.nothing()
 
     if isinstance(node, RefNode):
-        ref = lookup_value_node(node.name, node.is_property)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            ref: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            ref = lookup_value_node(node.name, node.is_property)
         if ref is None:
             return st.nothing()
         if (node.min_val is not None or node.max_val is not None) and isinstance(
@@ -149,6 +154,10 @@ def strategy_from_value_node(
         )
 
     if isinstance(node, JuxtaposeNode):
+        clauses = _split_juxtapose_omissible_commas(node.items)
+        if clauses is not None:
+            clause_sts = [strategy_from_value_node(c, depth=depth + 1) for c in clauses]
+            return st.tuples(*clause_sts).map(lambda parts: ", ".join(p for p in parts if p))
         sub_sts = [strategy_from_value_node(c, depth=depth + 1) for c in node.items]
         return st.tuples(*sub_sts).map(lambda parts: " ".join(p for p in parts if p))
 

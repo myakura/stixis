@@ -35,6 +35,9 @@ from stixis._grammar.vds import (
     ValueNode,
     _collect_grammar_calc_functions,
     _collect_grammar_keywords,
+    _is_node_nullable,
+    _split_juxtapose_omissible_commas,
+    compile_boolean_expr,
 )
 from stixis._syntax.serialize import (
     CSS_WIDE_KEYWORDS,
@@ -126,7 +129,7 @@ class _TokenMatcher:
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
         self.calc_context_keywords = calc_context_keywords
         self.calc_context_functions = calc_context_functions
-        self._active_refs: set[tuple[str, bool, int]] = set()
+        self._active_refs: set[tuple[str, bool, str, int]] = set()
 
     def match_root(self, node: ValueNode, *, allow_css_wide: bool = True) -> str | None:
         if allow_css_wide and len(self.tokens) == 1 and self.tokens[0].kind == "ident":
@@ -262,10 +265,13 @@ class _TokenMatcher:
                 return [(next_pos, rendered_sum)]
             return []
 
-        guard_key = (node.name, node.is_property, pos)
+        guard_key = (node.name, node.is_property, node.type_param, pos)
         if guard_key in self._active_refs:
             return []
-        target_node = self.specs_lookup(node.name, node.is_property)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            target_node: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            target_node = self.specs_lookup(node.name, node.is_property)
         if target_node is None:
             return []
         self._active_refs.add(guard_key)
@@ -367,6 +373,49 @@ class _TokenMatcher:
         min_override: float | None,
         max_override: float | None,
     ) -> list[tuple[int, str]]:
+        clauses = _split_juxtapose_omissible_commas(tuple(items))
+        if clauses is not None:
+            c_states: list[tuple[int, list[str]]] = [(pos, [])]
+            for clause in clauses:
+                c_next: list[tuple[int, list[str]]] = []
+                c_seen: set[tuple[int, tuple[str, ...]]] = set()
+                clause_nullable = _is_node_nullable(clause, self.specs_lookup)
+                for cur_pos, rendered_clauses in c_states:
+                    if not rendered_clauses:
+                        for nxt_pos, rendered in self.match_node(
+                            clause, cur_pos, min_override, max_override
+                        ):
+                            if rendered == "" and nxt_pos == cur_pos:
+                                key = (cur_pos, ())
+                                if key not in c_seen:
+                                    c_seen.add(key)
+                                    c_next.append((cur_pos, []))
+                            elif nxt_pos > cur_pos and rendered != "":
+                                key = (nxt_pos, (rendered,))
+                                if key not in c_seen:
+                                    c_seen.add(key)
+                                    c_next.append((nxt_pos, [rendered]))
+                    else:
+                        if clause_nullable:
+                            key = (cur_pos, tuple(rendered_clauses))
+                            if key not in c_seen:
+                                c_seen.add(key)
+                                c_next.append((cur_pos, rendered_clauses))
+                        if cur_pos < len(self.tokens) and self.tokens[cur_pos].kind == "comma":
+                            for nxt_pos, rendered in self.match_node(
+                                clause, cur_pos + 1, min_override, max_override
+                            ):
+                                if nxt_pos > cur_pos + 1 and rendered != "":
+                                    new_clauses = [*rendered_clauses, rendered]
+                                    key = (nxt_pos, tuple(new_clauses))
+                                    if key not in c_seen:
+                                        c_seen.add(key)
+                                        c_next.append((nxt_pos, new_clauses))
+                c_states = c_next
+                if not c_states:
+                    return []
+            return [(end_pos, ", ".join(rc)) for end_pos, rc in c_states]
+
         states: list[tuple[int, list[str]]] = [(pos, [])]
         for child in items:
             next_states: list[tuple[int, list[str]]] = []
@@ -998,7 +1047,7 @@ def _node_matches_single_value(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None = None,
     max_override: float | None = None,
-    active_refs: set[tuple[str, bool]] | None = None,
+    active_refs: set[tuple[str, bool, str]] | None = None,
 ) -> str | None:
     """Try to serialize a structured Python `value` directly against `node`, returning `None` if it does not match."""
     if active_refs is None:
@@ -1034,10 +1083,13 @@ def _node_matches_single_value(
     if isinstance(node, RefNode):
         eff_min = node.min_val if node.min_val is not None else min_override
         eff_max = node.max_val if node.max_val is not None else max_override
-        key = (node.name, node.is_property)
+        key = (node.name, node.is_property, node.type_param)
         if key in active_refs:
             return None
-        target_node = specs_lookup(node.name, node.is_property)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            target_node: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            target_node = specs_lookup(node.name, node.is_property)
         if target_node is None:
             return None
         active_refs.add(key)
@@ -1156,6 +1208,41 @@ def _node_matches_single_value(
         return None
 
     if isinstance(node, JuxtaposeNode):
+        clauses = _split_juxtapose_omissible_commas(node.items)
+        if clauses is not None:
+            if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+                matched_clauses = _match_clauses_subsequence(
+                    clauses,
+                    value,
+                    specs_lookup=specs_lookup,
+                    options=options,
+                    forbidden_custom_idents=forbidden_custom_idents,
+                    min_override=min_override,
+                    max_override=max_override,
+                    active_refs=active_refs,
+                )
+                if matched_clauses is not None:
+                    return matched_clauses
+                return _match_sequence_via_tokens(
+                    node, value, specs_lookup, options, forbidden_custom_idents
+                )
+            nullable = [_is_node_nullable(c, specs_lookup) for c in clauses]
+            for idx, clause in enumerate(clauses):
+                if all(nullable[j] for j in range(len(clauses)) if j != idx):
+                    r = _node_matches_single_value(
+                        clause,
+                        value,
+                        specs_lookup,
+                        options,
+                        forbidden_custom_idents,
+                        min_override,
+                        max_override,
+                        active_refs,
+                    )
+                    if r:
+                        return r
+            return None
+
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             # Try matching sequence items via token stream or positional matching
             if len(value) == len(node.items):
@@ -1182,6 +1269,21 @@ def _node_matches_single_value(
             return _match_sequence_via_tokens(
                 node, value, specs_lookup, options, forbidden_custom_idents
             )
+        nullable_items = [_is_node_nullable(c, specs_lookup) for c in node.items]
+        for idx, item in enumerate(node.items):
+            if all(nullable_items[j] for j in range(len(node.items)) if j != idx):
+                r = _node_matches_single_value(
+                    item,
+                    value,
+                    specs_lookup,
+                    options,
+                    forbidden_custom_idents,
+                    min_override,
+                    max_override,
+                    active_refs,
+                )
+                if r:
+                    return r
         return None
 
     if isinstance(node, (AllOfNode, AnyOrderNode)):
@@ -1285,10 +1387,56 @@ def _match_unordered_python_items(
     return _join_serialized_parts([matched[i] for i in range(k) if i in matched])
 
 
+def _match_clauses_subsequence(
+    clauses: tuple[ValueNode, ...],
+    values: Sequence[Any],
+    *,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    options: SerializationOptions,
+    forbidden_custom_idents: frozenset[str],
+    min_override: float | None,
+    max_override: float | None,
+    active_refs: set[tuple[str, bool, str]],
+) -> str | None:
+    if not values or len(values) > len(clauses):
+        return None
+    nullable = [_is_node_nullable(c, specs_lookup) for c in clauses]
+
+    def dfs(c_idx: int, v_idx: int) -> list[str] | None:
+        if v_idx == len(values):
+            return [] if all(nullable[j] for j in range(c_idx, len(clauses))) else None
+        if c_idx == len(clauses):
+            return None
+        r = _node_matches_single_value(
+            clauses[c_idx],
+            values[v_idx],
+            specs_lookup,
+            options,
+            forbidden_custom_idents,
+            min_override,
+            max_override,
+            active_refs,
+        )
+        if r:
+            rest = dfs(c_idx + 1, v_idx + 1)
+            if rest is not None:
+                return [r, *rest]
+        if nullable[c_idx]:
+            return dfs(c_idx + 1, v_idx)
+        return None
+
+    matched = dfs(0, 0)
+    return ", ".join(matched) if matched else None
+
+
 def _value_item_to_css_fragment(item: Any, options: SerializationOptions) -> str | None:
     if isinstance(item, Template):
         return render_css_template(item, options=options)
-    if isinstance(item, (Keyword, GenericFamily, Url, LocalFont, Dimension, Percentage)):
+    if isinstance(item, Url):
+        return serialize_url(item, options=options)
+    if isinstance(item, LocalFont):
+        return serialize_single_font_src(item, options=options)
+    if isinstance(item, (Keyword, GenericFamily, Dimension, Percentage)):
         return str(item)
     if not isinstance(item, bool) and isinstance(item, (int, float)):
         return serialize_number(item)

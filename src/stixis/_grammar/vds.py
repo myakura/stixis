@@ -25,6 +25,7 @@ class DelimNode(ValueNode):
     """Matches a literal delimiter or punctuation token (such as `/`, `,`, `:`, `(`, `)`)."""
 
     delim: str
+    omissible: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +47,7 @@ class RefNode(ValueNode):
     is_property: bool = False
     min_val: float | None = None
     max_val: float | None = None
+    type_param: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,14 +273,29 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
             end = syntax.find("'", pos + 1)
             if end != -1:
                 lit = syntax[pos + 1 : end]
-                tokens.append(("LITERAL", lit))
+                tokens.append(("QUOTED_LITERAL", lit))
                 pos = end + 1
                 continue
 
-        # Non-terminal `<...>`
+        # Non-terminal `<...>` (tracking nested `<...>` and single-quoted `'<prop>'` spans)
         if ch == "<":
-            # Find matching `>` (accounting for `[min,max]` or `'<prop>'`)
-            end = syntax.find(">", pos + 1)
+            scan = pos + 1
+            angle_depth = 1
+            in_quote = False
+            end = -1
+            while scan < n:
+                sc = syntax[scan]
+                if sc == "'":
+                    in_quote = not in_quote
+                elif not in_quote:
+                    if sc == "<":
+                        angle_depth += 1
+                    elif sc == ">":
+                        angle_depth -= 1
+                        if angle_depth == 0:
+                            end = scan
+                            break
+                scan += 1
             if end != -1:
                 inner = syntax[pos : end + 1]
                 if inner == "<function-token>":
@@ -494,8 +511,11 @@ class _VdsParser:
         if kind == "NONTERM":
             return _parse_nonterminal_token(val)
 
+        if kind == "QUOTED_LITERAL":
+            return DelimNode(val, omissible=False)
+
         if kind == "LITERAL":
-            return DelimNode(val)
+            return DelimNode(val, omissible=(val == ","))
 
         if kind == "KEYWORD":
             return KeywordNode(val)
@@ -515,21 +535,49 @@ def _parse_range_mult(r_str: str) -> tuple[int, int | None]:
     return lo, hi
 
 
+def _find_top_level_open_bracket(inner: str) -> int:
+    """Find `[` outside single quotes and nested `<...>` inside a `<...>` non-terminal body."""
+    angle_depth = 0
+    in_quote = False
+    for idx, ch in enumerate(inner):
+        if ch == "'":
+            in_quote = not in_quote
+        elif not in_quote:
+            if ch == "<":
+                angle_depth += 1
+            elif ch == ">":
+                angle_depth = max(0, angle_depth - 1)
+            elif ch == "[" and angle_depth == 0:
+                return idx
+    return -1
+
+
 def _parse_nonterminal_token(raw: str) -> ValueNode:
     inner = raw[1:-1].strip()
+    whole_type = f"<{inner}>"
+    if whole_type in _BUILTIN_PRIMITIVES:
+        if whole_type == "<signless-integer>":
+            return PrimitiveNode("<integer>", min_val=0, max_val=None)
+        if whole_type == "<signed-integer>":
+            return PrimitiveNode("<integer>", min_val=None, max_val=None)
+        return PrimitiveNode(whole_type)
+
     min_val: float | None = None
     max_val: float | None = None
     min_unit = ""
     max_unit = ""
 
-    if "[" in inner and inner.endswith("]"):
-        b_idx = inner.index("[")
-        bracket = inner[b_idx + 1 : -1]
-        inner = inner[:b_idx].strip()
-        if "," in bracket:
+    b_idx = _find_top_level_open_bracket(inner)
+    if b_idx != -1 and inner.endswith("]"):
+        bracket = inner[b_idx + 1 : -1].strip()
+        base = inner[:b_idx].strip()
+        if "<" not in bracket and "," in bracket:
             lo_s, hi_s = bracket.split(",", 1)
             min_val, min_unit = _parse_bound(lo_s)
             max_val, max_unit = _parse_bound(hi_s)
+            inner = base
+        else:
+            return RefNode(f"<{base}>", is_property=False, type_param=bracket)
 
     if inner.startswith("'") and inner.endswith("'"):
         prop_name = inner[1:-1].strip()
@@ -560,10 +608,110 @@ def compile_value_syntax(syntax: str) -> ValueNode:
     return parser.parse_expr()
 
 
+@lru_cache(maxsize=256)
+def compile_boolean_expr(type_param: str) -> ValueNode:
+    """Compile CSS Values 5 parameterized `<boolean-expr[ <test> ]>`."""
+    test_node = compile_value_syntax(type_param)
+    self_ref = RefNode("<boolean-expr>", is_property=False, type_param=type_param)
+    group = ExclusiveOrNode(
+        (
+            test_node,
+            JuxtaposeNode((DelimNode("("), self_ref, DelimNode(")"))),
+            RefNode("<general-enclosed>"),
+        )
+    )
+    return ExclusiveOrNode(
+        (
+            JuxtaposeNode((KeywordNode("not"), group)),
+            JuxtaposeNode(
+                (
+                    group,
+                    ExclusiveOrNode(
+                        (
+                            MultiplierNode(JuxtaposeNode((KeywordNode("and"), group)), 0, None),
+                            MultiplierNode(JuxtaposeNode((KeywordNode("or"), group)), 0, None),
+                        )
+                    ),
+                )
+            ),
+        )
+    )
+
+
+def _is_omissible_comma(node: ValueNode) -> bool:
+    """Return True if `node` is an unquoted VDS `,` subject to CSS Values 4 §2.2.1 implicit comma elision."""
+    return isinstance(node, DelimNode) and node.delim == "," and node.omissible
+
+
+def _split_juxtapose_omissible_commas(
+    items: tuple[ValueNode, ...] | list[ValueNode],
+) -> tuple[ValueNode, ...] | None:
+    """Partition `items` at CSS Values 4 §2.2.1 omissible `,` separators between non-empty clauses, or return `None`."""
+    if len(items) < 3:
+        return None
+    if _is_omissible_comma(items[0]) or _is_omissible_comma(items[-1]):
+        return None
+    if not any(_is_omissible_comma(it) for it in items[1:-1]):
+        return None
+    clauses: list[ValueNode] = []
+    current: list[ValueNode] = []
+    for it in items:
+        if _is_omissible_comma(it):
+            if not current:
+                return None
+            clauses.append(current[0] if len(current) == 1 else JuxtaposeNode(tuple(current)))
+            current = []
+        else:
+            current.append(it)
+    if not current or not clauses:
+        return None
+    clauses.append(current[0] if len(current) == 1 else JuxtaposeNode(tuple(current)))
+    return tuple(clauses)
+
+
+def _is_node_nullable(
+    node: ValueNode,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    visited: set[tuple[str, bool, str]] | None = None,
+) -> bool:
+    """Return True if `node` can match zero tokens (`""`) in `_TokenMatcher`."""
+    if visited is None:
+        visited = set()
+    if isinstance(node, KeywordNode):
+        return node.name == ""
+    if isinstance(
+        node, (DelimNode, PrimitiveNode, FunctionNode, NonEmptyGroupNode, AllOfNode, AnyOrderNode)
+    ):
+        return False
+    if isinstance(node, MultiplierNode):
+        return node.min_count == 0 or _is_node_nullable(node.child, specs_lookup, visited)
+    if isinstance(node, ExclusiveOrNode):
+        return any(_is_node_nullable(b, specs_lookup, visited) for b in node.items)
+    if isinstance(node, JuxtaposeNode):
+        clauses = _split_juxtapose_omissible_commas(node.items)
+        seq = clauses if clauses is not None else node.items
+        return all(_is_node_nullable(c, specs_lookup, visited) for c in seq)
+    if isinstance(node, RefNode):
+        if (node.is_property and node.name == "font-style") or (
+            not node.is_property and node.name == "<calc-sum>"
+        ):
+            return False
+        key = (node.name, node.is_property, node.type_param)
+        if key in visited:
+            return False
+        visited.add(key)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            resolved = specs_lookup(node.name, node.is_property)
+        return resolved is not None and _is_node_nullable(resolved, specs_lookup, visited)
+    return False
+
+
 def _collect_grammar_keywords(
     node: ValueNode,
     specs_lookup: Callable[[str, bool], ValueNode | None],
-    visited: set[tuple[str, bool]] | None = None,
+    visited: set[tuple[str, bool, str]] | None = None,
 ) -> frozenset[str]:
     """Collect all explicit `KeywordNode` names in a grammar tree to exclude them from `<custom-ident>` when needed."""
     if visited is None:
@@ -578,11 +726,14 @@ def _collect_grammar_keywords(
     if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
         return _collect_grammar_keywords(node.child, specs_lookup, visited)
     if isinstance(node, RefNode):
-        key = (node.name, node.is_property)
+        key = (node.name, node.is_property, node.type_param)
         if key in visited:
             return frozenset()
         visited.add(key)
-        resolved = specs_lookup(node.name, node.is_property)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            resolved = specs_lookup(node.name, node.is_property)
         if resolved is not None:
             return _collect_grammar_keywords(resolved, specs_lookup, visited)
     return frozenset()
@@ -591,7 +742,7 @@ def _collect_grammar_keywords(
 def _collect_grammar_calc_functions(
     node: ValueNode,
     specs_lookup: Callable[[str, bool], ValueNode | None],
-    visited: set[tuple[str, bool]] | None = None,
+    visited: set[tuple[str, bool, str]] | None = None,
 ) -> frozenset[str]:
     """Collect `anchor` and `anchor-size` when referenced in `node`'s grammar tree so math expressions allow them."""
     if visited is None:
@@ -615,11 +766,14 @@ def _collect_grammar_calc_functions(
             out_ref.add("anchor")
         elif not node.is_property and node.name in ("<anchor-size()>", "anchor-size()"):
             out_ref.add("anchor-size")
-        key = (node.name, node.is_property)
+        key = (node.name, node.is_property, node.type_param)
         if key in visited:
             return frozenset(out_ref)
         visited.add(key)
-        resolved = specs_lookup(node.name, node.is_property)
+        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
+            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
+        else:
+            resolved = specs_lookup(node.name, node.is_property)
         if resolved is not None:
             out_ref.update(_collect_grammar_calc_functions(resolved, specs_lookup, visited))
         return frozenset(out_ref)
