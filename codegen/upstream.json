@@ -5,9 +5,9 @@
     "commit": "f7a4146d99d78630a0c70bc5c2c84816cc82aa15",
     "subpath": "ed/css",
     "json_files": 125,
-    "properties": 814,
-    "descriptors": 103,
-    "values": 793
+    "properties": 811,
+    "descriptors": 49,
+    "values": 781
   },
   "wpt": {
     "repository": "https://github.com/web-platform-tests/wpt.git",
@@ -20,8 +20,8 @@
     "font_face_xfail_cases": 7,
     "css_fonts_cases": 469,
     "css_fonts_xfail_cases": 2,
-    "css_properties_cases": 5271,
-    "css_properties_xfail_cases": 1099,
+    "css_properties_cases": 5305,
+    "css_properties_xfail_cases": 1065,
     "css_properties_skipped_disabled": 527,
     "css_properties_skipped_unknown": 2
   },

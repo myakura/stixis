@@ -3,11 +3,34 @@
 from __future__ import annotations
 
 from string.templatelib import Interpolation, Template, convert
+from typing import Any
 
-from stixis._syntax.serialize import serialize_number, serialize_string
+from stixis._syntax.serialize import serialize_number, serialize_string, serialize_url
 from stixis._syntax.tokenizer import _is_ident_code_point
 from stixis.errors import StixisSyntaxError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
+
+
+def _is_default_values_instance(value: object, class_name: str) -> bool:
+    for cls in type(value).__mro__:
+        if cls.__name__ == class_name and getattr(cls, "__module__", "") == "stixis.values":
+            return type(value).__str__ is cls.__str__
+    return False
+
+
+def _format_template_value(
+    val: Any,
+    format_spec: str,
+    *,
+    options: SerializationOptions,
+) -> str:
+    if format_spec:
+        return format(val, format_spec)
+    if _is_default_values_instance(val, "Url"):
+        return serialize_url(val, options=options)
+    if _is_default_values_instance(val, "LocalFont"):
+        return f"local({serialize_string(val.family, options=options)})"
+    return str(val)
 
 
 def render_css_template(
@@ -65,7 +88,7 @@ def render_css_template(
         elif isinstance(item, Interpolation):
             val = convert(item.value, item.conversion)
             if in_comment:
-                text = format(val, item.format_spec) if item.format_spec else str(val)
+                text = _format_template_value(val, item.format_spec, options=options)
                 cleaned = (
                     text.replace("\r\n", " ")
                     .replace("\r", " ")
@@ -95,8 +118,7 @@ def render_css_template(
             ):
                 out.append(serialize_number(val))
             else:
-                text = format(val, item.format_spec) if item.format_spec else str(val)
-                out.append(text)
+                out.append(_format_template_value(val, item.format_spec, options=options))
 
     if in_comment and not start_in_comment:
         raise StixisSyntaxError("Unclosed CSS comment `/*` in Template")

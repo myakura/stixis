@@ -309,7 +309,14 @@ def load_and_merge_specs(
                 entry["syntax"] = a["value"]
                 atrule_syntax_owners[aname] = spec_name
             for d in a.get("descriptors", []):
-                if d.get("type") == "at-rule":
+                _collect_nested_types(
+                    d.get("values", []),
+                    values,
+                    value_owners=value_owners,
+                    spec_name=spec_name,
+                    superseded_by=superseded_by,
+                )
+                if d.get("type") in ("at-rule", "discrete", "range"):
                     continue
                 dname = d["name"]
                 dkey = (aname, dname)
@@ -323,13 +330,6 @@ def load_and_merge_specs(
                     and _can_overwrite(descriptor_owners.get(dkey), spec_name)
                 ):
                     entry["descriptors"][dname] += " | " + d["newValues"]
-                _collect_nested_types(
-                    d.get("values", []),
-                    values,
-                    value_owners=value_owners,
-                    spec_name=spec_name,
-                    superseded_by=superseded_by,
-                )
             _collect_nested_types(
                 a.get("values", []),
                 values,
