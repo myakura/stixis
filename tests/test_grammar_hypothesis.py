@@ -32,7 +32,6 @@ from stixis._grammar.vds import (
     RefNode,
     ValueNode,
     _split_juxtapose_omissible_commas,
-    compile_boolean_expr,
 )
 
 CSSOM_OPTS = SerializationOptions.cssom()
@@ -114,10 +113,7 @@ def strategy_from_value_node(
         return st.nothing()
 
     if isinstance(node, RefNode):
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            ref: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            ref = lookup_value_node(node.name, node.is_property)
+        ref = lookup_value_node(node.name, node.is_property)
         if ref is None:
             return st.nothing()
         if (node.min_val is not None or node.max_val is not None) and isinstance(

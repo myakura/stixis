@@ -14,11 +14,8 @@ from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis._grammar.calc import (
     _consume_balanced_group,
     _contains_global_substitution,
-    _format_tokens_with_if_validation,
     _is_math_function_token,
-    _normalize_tokens_with_if_validation,
     _parse_calc_sum,
-    _validate_and_format_if_function,
 )
 from stixis._grammar.color import (
     extract_relative_color_rest_node,
@@ -42,7 +39,6 @@ from stixis._grammar.vds import (
     _collect_grammar_keywords,
     _is_node_nullable,
     _split_juxtapose_omissible_commas,
-    compile_boolean_expr,
 )
 from stixis._syntax.serialize import (
     CSS_WIDE_KEYWORDS,
@@ -139,7 +135,7 @@ class _TokenMatcher:
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
         self.calc_context_keywords = calc_context_keywords
         self.calc_context_functions = calc_context_functions
-        self._active_refs: set[tuple[str, bool, str, int]] = set()
+        self._active_refs: set[tuple[str, bool, int]] = set()
 
     def match_root(self, node: ValueNode, *, allow_css_wide: bool = True) -> str | None:
         if allow_css_wide and len(self.tokens) == 1 and self.tokens[0].kind == "ident":
@@ -153,7 +149,7 @@ class _TokenMatcher:
                 forbid_top_level_bang=True,
                 forbid_top_level_semicolon=True,
             )
-            return _format_tokens_with_if_validation(self.tokens, options=self.options)
+            return format_token_sequence(self.tokens, options=self.options)
 
         for pos, rendered in self.match_node(node, 0):
             if pos == len(self.tokens) and rendered != "":
@@ -275,13 +271,10 @@ class _TokenMatcher:
                 return [(next_pos, rendered_sum)]
             return []
 
-        guard_key = (node.name, node.is_property, node.type_param, pos)
+        guard_key = (node.name, node.is_property, pos)
         if guard_key in self._active_refs:
             return []
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            target_node: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            target_node = self.specs_lookup(node.name, node.is_property)
+        target_node = self.specs_lookup(node.name, node.is_property)
         if target_node is None:
             return []
         self._active_refs.add(guard_key)
@@ -319,12 +312,6 @@ class _TokenMatcher:
             return []
         inner_tokens, next_pos = grouped
         fn_name = serialize_ident(tok.value.lower())
-
-        if fn_name == "if" and node.name.lower() == "if":
-            rendered_if = _validate_and_format_if_function(inner_tokens, options=self.options)
-            if rendered_if is None:
-                return []
-            return [(next_pos, rendered_if)]
 
         if node.arg is None:
             if not inner_tokens:
@@ -1226,62 +1213,20 @@ def _match_function_python_value(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None,
     max_override: float | None,
-    active_refs: set[tuple[str, bool, str]],
+    active_refs: set[tuple[str, bool]],
     allow_bare_arg: bool,
 ) -> str | None:
     if isinstance(value, GenericFamily) and node.name.lower() == "generic":
         rendered_gen = serialize_generic_family(value)
         return rendered_gen if rendered_gen.startswith("generic(") else None
 
-    def _validate_rendered_fn(fn_name: str, candidate: str) -> str | None:
-        if fn_name == "if":
-            try:
-                toks = [
-                    t
-                    for t in validate_token_stream_safety(
-                        candidate,
-                        forbid_top_level_semicolon=True,
-                        forbid_top_level_bang=True,
-                        forbid_top_level_braces=True,
-                        target="<if()>",
-                    )
-                    if t.kind != "whitespace"
-                ]
-            except StixisValidationError:
-                return None
-            if len(toks) < 2 or toks[0].kind != "function" or toks[-1].kind != ")":
-                return None
-            return _validate_and_format_if_function(toks[1:-1], options=options)
-        if "if(" in candidate.lower():
-            try:
-                toks = validate_token_stream_safety(
-                    candidate,
-                    forbid_top_level_semicolon=True,
-                    forbid_top_level_bang=True,
-                    forbid_top_level_braces=True,
-                    target=f"<{fn_name}()>",
-                )
-            except StixisValidationError:
-                return None
-            if _normalize_tokens_with_if_validation(toks) is None:
-                return None
-        return candidate
-
     def render_arg(fn_name: str, arg_val: Any) -> str | None:
         if isinstance(arg_val, bool):
             return None
         if node.arg is None:
-            return (
-                _validate_rendered_fn(fn_name, f"{fn_name}()")
-                if arg_val in (None, (), [])
-                else None
-            )
+            return f"{fn_name}()" if arg_val in (None, (), []) else None
         if arg_val in (None, (), []):
-            return (
-                _validate_rendered_fn(fn_name, f"{fn_name}()")
-                if _is_node_nullable(node.arg, specs_lookup)
-                else None
-            )
+            return f"{fn_name}()" if _is_node_nullable(node.arg, specs_lookup) else None
         rendered = _node_matches_single_value(
             node.arg,
             arg_val,
@@ -1296,7 +1241,7 @@ def _match_function_python_value(
         )
         if rendered is None:
             return None
-        return _validate_rendered_fn(fn_name, f"{fn_name}({rendered})")
+        return f"{fn_name}({rendered})"
 
     expected_fn = None if node.name == "<function-token>" else serialize_ident(node.name.lower())
 
@@ -1342,7 +1287,7 @@ def _match_mapping_against_juxtapose(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None,
     max_override: float | None,
-    active_refs: set[tuple[str, bool, str]],
+    active_refs: set[tuple[str, bool]],
     context_target: str | None,
 ) -> str | None:
     if not value:
@@ -1410,7 +1355,7 @@ def _node_matches_single_value(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None = None,
     max_override: float | None = None,
-    active_refs: set[tuple[str, bool, str]] | None = None,
+    active_refs: set[tuple[str, bool]] | None = None,
     *,
     context_target: str | None = None,
     allow_bare_function_arg: bool = False,
@@ -1462,13 +1407,10 @@ def _node_matches_single_value(
     if isinstance(node, RefNode):
         eff_min = node.min_val if node.min_val is not None else min_override
         eff_max = node.max_val if node.max_val is not None else max_override
-        key = (node.name, node.is_property, node.type_param)
+        key = (node.name, node.is_property)
         if key in active_refs:
             return None
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            target_node: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            target_node = specs_lookup(node.name, node.is_property)
+        target_node = specs_lookup(node.name, node.is_property)
         if target_node is None:
             return None
         next_context = node.name if node.is_property else context_target
@@ -1931,7 +1873,7 @@ def _match_clauses_subsequence(
     forbidden_custom_idents: frozenset[str],
     min_override: float | None,
     max_override: float | None,
-    active_refs: set[tuple[str, bool, str]],
+    active_refs: set[tuple[str, bool]],
     context_target: str | None = None,
 ) -> str | None:
     if not values or len(values) > len(clauses):
@@ -2177,37 +2119,31 @@ def _serialize_primitive_python_value(
         if kind in ("<declaration-value>", "<any-value>"):
             if isinstance(value, Template):
                 rendered = render_css_template(value, options=options)
-                toks = validate_token_stream_safety(
+                validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
-                if _normalize_tokens_with_if_validation(toks) is None:
-                    return None
                 return rendered.strip()
             if isinstance(value, str):
-                toks = validate_token_stream_safety(
+                validate_token_stream_safety(
                     value,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
-                if _normalize_tokens_with_if_validation(toks) is None:
-                    return None
                 return value.strip()
             if not isinstance(value, bool) and isinstance(value, (int, float)):
                 return serialize_number(value)
             if isinstance(value, (Dimension, Percentage, Keyword, Url)):
                 rendered = str(value)
-                toks = validate_token_stream_safety(
+                validate_token_stream_safety(
                     rendered,
                     forbid_top_level_semicolon=(kind == "<declaration-value>"),
                     forbid_top_level_bang=(kind == "<declaration-value>"),
                     target=kind,
                 )
-                if _normalize_tokens_with_if_validation(toks) is None:
-                    return None
                 return rendered
             return None
 
@@ -2289,10 +2225,7 @@ def evaluate_canonicalize(
             return non_ws[0].value.lower()
         try:
             if _contains_global_substitution(non_ws) and at_rule is None:
-                rendered_sub = _format_tokens_with_if_validation(non_ws, options=options)
-                if rendered_sub is None:
-                    raise StixisValidationError(target, syntax, css_text)
-                return rendered_sub
+                return format_token_sequence(non_ws, options=options)
             matches = matcher._match_font_style_tokens(0, is_descriptor=(at_rule == "@font-face"))
         except RecursionError as exc:
             raise StixisValidationError(
