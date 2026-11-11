@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 
 from stixis import (
+    Keyword,
     SerializationOptions,
     StixisValidationError,
+    Url,
     canonicalize,
     serialize_value,
 )
@@ -431,3 +433,58 @@ def test_canonical_grammars_not_overwritten_by_unshipped_or_umbrella_drafts() ->
     ):
         with pytest.raises(StixisValidationError):
             canonicalize(prop, bad_val, options=opts_all)
+
+
+def test_vds_implicit_comma_elision_and_gradients() -> None:
+    """Issue #97: CSS Values 4 §2.2.1 implicit comma elision in VDS juxtapositions."""
+    for prop, val, expected in (
+        ("color", "rgb(0, 0, 255)", "rgb(0, 0, 255)"),
+        ("color", "rgb(0, 0, 255, 0.5)", "rgb(0, 0, 255, 0.5)"),
+        ("color", "rgba(0, 0, 255)", "rgba(0, 0, 255)"),
+        ("color", "hsl(120, 100%, 50%)", "hsl(120, 100%, 50%)"),
+        ("color", "hsl(120, 100%, 50%, 0.5)", "hsl(120, 100%, 50%, 0.5)"),
+        ("background-image", "linear-gradient(red, blue)", "linear-gradient(red, blue)"),
+        (
+            "background-image",
+            "linear-gradient(45deg, red, 30%, blue)",
+            "linear-gradient(45deg, red, 30%, blue)",
+        ),
+        ("background-image", "radial-gradient(red, blue)", "radial-gradient(red, blue)"),
+        ("background-image", "conic-gradient(red, blue)", "conic-gradient(red, blue)"),
+        ("color", "color-mix(in srgb, red, blue)", "color-mix(in srgb, red, blue)"),
+        ("background", "red", "red"),
+        ("background", 'url("a.png"), red', 'url("a.png"), red'),
+        ("transition-timing-function", "steps(4)", "steps(4)"),
+        ("transition-timing-function", "steps(4, jump-start)", "steps(4, jump-start)"),
+        ("transform", "translate(10px)", "translate(10px)"),
+        ("transform", "translate(10px, 20px)", "translate(10px, 20px)"),
+    ):
+        assert canonicalize(prop, val) == expected
+
+    assert serialize_value("background", Keyword("red")) == "red"
+    assert (
+        serialize_value(
+            "background",
+            [Url("a.png"), Keyword("red")],
+            options=SerializationOptions.cleome(),
+        )
+        == "url('a.png'), red"
+    )
+
+    for prop, bad_val in (
+        ("color", "rgb(0, 0, 255, )"),
+        ("color", "rgb(, 0, 0, 255)"),
+        ("color", "rgb(0, , 255)"),
+        ("color", "hsl(120, 100%, 50%, )"),
+        ("background-image", "linear-gradient(, red, blue)"),
+        ("background-image", "linear-gradient(red, , blue)"),
+        ("background-image", "linear-gradient(red, blue, )"),
+        ("background-image", "linear-gradient(45deg red, blue)"),
+        ("background", ", red"),
+        ("background", "red, "),
+        ("cursor", 'url("a.png") pointer'),
+        ("transition-timing-function", "steps(4, )"),
+        ("transform", "translate(10px, )"),
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize(prop, bad_val)
