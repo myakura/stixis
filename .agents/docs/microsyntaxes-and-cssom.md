@@ -23,7 +23,8 @@ All primitive serializers implement W3C CSSOM section 2.1 (`Common Serializing I
 
 ### 1. `<urange>` and range compaction (`urange.py`)
 
-* `parse_urange(text)` implements CSS Syntax Level 3 section 8 and passes all 94 cases in WPT `urange-parsing.html`. Because CSS tokenizers absorb `U+...` into `ident`, `number` (including scientific notation like `u+1e3`), or `dimension` tokens, `parse_urange` strips comments first while checking that no comment separated the leading `u` or `U` from `+` (rejecting `u/**/0` while accepting `u/**/+/**/0`).
+* `consume_urange_tokens(tokens, pos)` implements the six token-level clauses of CSS Syntax Level 3 section 8.1 using `CssToken.ws_before` adjacency (passing all 94 cases in WPT `urange-parsing.html`, rejecting `u/**/0` and `U+00/**/41` while accepting `u/**/+/**/a/**/?` and scientific-notation tokens such as `u+1e3` and `u+1e-20`, at any token offset `pos`).
+* Singular `parse_single_urange` and `serialize_single_urange` validate a single `<urange>` (`str`, code point `int`, or `(start, end)` 2-tuple) and reject comma lists, whereas `parse_urange` and `format_urange` validate `<urange>#` (`@font-face/unicode-range`).
 * `parse_urange` and `format_urange` merge contiguous integer code points into inclusive `(start, end)` ranges for both `set[int]` and pure-integer sequences (`list[int]`, `tuple[int, ...]`), and accept `coalesce=True` to sort and merge adjacent or overlapping intervals on mixed sequences or raw CSS strings.
 * `compact_urange(sorted_target_cps, forbidden_sorted, max_gap=0x80)` merges adjacent ranges when the missing code point count `gap = cp - prev_end - 1 <= max_gap` only if `bisect_right` confirms that no code point in `forbidden_sorted` lies inside `(prev_end, next_start)`. This shortens `unicode-range` strings without shadowing glyphs in later `@font-face` slices.
 
