@@ -14,11 +14,6 @@ from stixis._generated.specs import (
     PROPERTY_SYNTAXES,
 )
 from stixis._generated.types import FontFaceDescriptors
-from stixis._grammar.calc import (
-    GLOBAL_SUBSTITUTION_FUNCTIONS,
-    _contains_global_substitution,
-    _normalize_tokens_with_substitution_validation,
-)
 from stixis._grammar.matcher import evaluate_canonicalize, evaluate_serialize_value
 from stixis._grammar.targets import (
     is_property_enabled,
@@ -519,38 +514,13 @@ def _validate_at_rule_prelude(
     )
     if not raw_prelude:
         return ""
-    tokens = validate_token_stream_safety(
+    validate_token_stream_safety(
         raw_prelude,
         forbid_top_level_semicolon=True,
         forbid_top_level_bang=False,
         forbid_top_level_braces=True,
         target=f"{at_name} prelude",
     )
-    if _contains_global_substitution(tokens):
-        if at_name in ("@supports", "@supports-condition", "@container"):
-            allowed_subs = GLOBAL_SUBSTITUTION_FUNCTIONS
-        elif at_name in (
-            "@media",
-            "@scope",
-            "@custom-media",
-            "@when",
-            "@else",
-        ) or at_name.startswith("@--"):
-            allowed_subs = frozenset({"env"})
-        else:
-            allowed_subs = frozenset()
-        if (
-            _normalize_tokens_with_substitution_validation(
-                tokens, allowed_substitutions=allowed_subs
-            )
-            is None
-        ):
-            raise StixisValidationError(
-                f"{at_name} prelude",
-                f"{at_name} prelude",
-                prelude,
-                f"Invalid or disallowed substitution function in {at_name} prelude",
-            )
     return raw_prelude
 
 

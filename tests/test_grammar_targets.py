@@ -408,29 +408,31 @@ def test_global_substitution_target_and_argument_validation() -> None:
         ("width", "var()"),
         ("width", "var({})"),
         ("width", "var({}, 10px)"),
-        ("width", "var(123)"),
-        ("width", "var(foo)"),
-        ("width", "var(--)"),
-        ("width", "var(--x --y)"),
         ("width", "var(--x {--y})"),
         ("width", "var({--x} --y)"),
+        ("width", "var(--x {--y}, 10px)"),
         ("width", "var(, 10px)"),
+        ("width", "var(--x, !)"),
+        ("width", "var(--x, ;)"),
         ("width", "var(--x, var())"),
-        ("width", "inherit()"),
-        ("width", "inherit(color)"),
-        ("width", "inherit(!!, foo)"),
-        ("width", "inherit(, foo)"),
+        ("left", "inherit()"),
+        ("left", "inherit({})"),
+        ("left", "inherit(!!, foo)"),
+        ("left", "inherit(, foo)"),
+        ("left", "inherit(--x {--y})"),
         ("width", "env()"),
-        ("width", "env(123)"),
+        ("width", "env(10px)"),
         ("width", "env(initial)"),
         ("width", "env(env(test))"),
+        ("width", "env(safe-area-inset-top ())"),
         ("width", "env(safe-area-inset-top -1)"),
         ("width", "env(safe-area-inset-top 0.5)"),
         ("width", "first-valid()"),
         ("width", "first-valid({})"),
         ("width", "first-valid(10px, )"),
         ("width", "attr()"),
-        ("width", "attr(123)"),
+        ("width", "attr(())"),
+        ("width", "attr(!)"),
         ("width", "attr(*|bar)"),
         ("width", "attr(data-w type())"),
         ("width", "attr(data-w type(<invalid>))"),
@@ -442,6 +444,10 @@ def test_global_substitution_target_and_argument_validation() -> None:
     assert canonicalize("width", "var(--x)") == "var(--x)"
     assert canonicalize("width", "var(--x, 10px)") == "var(--x, 10px)"
     assert canonicalize("width", "var(--x, )") == "var(--x,)"
+    # CSS Variables 2 `#typedef-var-args` & WPT `css-variables/var-parsing.html`: `<var-args>` parses name after substitution
+    assert canonicalize("width", "var(--x ())") == "var(--x ())"
+    assert canonicalize("width", "var(--x() )") == "var(--x())"
+    assert canonicalize("width", "var(1px, 10px)") == "var(1px, 10px)"
     assert canonicalize("width", "var(var(--name))") == "var(var(--name))"
     assert canonicalize("width", "var(attr(data-name type(*)))") == "var(attr(data-name type(*)))"
     assert (
@@ -472,7 +478,8 @@ def test_global_substitution_target_and_argument_validation() -> None:
         == "env(safe-area-inset-top, 0px)"
     )
     assert canonicalize("width", "first-valid(10px, 20px)") == "first-valid(10px, 20px)"
-    assert canonicalize("width", "inherit(--w, 10px)") == "inherit(--w, 10px)"
+    assert canonicalize("left", "inherit(--w, 10px)") == "inherit(--w, 10px)"
+    assert canonicalize("left", "inherit(--x, )") == "inherit(--x,)"
     assert (
         canonicalize("width", "attr(data-w type(<length>), 10px)")
         == "attr(data-w type(<length>), 10px)"

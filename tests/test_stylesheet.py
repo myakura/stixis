@@ -343,9 +343,11 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
 
 
 def test_at_rule_prelude_substitution_restrictions() -> None:
-    """Issue #98: `@property` and `@media` preludes reject disallowed or malformed substitution functions."""
+    """Issue #98: `@property` and raw-CSS typed preludes reject substitution functions while `@supports` preserves unsupported feature queries."""
     with pytest.raises(StixisValidationError):
         AtRule("@property", "var(--x)", descriptors={"syntax": "'*'", "inherits": "false"})
+    with pytest.raises(StixisValidationError):
+        AtRule("@property", t"var(--x)", descriptors={"syntax": "'*'", "inherits": "false"})
     with pytest.raises(StixisValidationError):
         AtRule(
             "@property",
@@ -353,13 +355,12 @@ def test_at_rule_prelude_substitution_restrictions() -> None:
             descriptors={"syntax": "'*'", "inherits": "false"},
         )
     with pytest.raises(StixisValidationError):
-        AtRule("@media", "(min-width: var(--bp))")
-    with pytest.raises(StixisValidationError):
-        AtRule("@media", "(min-width: env())")
-    with pytest.raises(StixisValidationError):
-        AtRule("@supports", "(width: var())")
+        AtRule("@layer", t"var(--layer)")
 
     media_env = AtRule("@media", "(min-width: env(safe-area-inset-left))")
     assert "@media (min-width: env(safe-area-inset-left))" in str(media_env)
     supports_var = AtRule("@supports", "(width: var(--x))")
     assert "@supports (width: var(--x))" in str(supports_var)
+    # CSS Conditional Rules 3 §6.1 & WPT `CSS-supports-L3.html`: unsupported declarations parse inside `@supports` conditions
+    supports_negated = AtRule("@supports", "not (width: var())")
+    assert "@supports not (width: var())" in str(supports_negated)

@@ -1103,7 +1103,7 @@ def _is_only_substitution_calls(
 
 
 def _validate_flat_var_or_inherit_args(inner_tokens: Sequence[CssToken]) -> list[CssToken] | None:
-    """Validate `var(...)` or `inherit(...)` (allowing `<custom-property-name>`, substitution calls, or `{...}`-wrapped names)."""
+    """Validate `<var-args>` / `<inherit-args>` (`fn( <declaration-value> [, <declaration-value>? ]? )`)."""
     split = _split_first_top_level_comma(inner_tokens)
     if split is None:
         return None
@@ -1122,20 +1122,8 @@ def _validate_flat_var_or_inherit_args(inner_tokens: Sequence[CssToken]) -> list
             or _has_top_level_semicolon_or_bang(brace_inner)
         ):
             return None
-    else:
-        if _has_top_level_brace(head):
-            return None
-        is_custom_prop = (
-            len(head) == 1
-            and head[0].kind == "ident"
-            and head[0].value.startswith("--")
-            and len(head[0].value) >= 3
-        )
-        if not is_custom_prop and not _is_only_substitution_calls(
-            head,
-            allowed_names=GLOBAL_SUBSTITUTION_FUNCTIONS | frozenset({"ident", "random-item"}),
-        ):
-            return None
+    elif _has_top_level_brace(head):
+        return None
 
     out: list[CssToken] = list(head)
     if has_comma:
