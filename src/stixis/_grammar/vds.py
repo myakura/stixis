@@ -47,7 +47,6 @@ class RefNode(ValueNode):
     is_property: bool = False
     min_val: float | None = None
     max_val: float | None = None
-    type_param: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -577,7 +576,7 @@ def _parse_nonterminal_token(raw: str) -> ValueNode:
             max_val, max_unit = _parse_bound(hi_s)
             inner = base
         else:
-            return RefNode(f"<{base}>", is_property=False, type_param=bracket)
+            return RefNode(f"<{base}>", is_property=False)
 
     if inner.startswith("'") and inner.endswith("'"):
         prop_name = inner[1:-1].strip()
@@ -606,36 +605,6 @@ def compile_value_syntax(syntax: str) -> ValueNode:
     tokens = _tokenize_vds(syntax)
     parser = _VdsParser(tokens)
     return parser.parse_expr()
-
-
-@lru_cache(maxsize=256)
-def compile_boolean_expr(type_param: str) -> ValueNode:
-    """Compile CSS Values 5 parameterized `<boolean-expr[ <test> ]>`."""
-    test_node = compile_value_syntax(type_param)
-    self_ref = RefNode("<boolean-expr>", is_property=False, type_param=type_param)
-    group = ExclusiveOrNode(
-        (
-            test_node,
-            JuxtaposeNode((DelimNode("("), self_ref, DelimNode(")"))),
-            RefNode("<general-enclosed>"),
-        )
-    )
-    return ExclusiveOrNode(
-        (
-            JuxtaposeNode((KeywordNode("not"), group)),
-            JuxtaposeNode(
-                (
-                    group,
-                    ExclusiveOrNode(
-                        (
-                            MultiplierNode(JuxtaposeNode((KeywordNode("and"), group)), 0, None),
-                            MultiplierNode(JuxtaposeNode((KeywordNode("or"), group)), 0, None),
-                        )
-                    ),
-                )
-            ),
-        )
-    )
 
 
 def _is_omissible_comma(node: ValueNode) -> bool:
@@ -672,7 +641,7 @@ def _split_juxtapose_omissible_commas(
 def _is_node_nullable(
     node: ValueNode,
     specs_lookup: Callable[[str, bool], ValueNode | None],
-    visited: set[tuple[str, bool, str]] | None = None,
+    visited: set[tuple[str, bool]] | None = None,
 ) -> bool:
     """Return True if `node` can match zero tokens (`""`) in `_TokenMatcher`."""
     if visited is None:
@@ -696,14 +665,11 @@ def _is_node_nullable(
             not node.is_property and node.name == "<calc-sum>"
         ):
             return False
-        key = (node.name, node.is_property, node.type_param)
+        key = (node.name, node.is_property)
         if key in visited:
             return False
         visited.add(key)
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            resolved = specs_lookup(node.name, node.is_property)
+        resolved = specs_lookup(node.name, node.is_property)
         return resolved is not None and _is_node_nullable(resolved, specs_lookup, visited)
     return False
 
@@ -711,7 +677,7 @@ def _is_node_nullable(
 def _collect_grammar_keywords(
     node: ValueNode,
     specs_lookup: Callable[[str, bool], ValueNode | None],
-    visited: set[tuple[str, bool, str]] | None = None,
+    visited: set[tuple[str, bool]] | None = None,
 ) -> frozenset[str]:
     """Collect all explicit `KeywordNode` names in a grammar tree to exclude them from `<custom-ident>` when needed."""
     if visited is None:
@@ -726,14 +692,11 @@ def _collect_grammar_keywords(
     if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
         return _collect_grammar_keywords(node.child, specs_lookup, visited)
     if isinstance(node, RefNode):
-        key = (node.name, node.is_property, node.type_param)
+        key = (node.name, node.is_property)
         if key in visited:
             return frozenset()
         visited.add(key)
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            resolved = specs_lookup(node.name, node.is_property)
+        resolved = specs_lookup(node.name, node.is_property)
         if resolved is not None:
             return _collect_grammar_keywords(resolved, specs_lookup, visited)
     return frozenset()
@@ -742,7 +705,7 @@ def _collect_grammar_keywords(
 def _collect_grammar_calc_functions(
     node: ValueNode,
     specs_lookup: Callable[[str, bool], ValueNode | None],
-    visited: set[tuple[str, bool, str]] | None = None,
+    visited: set[tuple[str, bool]] | None = None,
 ) -> frozenset[str]:
     """Collect `anchor` and `anchor-size` when referenced in `node`'s grammar tree so math expressions allow them."""
     if visited is None:
@@ -766,14 +729,11 @@ def _collect_grammar_calc_functions(
             out_ref.add("anchor")
         elif not node.is_property and node.name in ("<anchor-size()>", "anchor-size()"):
             out_ref.add("anchor-size")
-        key = (node.name, node.is_property, node.type_param)
+        key = (node.name, node.is_property)
         if key in visited:
             return frozenset(out_ref)
         visited.add(key)
-        if not node.is_property and node.name == "<boolean-expr>" and node.type_param:
-            resolved: ValueNode | None = compile_boolean_expr(node.type_param)
-        else:
-            resolved = specs_lookup(node.name, node.is_property)
+        resolved = specs_lookup(node.name, node.is_property)
         if resolved is not None:
             out_ref.update(_collect_grammar_calc_functions(resolved, specs_lookup, visited))
         return frozenset(out_ref)
