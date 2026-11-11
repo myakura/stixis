@@ -379,3 +379,77 @@ def test_tokenize_vds_preserves_nested_parameterized_nonterminals() -> None:
     )
     with pytest.raises(StixisValidationError):
         canonicalize("<if-condition>", "123")
+
+
+def test_global_substitution_target_and_argument_validation() -> None:
+    """Issue #98: substitution functions enforce target context, argument syntax, and sibling token validity."""
+    for bad_target, bad_css in (
+        ("<length>", "var(--x)"),
+        ("<length>", "env(safe-area-inset-top)"),
+        ("<length>", "attr(data-w type(<length>))"),
+        ("<length>", "first-valid(10px, 20px)"),
+        ("<length>", "inherit(--x)"),
+        ("<length>", "if(else: 10px)"),
+        ("<length>", "calc(var(--x) + 1px)"),
+        ("@font-face/font-weight", "var(--x)"),
+        ("@font-face/font-weight", "env(safe-area-inset-top)"),
+        ("@font-face/src", "var(--x)"),
+        ("@property/initial-value", "var(--x)"),
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize(bad_target, bad_css)
+
+    for bad_prop, bad_css in (
+        ("width", "var()"),
+        ("width", "var(123)"),
+        ("width", "var(foo)"),
+        ("width", "var(--)"),
+        ("width", "var(--x --y)"),
+        ("width", "var(, 10px)"),
+        ("width", "var(--x, var())"),
+        ("width", "inherit()"),
+        ("width", "inherit(color)"),
+        ("width", "env()"),
+        ("width", "env(123)"),
+        ("width", "env(initial)"),
+        ("width", "env(safe-area-inset-top -1)"),
+        ("width", "env(safe-area-inset-top 0.5)"),
+        ("width", "first-valid()"),
+        ("width", "first-valid(10px, )"),
+        ("width", "attr()"),
+        ("width", "attr(123)"),
+        ("width", "attr(*|bar)"),
+        ("width", "attr(data-w type())"),
+        ("width", "attr(data-w type(<invalid>))"),
+        ("width", "attr(data-w type(< length >))"),
+        ("width", "not-a-length var(--x)"),
+        ("width", "10s var(--x)"),
+        ("width", "calc(not-a-length + var(--x))"),
+        ("font-style", "not-a-style var(--x)"),
+        ("border", "1px bogus-style var(--c)"),
+        ("color", "rgb(from var(--c) bogus g b)"),
+    ):
+        with pytest.raises(StixisValidationError):
+            canonicalize(bad_prop, bad_css)
+
+    assert canonicalize("width", "var(--x)") == "var(--x)"
+    assert canonicalize("width", "var(--x, 10px)") == "var(--x, 10px)"
+    assert canonicalize("width", "var(--x, )") == "var(--x,)"
+    assert (
+        canonicalize("font-family", "var(--f, Arial, sans-serif)") == "var(--f, Arial, sans-serif)"
+    )
+    assert canonicalize("width", "env(safe-area-inset-top, 0px)") == "env(safe-area-inset-top, 0px)"
+    assert (
+        canonicalize("width", "env(viewport-segment-width 0 1, 100px)")
+        == "env(viewport-segment-width 0 1, 100px)"
+    )
+    assert canonicalize("width", "first-valid(10px, 20px)") == "first-valid(10px, 20px)"
+    assert canonicalize("width", "inherit(--w, 10px)") == "inherit(--w, 10px)"
+    assert (
+        canonicalize("width", "attr(data-w type(<length>), 10px)")
+        == "attr(data-w type(<length>), 10px)"
+    )
+    assert canonicalize("width", "attr(data-w px, 10px)") == "attr(data-w px, 10px)"
+    assert canonicalize("height", "attr(data-h %)") == "attr(data-h %)"
+    assert canonicalize("color", "attr(ns|data-c type(*), red)") == "attr(ns|data-c type(*), red)"
+    assert canonicalize("border", "1px solid var(--c)") == "1px solid var(--c)"

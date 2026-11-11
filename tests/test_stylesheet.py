@@ -340,3 +340,26 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
     object.__setattr__(bad_brace, "raw_css", "10px}body{color:red")
     with pytest.raises(StixisValidationError):
         serialize_value("<any-value>", bad_brace)
+
+
+def test_at_rule_prelude_substitution_restrictions() -> None:
+    """Issue #98: `@property` and `@media` preludes reject disallowed or malformed substitution functions."""
+    with pytest.raises(StixisValidationError):
+        AtRule("@property", "var(--x)", descriptors={"syntax": "'*'", "inherits": "false"})
+    with pytest.raises(StixisValidationError):
+        AtRule(
+            "@property",
+            "env(safe-area-inset-top)",
+            descriptors={"syntax": "'*'", "inherits": "false"},
+        )
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", "(min-width: var(--bp))")
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", "(min-width: env())")
+    with pytest.raises(StixisValidationError):
+        AtRule("@supports", "(width: var())")
+
+    media_env = AtRule("@media", "(min-width: env(safe-area-inset-left))")
+    assert "@media (min-width: env(safe-area-inset-left))" in str(media_env)
+    supports_var = AtRule("@supports", "(width: var(--x))")
+    assert "@supports (width: var(--x))" in str(supports_var)

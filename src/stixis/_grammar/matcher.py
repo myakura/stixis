@@ -9,14 +9,17 @@ from typing import Any
 
 from stixis._generated.units import LOWER_TO_CANONICAL_UNIT, UNITS_BY_TYPE
 from stixis._grammar.calc import (
+    GLOBAL_SUBSTITUTION_FUNCTIONS,
+    MATH_FUNCTIONS,
     _consume_balanced_group,
     _contains_global_substitution,
-    _format_tokens_with_if_validation,
     _is_math_function_token,
+    _normalize_tokens_with_substitution_validation,
     _parse_calc_sum,
     _validate_and_format_if_function,
 )
 from stixis._grammar.color import (
+    RELATIVE_COLOR_CHANNEL_KEYWORDS,
     extract_relative_color_rest_node,
     narrow_predefined_color_param_channels,
 )
@@ -120,7 +123,9 @@ class _TokenMatcher:
         allow_css_wide_in_multiword_family: bool = False,
         calc_context_keywords: frozenset[str] = frozenset(),
         calc_context_functions: frozenset[str] = frozenset(),
+        allow_substitution: bool = False,
     ) -> None:
+        self.ws_tokens = list(tokens)
         self.tokens = [t for t in tokens if t.kind != "whitespace"]
         self.specs_lookup = specs_lookup
         self.options = options
@@ -129,6 +134,7 @@ class _TokenMatcher:
         self.allow_css_wide_in_multiword_family = allow_css_wide_in_multiword_family
         self.calc_context_keywords = calc_context_keywords
         self.calc_context_functions = calc_context_functions
+        self.allow_substitution = allow_substitution
         self._active_refs: set[tuple[str, bool, str, int]] = set()
 
     def match_root(self, node: ValueNode, *, allow_css_wide: bool = True) -> str | None:
@@ -138,12 +144,33 @@ class _TokenMatcher:
                 return kw_low
 
         if _contains_global_substitution(self.tokens):
+            if not self.allow_substitution:
+                # Allow standalone `<if()>` / `<var()>` / `<declaration-value>` / `<any-value>` targets to match directly via `match_node`
+                for pos, rendered in self.match_node(node, 0):
+                    if pos == len(self.tokens) and rendered != "":
+                        return rendered
+                return None
             validate_token_stream_safety(
                 self.raw_text or format_token_sequence(self.tokens, options=self.options),
                 forbid_top_level_bang=True,
                 forbid_top_level_semicolon=True,
             )
-            return _format_tokens_with_if_validation(self.tokens, options=self.options)
+            norm = _normalize_tokens_with_substitution_validation(
+                self.ws_tokens,
+                allowed_substitutions=GLOBAL_SUBSTITUTION_FUNCTIONS,
+            )
+            if norm is None:
+                return None
+            if not _validate_sibling_tokens_for_node(
+                norm,
+                node,
+                specs_lookup=self.specs_lookup,
+                options=self.options,
+                calc_context_keywords=self.calc_context_keywords,
+                calc_context_functions=self.calc_context_functions,
+            ):
+                return None
+            return format_token_sequence(norm, options=self.options)
 
         for pos, rendered in self.match_node(node, 0):
             if pos == len(self.tokens) and rendered != "":
@@ -259,6 +286,7 @@ class _TokenMatcher:
                 extra_functions=self.calc_context_functions,
                 specs_lookup=self.specs_lookup,
                 options=self.options,
+                allow_substitution=self.allow_substitution,
             )
             if calc_res is not None:
                 rendered_sum, next_pos = calc_res
@@ -311,7 +339,14 @@ class _TokenMatcher:
         fn_name = serialize_ident(tok.value.lower())
 
         if fn_name == "if" and node.name.lower() == "if":
-            rendered_if = _validate_and_format_if_function(inner_tokens, options=self.options)
+            allowed_subs = (
+                GLOBAL_SUBSTITUTION_FUNCTIONS if self.allow_substitution else frozenset({"if"})
+            )
+            rendered_if = _validate_and_format_if_function(
+                inner_tokens,
+                options=self.options,
+                allowed_substitutions=allowed_subs,
+            )
             if rendered_if is None:
                 return []
             return [(next_pos, rendered_if)]
@@ -331,6 +366,7 @@ class _TokenMatcher:
                 self.forbidden_custom_idents,
                 calc_context_keywords=self.calc_context_keywords,
                 calc_context_functions=self.calc_context_functions,
+                allow_substitution=self.allow_substitution,
             )
             channel_matcher = _TokenMatcher(
                 inner_tokens,
@@ -339,6 +375,7 @@ class _TokenMatcher:
                 self.forbidden_custom_idents,
                 calc_context_keywords=self.calc_context_keywords | channel_kws,
                 calc_context_functions=self.calc_context_functions,
+                allow_substitution=self.allow_substitution,
             )
             results: list[tuple[int, str]] = []
             seen: set[tuple[int, str]] = set()
@@ -359,6 +396,7 @@ class _TokenMatcher:
             self.forbidden_custom_idents,
             calc_context_keywords=self.calc_context_keywords,
             calc_context_functions=self.calc_context_functions,
+            allow_substitution=self.allow_substitution,
         )
         results = []
         for end_p, rendered in sub_matcher.match_node(node.arg, 0):
@@ -645,6 +683,7 @@ class _TokenMatcher:
                 extra_functions=self.calc_context_functions,
                 specs_lookup=self.specs_lookup,
                 options=self.options,
+                allow_substitution=self.allow_substitution,
             )
             if math_res is not None:
                 rendered_math, next_pos = math_res
@@ -1699,6 +1738,478 @@ def _serialize_primitive_python_value(
     return None
 
 
+_NUMERIC_AND_DIM_PRIMITIVES: frozenset[str] = frozenset(
+    {
+        "<number>",
+        "<integer>",
+        "<percentage>",
+        "<dimension>",
+        "<length>",
+        "<angle>",
+        "<time>",
+        "<frequency>",
+        "<resolution>",
+        "<flex>",
+        "<decibel>",
+        "<semitones>",
+        "<length-percentage>",
+        "<angle-percentage>",
+        "<time-percentage>",
+        "<frequency-percentage>",
+    }
+)
+
+
+def _collect_level_capabilities(
+    roots: Sequence[ValueNode],
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+) -> tuple[
+    bool,
+    set[str],
+    set[str],
+    set[str],
+    dict[str, list[FunctionNode]],
+    bool,
+    bool,
+    list[ValueNode],
+    list[ValueNode],
+]:
+    """Collect grammar terminals reachable at depth 0 of `roots` (without descending into `FunctionNode` or `(...)`/`[...]`)."""
+    any_token = False
+    keywords: set[str] = set()
+    delims: set[str] = set()
+    primitives: set[str] = set()
+    functions: dict[str, list[FunctionNode]] = {}
+    any_function = False
+    has_calc_sum = False
+    paren_nodes: list[ValueNode] = []
+    bracket_nodes: list[ValueNode] = []
+
+    visited_refs: set[tuple[str, bool, str]] = set()
+    stack: list[ValueNode] = list(roots)
+
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, KeywordNode):
+            if cur.name:
+                keywords.add(cur.name.lower())
+        elif isinstance(cur, DelimNode):
+            delims.add(cur.delim)
+        elif isinstance(cur, PrimitiveNode):
+            if cur.kind in ("<declaration-value>", "<any-value>"):
+                any_token = True
+                break
+            primitives.add(cur.kind)
+        elif isinstance(cur, FunctionNode):
+            if cur.name == "<function-token>":
+                any_function = True
+            else:
+                functions.setdefault(cur.name.lower(), []).append(cur)
+        elif isinstance(cur, NonEmptyGroupNode):
+            stack.append(cur.child)
+        elif isinstance(cur, MultiplierNode):
+            if cur.comma_separated:
+                delims.add(",")
+            stack.append(cur.child)
+        elif isinstance(cur, (ExclusiveOrNode, AllOfNode, AnyOrderNode)):
+            stack.extend(cur.items)
+        elif isinstance(cur, JuxtaposeNode):
+            idx = 0
+            items = cur.items
+            while idx < len(items):
+                item = items[idx]
+                if isinstance(item, DelimNode) and item.delim in ("(", "["):
+                    open_d = item.delim
+                    close_d = ")" if open_d == "(" else "]"
+                    depth = 1
+                    end_idx = idx + 1
+                    while end_idx < len(items) and depth > 0:
+                        sub_it = items[end_idx]
+                        if isinstance(sub_it, DelimNode):
+                            if sub_it.delim == open_d:
+                                depth += 1
+                            elif sub_it.delim == close_d:
+                                depth -= 1
+                                if depth == 0:
+                                    break
+                        end_idx += 1
+                    if depth == 0 and end_idx < len(items):
+                        delims.add(open_d)
+                        delims.add(close_d)
+                        inner_slice = items[idx + 1 : end_idx]
+                        if inner_slice:
+                            grouped_node: ValueNode = (
+                                inner_slice[0]
+                                if len(inner_slice) == 1
+                                else JuxtaposeNode(inner_slice)
+                            )
+                            if open_d == "(":
+                                paren_nodes.append(grouped_node)
+                            else:
+                                bracket_nodes.append(grouped_node)
+                        idx = end_idx + 1
+                        continue
+                stack.append(item)
+                idx += 1
+        elif isinstance(cur, RefNode):
+            if not cur.is_property and cur.name == "<calc-sum>":
+                has_calc_sum = True
+                primitives.add("<number>")
+                primitives.add("<percentage>")
+                primitives.add("<dimension>")
+                continue
+            if cur.is_property and cur.name == "font-style":
+                keywords.update(("normal", "italic", "left", "right", "oblique"))
+                primitives.add("<angle>")
+                continue
+            ref_key = (cur.name, cur.is_property, cur.type_param)
+            if ref_key in visited_refs:
+                continue
+            visited_refs.add(ref_key)
+            if not cur.is_property and cur.name == "<boolean-expr>" and cur.type_param:
+                resolved = compile_boolean_expr(cur.type_param)
+            else:
+                resolved = specs_lookup(cur.name, cur.is_property)
+            if resolved is not None:
+                stack.append(resolved)
+
+    return (
+        any_token,
+        keywords,
+        delims,
+        primitives,
+        functions,
+        any_function,
+        has_calc_sum,
+        paren_nodes,
+        bracket_nodes,
+    )
+
+
+def _validate_sibling_tokens_for_node(
+    tokens: Sequence[CssToken],
+    root_node: ValueNode,
+    *,
+    specs_lookup: Callable[[str, bool], ValueNode | None],
+    options: SerializationOptions,
+    calc_context_keywords: frozenset[str] = frozenset(),
+    calc_context_functions: frozenset[str] = frozenset(),
+) -> bool:
+    """Verify every non-substitution token in `tokens` is producible by `root_node`'s grammar."""
+    worklist: list[tuple[Sequence[CssToken], list[ValueNode], frozenset[str], frozenset[str]]] = [
+        (tokens, [root_node], calc_context_keywords, calc_context_functions)
+    ]
+
+    while worklist:
+        toks, nodes, calc_kws, calc_fns = worklist.pop()
+        if not toks:
+            continue
+        (
+            any_token,
+            keywords,
+            delims,
+            primitives,
+            functions,
+            any_function,
+            has_calc_sum,
+            paren_nodes,
+            bracket_nodes,
+        ) = _collect_level_capabilities(nodes, specs_lookup)
+        if any_token:
+            continue
+
+        if "<feature-tag-value>" in primitives:
+            keywords.update(("on", "off"))
+        if "<font-tech>" in primitives:
+            keywords.update(FONT_TECH_KEYWORDS)
+        if "<font-src-list>" in primitives:
+            delims.add(",")
+
+        allows_math = has_calc_sum or bool(primitives & _NUMERIC_AND_DIM_PRIMITIVES)
+        allows_any_dimension = "<dimension>" in primitives
+        allowed_lower_units: set[str] = set()
+        if not allows_any_dimension:
+            for p_kind in primitives:
+                base_k = (
+                    f"<{p_kind[1:].split('-')[0]}>"
+                    if p_kind
+                    in (
+                        "<length-percentage>",
+                        "<angle-percentage>",
+                        "<time-percentage>",
+                        "<frequency-percentage>",
+                    )
+                    else p_kind
+                )
+                lower_map = LOWER_TO_CANONICAL_UNIT.get(base_k)
+                if lower_map:
+                    allowed_lower_units.update(lower_map.keys())
+
+        allows_unitless_zero = bool(
+            primitives & {"<zero>", "<integer>", "<number>", "<length>", "<length-percentage>"}
+        )
+        allows_integer = bool(primitives & {"<integer>", "<number>", "<feature-tag-value>"})
+        allows_float = "<number>" in primitives
+        allows_percentage = bool(
+            primitives
+            & {
+                "<percentage>",
+                "<length-percentage>",
+                "<angle-percentage>",
+                "<time-percentage>",
+                "<frequency-percentage>",
+            }
+        )
+        allows_string = bool(
+            primitives
+            & {
+                "<string>",
+                "<string-token>",
+                "<family-name>",
+                "<font-family-name>",
+                "<opentype-tag>",
+                "<feature-tag-value>",
+                "<font-format>",
+            }
+        )
+        allows_url = bool(primitives & {"<url>", "<url-token>", "<font-src>", "<font-src-list>"})
+        allows_font_src = bool(primitives & {"<font-src>", "<font-src-list>"})
+        allows_hex_color = "<hex-color>" in primitives
+        allows_any_ident = bool(primitives & {"<ident>", "<ident-token>"})
+        allows_custom_ident = bool(
+            primitives & {"<custom-ident>", "<family-name>", "<font-family-name>", "<font-format>"}
+        )
+        allows_dashed_ident = bool(primitives & {"<dashed-ident>", "<custom-property-name>"})
+        allows_generic_family = bool(primitives & {"<generic-family>", "<generic-font-family>"})
+        allows_urange = bool(primitives & {"<urange>", "<unicode-range-token>"})
+
+        pos = 0
+        n_toks = len(toks)
+        while pos < n_toks:
+            tok = toks[pos]
+            if tok.kind == "function":
+                fn_low = tok.value.lower()
+                grouped = _consume_balanced_group(toks, pos + 1, ")")
+                if grouped is None:
+                    return False
+                inner_toks, next_pos = grouped
+
+                if fn_low in GLOBAL_SUBSTITUTION_FUNCTIONS:
+                    pos = next_pos
+                    continue
+
+                if fn_low in MATH_FUNCTIONS and allows_math:
+                    math_res = _is_math_function_token(
+                        toks,
+                        pos,
+                        extra_keywords=calc_kws,
+                        extra_functions=calc_fns,
+                        specs_lookup=specs_lookup,
+                        options=options,
+                        allow_substitution=True,
+                    )
+                    if math_res is not None and math_res[1] == next_pos:
+                        pos = next_pos
+                        continue
+                    if fn_low not in functions and not any_function:
+                        return False
+
+                cand_fn_nodes = list(functions.get(fn_low, ()))
+                if fn_low in calc_fns and allows_math:
+                    extra_fn_node = specs_lookup(f"<{fn_low}()>", False)
+                    if isinstance(extra_fn_node, FunctionNode):
+                        cand_fn_nodes.append(extra_fn_node)
+
+                if cand_fn_nodes:
+                    if not _contains_global_substitution(inner_toks):
+                        sub_m = _TokenMatcher(
+                            toks[pos:next_pos],
+                            specs_lookup,
+                            options,
+                            calc_context_keywords=calc_kws,
+                            calc_context_functions=calc_fns,
+                            allow_substitution=False,
+                        )
+                        matched_ok = any(
+                            end_p == next_pos - pos
+                            for fn_node in cand_fn_nodes
+                            for end_p, _ in sub_m.match_node(fn_node, 0)
+                        )
+                        if not matched_ok:
+                            return False
+                    else:
+                        arg_nodes = [
+                            fn_node.arg for fn_node in cand_fn_nodes if fn_node.arg is not None
+                        ]
+                        if not arg_nodes:
+                            # Zero-argument function can only accept substitution tokens that may expand to empty
+                            if any(
+                                t.kind != "function"
+                                or t.value.lower() not in GLOBAL_SUBSTITUTION_FUNCTIONS
+                                for t in inner_toks
+                            ):
+                                return False
+                        else:
+                            next_kws = calc_kws
+                            if fn_low in RELATIVE_COLOR_CHANNEL_KEYWORDS and inner_toks:
+                                first_in = inner_toks[0]
+                                if (
+                                    first_in.kind == "ident" and first_in.value.lower() == "from"
+                                ) or (
+                                    first_in.kind == "function"
+                                    and first_in.value.lower() in GLOBAL_SUBSTITUTION_FUNCTIONS
+                                ):
+                                    next_kws = calc_kws | RELATIVE_COLOR_CHANNEL_KEYWORDS[fn_low]
+                            next_fns = calc_fns
+                            for a_node in arg_nodes:
+                                next_fns = next_fns | _collect_grammar_calc_functions(
+                                    a_node, specs_lookup
+                                )
+                            worklist.append((inner_toks, arg_nodes, next_kws, next_fns))
+                    pos = next_pos
+                    continue
+
+                if fn_low in ("url", "src") and allows_url:
+                    if _contains_global_substitution(inner_toks) or (
+                        len(inner_toks) == 1 and inner_toks[0].kind == "string"
+                    ):
+                        pos = next_pos
+                        continue
+                    return False
+
+                if fn_low == "generic" and allows_generic_family:
+                    if _contains_global_substitution(inner_toks) or (
+                        len(inner_toks) == 1
+                        and inner_toks[0].kind == "ident"
+                        and inner_toks[0].value.lower() in GENERIC_SCRIPT_KEYWORDS
+                    ):
+                        pos = next_pos
+                        continue
+                    return False
+
+                if allows_font_src and fn_low in ("local", "format", "tech"):
+                    pos = next_pos
+                    continue
+
+                if any_function:
+                    pos = next_pos
+                    continue
+
+                return False
+
+            if tok.kind == "(":
+                grouped = _consume_balanced_group(toks, pos + 1, ")")
+                if grouped is None or ("(" not in delims and not paren_nodes):
+                    return False
+                inner_toks, next_pos = grouped
+                if paren_nodes:
+                    worklist.append((inner_toks, paren_nodes, calc_kws, calc_fns))
+                pos = next_pos
+                continue
+
+            if tok.kind == "[":
+                grouped = _consume_balanced_group(toks, pos + 1, "]")
+                if grouped is None or ("[" not in delims and not bracket_nodes):
+                    return False
+                inner_toks, next_pos = grouped
+                if bracket_nodes:
+                    worklist.append((inner_toks, bracket_nodes, calc_kws, calc_fns))
+                pos = next_pos
+                continue
+
+            if tok.kind == "ident":
+                low = tok.value.lower()
+                ok_ident = (
+                    low in keywords
+                    or (allows_float and low in calc_kws)
+                    or allows_any_ident
+                    or (allows_custom_ident and low not in RESERVED_CUSTOM_IDENT_KEYWORDS)
+                    or (allows_dashed_ident and tok.value.startswith("--") and len(tok.value) >= 2)
+                    or (
+                        allows_generic_family
+                        and (
+                            low in GENERIC_FAMILY_KEYWORDS
+                            or (low.startswith("-webkit-") and low[8:] in GENERIC_FAMILY_KEYWORDS)
+                        )
+                    )
+                    or (allows_urange and low == "u")
+                )
+                if not ok_ident:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "number":
+                ok_num = (
+                    (tok.num == 0 and allows_unitless_zero)
+                    or (tok.is_integer and allows_integer)
+                    or allows_float
+                    or allows_urange
+                )
+                if not ok_num:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "percentage":
+                if not allows_percentage:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "dimension":
+                if not (
+                    allows_any_dimension or tok.unit.lower() in allowed_lower_units or allows_urange
+                ):
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "string":
+                if not allows_string:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "url":
+                if not allows_url:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "hash":
+                if not (
+                    allows_hex_color
+                    and len(tok.value) in (3, 4, 6, 8)
+                    and all(c in "0123456789abcdefABCDEF" for c in tok.value)
+                ):
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "comma":
+                if "," not in delims:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "colon":
+                if ":" not in delims:
+                    return False
+                pos += 1
+                continue
+
+            if tok.kind == "delim":
+                if tok.value not in delims and not (allows_urange and tok.value in ("+", "?")):
+                    return False
+                pos += 1
+                continue
+
+            return False
+
+    return True
+
+
 def evaluate_canonicalize(
     target: str,
     syntax: str,
@@ -1732,8 +2243,18 @@ def evaluate_canonicalize(
     if not non_ws and is_custom_prop:
         return ""
 
+    is_prop = _is_property_target(target, at_rule)
+    if not is_prop and at_rule == "@property" and _contains_global_substitution(non_ws):
+        raise StixisValidationError(target, syntax, css_text)
+
     if target == "font-style":
-        matcher = _TokenMatcher(non_ws, specs_lookup, options, raw_text=css_text)
+        matcher = _TokenMatcher(
+            tokens,
+            specs_lookup,
+            options,
+            raw_text=css_text,
+            allow_substitution=is_prop,
+        )
         if (
             len(non_ws) == 1
             and non_ws[0].kind == "ident"
@@ -1742,8 +2263,8 @@ def evaluate_canonicalize(
         ):
             return non_ws[0].value.lower()
         try:
-            if _contains_global_substitution(non_ws) and at_rule is None:
-                rendered_sub = _format_tokens_with_if_validation(non_ws, options=options)
+            if _contains_global_substitution(non_ws) and is_prop:
+                rendered_sub = matcher.match_root(node, allow_css_wide=True)
                 if rendered_sub is None:
                     raise StixisValidationError(target, syntax, css_text)
                 return rendered_sub
@@ -1758,6 +2279,18 @@ def evaluate_canonicalize(
         raise StixisValidationError(target, syntax, css_text)
 
     if target == "font-language-override":
+        if is_prop and _contains_global_substitution(non_ws):
+            matcher = _TokenMatcher(
+                tokens,
+                specs_lookup,
+                options,
+                raw_text=css_text,
+                allow_substitution=True,
+            )
+            rendered_flo = matcher.match_root(node, allow_css_wide=True)
+            if rendered_flo is None:
+                raise StixisValidationError(target, syntax, css_text)
+            return rendered_flo
         if len(non_ws) == 1 and non_ws[0].kind == "ident":
             kw_low = non_ws[0].value.lower()
             if kw_low in CSS_WIDE_KEYWORDS and at_rule is None:
@@ -1774,12 +2307,13 @@ def evaluate_canonicalize(
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
     calc_funcs = _collect_grammar_calc_functions(node, specs_lookup)
     matcher = _TokenMatcher(
-        non_ws,
+        tokens,
         specs_lookup,
         options,
         forbidden_custom_idents=forbidden_idents,
         raw_text=css_text,
         calc_context_functions=calc_funcs,
+        allow_substitution=is_prop,
     )
     if (
         at_rule is not None
@@ -1791,7 +2325,7 @@ def evaluate_canonicalize(
         raise StixisValidationError(target, syntax, css_text)
 
     try:
-        res = matcher.match_root(node, allow_css_wide=_is_property_target(target, at_rule))
+        res = matcher.match_root(node, allow_css_wide=is_prop)
     except RecursionError as exc:
         raise StixisValidationError(
             target, syntax, css_text, "Maximum nesting depth exceeded"
