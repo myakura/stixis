@@ -438,3 +438,20 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
         '  --ovr: url("https://custom.example/override.woff2");\n'
         "}"
     )
+
+    # Arbitrary mutable objects defining `_format_css` and `__str__` are snapshotted at construction (`AGENTS.md` frozen-AST invariant).
+    class MutableHook:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def _format_css(self, options: SerializationOptions) -> str:
+            return self.text
+
+        def __str__(self) -> str:
+            return self.text
+
+    hook = MutableHook("a")
+    frozen_rule = StyleRule(t"{hook}", {"color": "red"})
+    hook.text = "b"
+    assert str(frozen_rule) == "a {\n  color: red;\n}"
+    assert frozen_rule.format(options=cleome) == "a {\n  color: red;\n}"
