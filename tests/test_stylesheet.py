@@ -345,20 +345,9 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
 def test_at_rule_block_kinds_and_query_features() -> None:
     from stixis import RawDeclaration, canonicalize
 
-    # Rule-list-only at-rules reject declarations, query features, custom properties, and RawDeclaration
-    for at_name, prelude, bad_descs in (
-        ("@keyframes", "spin", {"color": "red"}),
-        ("@media", "screen", {"hover": "hover"}),
-        ("@media", "screen", {"color": "red"}),
-        ("@media", "screen", {"--x": "1"}),
-        ("@container", "(min-width: 400px)", {"width": Px(500)}),
-        ("@supports", "(display: grid)", {"display": "grid"}),
-        ("@layer", "utilities", {"color": "red"}),
-        ("@starting-style", None, {"opacity": 0}),
-    ):
-        with pytest.raises(StixisValidationError):
-            AtRule(at_name, prelude, descriptors=bad_descs)
-
+    # `@keyframes` never accepts declarations; `@media` query features fail eagerly at construction
+    with pytest.raises(StixisValidationError):
+        AtRule("@keyframes", "spin", descriptors={"color": "red"})
     with pytest.raises(StixisValidationError):
         AtRule("@keyframes", "spin", descriptors=[RawDeclaration("color", "red")])
     with pytest.raises(StixisValidationError):
@@ -368,6 +357,76 @@ def test_at_rule_block_kinds_and_query_features() -> None:
             descriptors={"color": "red"},
             options=SerializationOptions(allow_unknown_properties=True),
         )
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", "screen", descriptors={"hover": "hover"})
+    with pytest.raises(StixisValidationError):
+        AtRule("@supports", "(display: grid)", descriptors={"color": "not-a-color"})
+
+    # Conditional group at-rules reject bare declarations at stylesheet top level (or inside @keyframes),
+    # while accepting CSS style declarations when nested inside `StyleRule` or `@scope` (CSS Nesting 1 §2.2).
+    for at_name, prelude, style_descs in (
+        ("@media", "screen", {"color": "red"}),
+        ("@media", "screen", {"--x": "1"}),
+        ("@container", "(min-width: 400px)", {"width": Px(500)}),
+        ("@supports", "(display: grid)", {"display": "grid"}),
+        ("@layer", "utilities", {"color": "red"}),
+        ("@starting-style", None, {"opacity": 0}),
+    ):
+        nested_cond = AtRule(at_name, prelude, descriptors=style_descs)
+        with pytest.raises(StixisValidationError):
+            StyleSheet([nested_cond])
+        with pytest.raises(StixisValidationError):
+            str(nested_cond)
+        with pytest.raises(StixisValidationError):
+            dumps(nested_cond)
+        with pytest.raises(StixisValidationError):
+            AtRule("@keyframes", "spin", rules=[nested_cond])
+        assert hash(StyleRule("p", rules=[nested_cond])) == hash(
+            StyleRule("p", rules=[nested_cond])
+        )
+
+    # Top-level nested conditional chain without a style ancestor is still rejected
+    with pytest.raises(StixisValidationError):
+        StyleSheet(
+            [
+                AtRule(
+                    "@layer",
+                    "utilities",
+                    rules=[AtRule("@media", "screen", descriptors={"color": "red"})],
+                )
+            ]
+        )
+
+    # Nested conditional rules inside `StyleRule` and `@scope` serialize bare declarations and honor `options`
+    nested_supports = StyleRule(
+        "p",
+        {"opacity": 1},
+        rules=[
+            AtRule("@supports", "(display: grid)", descriptors={"font_family": "Inter"}),
+            AtRule("@starting-style", descriptors={"opacity": 0}),
+            AtRule(
+                "@media",
+                "screen",
+                rules=[AtRule("@supports", "(color: green)", descriptors={"color": "green"})],
+            ),
+        ],
+    )
+    assert (
+        nested_supports.format(options=SerializationOptions.cleome())
+        == "p {\n  opacity: 1;\n  @supports (display: grid) {\n    font-family: 'Inter';\n  }\n  @starting-style {\n    opacity: 0;\n  }\n  @media screen {\n    @supports (color: green) {\n      color: green;\n    }\n  }\n}"
+    )
+    assert (
+        str(
+            AtRule(
+                "@scope",
+                "(.card)",
+                rules=[
+                    AtRule("@media", "(min-width: 50px)", descriptors={"background_color": "green"})
+                ],
+            )
+        )
+        == "@scope (.card) {\n  @media (min-width: 50px) {\n    background-color: green;\n  }\n}"
+    )
 
     # Statement-only at-rules reject descriptors, child rules, and empty preludes
     for stmt_at, stmt_pre in (
@@ -431,6 +490,27 @@ def test_at_rule_block_kinds_and_query_features() -> None:
     with pytest.raises(StixisValidationError):
         AtRule("@page", rules=[StyleRule("p", {"color": "red"})])
 
+    # `@font-feature-values` sub-rules preserve case and underscores in `<font-feature-value-name>` (`<ident>`)
+    ffv = AtRule(
+        "@font-feature-values",
+        "Inter",
+        rules=[
+            AtRule(
+                "@styleset",
+                descriptors={"Fancy_Set": (1, 2), "A": 2, r"\61": 4, r"complex\20 blah": 3},
+            ),
+            AtRule("@character-variant", descriptors={"cv_Alt": (3, 1)}),
+        ],
+    )
+    assert (
+        str(ffv)
+        == '@font-feature-values "Inter" {\n  @styleset {\n    Fancy_Set: 1 2;\n    A: 2;\n    a: 4;\n    complex\\ blah: 3;\n  }\n  @character-variant {\n    cv_Alt: 3 1;\n  }\n}'
+    )
+    assert canonicalize("font-variant-alternates", "styleset(Fancy_Set)") == "styleset(Fancy_Set)"
+    for bad_feat_name in ("", "123blah", ":blah", "two words", "a/*b*/c"):
+        with pytest.raises(StixisValidationError):
+            AtRule("@styleset", descriptors={bad_feat_name: 1})
+
     # Pure descriptor-block at-rules reject nested StyleRules and custom properties (except @function)
     with pytest.raises(StixisValidationError):
         AtRule(
@@ -447,11 +527,14 @@ def test_at_rule_block_kinds_and_query_features() -> None:
         "@function",
         "--double(--v)",
         descriptors={"--res": "calc(var(--v) * 2)", "result": "var(--res)"},
+        rules=[AtRule("@supports", "(width: 100px)", descriptors={"result": "calc(var(--v) * 4)"})],
     )
     assert (
         str(fn_rule)
-        == "@function --double(--v) {\n  --res: calc(var(--v) * 2);\n  result: var(--res);\n}"
+        == "@function --double(--v) {\n  --res: calc(var(--v) * 2);\n  result: var(--res);\n  @supports (width: 100px) {\n    result: calc(var(--v) * 4);\n  }\n}"
     )
+    with pytest.raises(StixisValidationError):
+        StyleRule("p", rules=[AtRule("@supports", "(width: 100px)", descriptors={"result": "1px"})])
 
     # Target resolution and serialize_declarations exclude @media/@container query features
     with pytest.raises(StixisValidationError):
@@ -465,6 +548,7 @@ def test_at_rule_block_kinds_and_query_features() -> None:
         == "size: a4; margin: 10px;"
     )
     assert serialize_declarations({"top": Px(0)}, at_rule="@position-try") == "top: 0px;"
+    assert serialize_declarations({"Fancy_Set": 1}, at_rule="@styleset") == "Fancy_Set: 1;"
 
 
 def test_serialization_options_propagate_to_raw_declaration_custom_prop_url_and_template_selector() -> (

@@ -314,13 +314,18 @@ _STATEMENT_ONLY_ATRULES: frozenset[str] = frozenset(
     }
 )
 
-_RULE_LIST_ONLY_ATRULES: frozenset[str] = frozenset(
+_NO_DECLARATION_ATRULES: frozenset[str] = frozenset(
     {
         "@-webkit-keyframes",
+        "@keyframes",
+    }
+)
+
+_CONDITIONAL_GROUP_ATRULES: frozenset[str] = frozenset(
+    {
         "@container",
         "@document",
         "@else",
-        "@keyframes",
         "@layer",
         "@media",
         "@navigation",
@@ -328,6 +333,23 @@ _RULE_LIST_ONLY_ATRULES: frozenset[str] = frozenset(
         "@supports",
         "@supports-condition",
         "@when",
+    }
+)
+
+_FUNCTION_CONDITIONAL_ATRULES: frozenset[str] = frozenset(
+    {
+        "@container",
+        "@media",
+        "@supports",
+        "@supports-condition",
+    }
+)
+
+_STYLE_CONTEXT_ATRULES: frozenset[str] = frozenset(
+    {
+        "@mixin",
+        "@private",
+        "@scope",
     }
 )
 
@@ -357,12 +379,10 @@ _STYLE_DECLARATION_ATRULES: frozenset[str] = (
         {
             "@apply",
             "@contents",
-            "@mixin",
             "@position-try",
-            "@private",
-            "@scope",
         }
     )
+    | _STYLE_CONTEXT_ATRULES
     | _PAGE_MARGIN_ATRULES
 )
 
@@ -385,6 +405,7 @@ _DECLARATION_ONLY_BLOCK_ATRULES: frozenset[str] = (
             "@counter-style",
             "@font-face",
             "@font-palette-values",
+            "@location",
             "@position-try",
             "@property",
             "@view-transition",
@@ -397,6 +418,42 @@ _DECLARATION_ONLY_BLOCK_ATRULES: frozenset[str] = (
 _STATEMENT_CAPABLE_KNOWN_ATRULES: frozenset[str] = _STATEMENT_ONLY_ATRULES | frozenset(
     {"@apply", "@contents", "@layer"}
 )
+
+
+def _normalize_feature_value_name(key: str, *, at_rule: str) -> str:
+    """Validate and serialize a case-sensitive `<font-feature-value-name>` (`<ident>`) without property-name normalization."""
+    if not isinstance(key, str) or not key.strip():
+        raise StixisValidationError(
+            at_rule,
+            "<font-feature-value-name>",
+            key,
+            "Empty font feature value name",
+        )
+    stripped = key.strip()
+    if "/*" in stripped or "*/" in stripped:
+        raise StixisValidationError(
+            at_rule,
+            "<font-feature-value-name>",
+            key,
+            f"Invalid font feature value name: {key!r}",
+        )
+    try:
+        toks = tokenize_css(stripped, preserve_whitespace=True)
+    except StixisSyntaxError as exc:
+        raise StixisValidationError(
+            at_rule,
+            "<font-feature-value-name>",
+            key,
+            f"Invalid font feature value name: {key!r}",
+        ) from exc
+    if len(toks) != 1 or toks[0].kind != "ident" or not toks[0].value:
+        raise StixisValidationError(
+            at_rule,
+            "<font-feature-value-name>",
+            key,
+            f"Invalid font feature value name: {key!r}",
+        )
+    return serialize_ident(toks[0].value)
 
 
 def _normalize_at_rule_name(raw_at_rule: str) -> str:
@@ -436,7 +493,11 @@ def _validate_and_normalize_declarations(
     else:
         raise StixisValidationError("declarations", "Mapping[str, Any]", declarations)
 
-    if norm_at in _STATEMENT_ONLY_ATRULES or norm_at in _RULE_LIST_ONLY_ATRULES:
+    if (
+        norm_at in _STATEMENT_ONLY_ATRULES
+        or norm_at in _NO_DECLARATION_ATRULES
+        or norm_at in _CONDITIONAL_GROUP_ATRULES
+    ):
         raise StixisValidationError(
             norm_at,
             "no declarations",
@@ -464,6 +525,22 @@ def _validate_and_normalize_declarations(
         raw_key, val = item
         if val is None:
             continue
+
+        if effective_at in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES:
+            feat_name = _normalize_feature_value_name(raw_key, at_rule=effective_at)
+            sub_syn = _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES[effective_at]
+            val_str = evaluate_serialize_value(
+                f"{effective_at}/{feat_name}",
+                sub_syn,
+                compile_value_syntax(sub_syn),
+                val,
+                specs_lookup=lookup_value_node,
+                at_rule=effective_at,
+                options=options,
+            )
+            normalized_pairs.append((feat_name, val_str))
+            continue
+
         prop = normalize_identifier_key(raw_key)
 
         if prop.startswith("--") and len(prop) >= 2:
@@ -484,20 +561,6 @@ def _validate_and_normalize_declarations(
                 compile_value_syntax("<declaration-value>"),
                 val,
                 specs_lookup=lookup_value_node,
-                options=options,
-            )
-            normalized_pairs.append((prop, val_str))
-            continue
-
-        if effective_at in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES:
-            sub_syn = _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES[effective_at]
-            val_str = evaluate_serialize_value(
-                f"{effective_at}/{prop}",
-                sub_syn,
-                compile_value_syntax(sub_syn),
-                val,
-                specs_lookup=lookup_value_node,
-                at_rule=effective_at,
                 options=options,
             )
             normalized_pairs.append((prop, val_str))
@@ -745,6 +808,47 @@ def _needs_rebuild_for_options(
     return bool(built_opts.allow_unknown_properties and not target_opts.allow_unknown_properties)
 
 
+def _validate_conditional_group_declarations(
+    at_name: str,
+    descriptors: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration],
+    *,
+    options: SerializationOptions,
+) -> tuple[tuple[tuple[str, str], ...], frozenset[str], tuple[tuple[str, str], ...] | None]:
+    style_decls: tuple[tuple[str, str], ...] | None = None
+    style_err: StixisValidationError | None = None
+    try:
+        style_decls = _validate_and_normalize_declarations(
+            descriptors,
+            at_rule=None,
+            options=options,
+        )
+    except StixisValidationError as exc:
+        style_err = exc
+
+    fn_decls: tuple[tuple[str, str], ...] | None = None
+    if at_name in _FUNCTION_CONDITIONAL_ATRULES:
+        try:
+            fn_decls = _validate_and_normalize_declarations(
+                descriptors,
+                at_rule="@function",
+                options=options,
+            )
+        except StixisValidationError:
+            fn_decls = None
+
+    contexts: set[str] = set()
+    if style_decls is not None:
+        contexts.add("style")
+    if fn_decls is not None:
+        contexts.add("function")
+
+    primary_decls = style_decls if style_decls is not None else fn_decls
+    if not contexts or primary_decls is None:
+        assert style_err is not None
+        raise style_err
+    return primary_decls, frozenset(contexts), fn_decls
+
+
 @dataclass(frozen=True, slots=True)
 class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
@@ -765,6 +869,18 @@ class StyleRule:
         sel_s = _validate_selector(self.selector, options=opts)
         decls = _validate_and_normalize_declarations(self.declarations, at_rule=None, options=opts)
         rules_t = _validate_child_rules(self.rules, options=opts)
+        for child in rules_t:
+            if (
+                isinstance(child, AtRule)
+                and child._allowed_decl_contexts is not None
+                and "style" not in child._allowed_decl_contexts
+            ):
+                raise StixisValidationError(
+                    "StyleRule",
+                    "style declarations",
+                    child,
+                    f"{child._at_name} declarations are not valid inside a style rule",
+                )
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
             if self.comment is not None
@@ -814,7 +930,7 @@ class StyleRule:
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
+                _format_rule_node(c, minify=True, indent=0, options=eff_opts, decl_context="style")
                 for c in self._rules_tuple
             )
             sep = ";" if (decl_part and child_part) else ""
@@ -832,7 +948,13 @@ class StyleRule:
 
         for child in self._rules_tuple:
             body_items.append(
-                _format_rule_node(child, minify=False, indent=indent + 1, options=eff_opts)
+                _format_rule_node(
+                    child,
+                    minify=False,
+                    indent=indent + 1,
+                    options=eff_opts,
+                    decl_context="style",
+                )
             )
 
         if not body_items:
@@ -862,6 +984,8 @@ class AtRule:
     _at_name: str = field(init=False, repr=False)
     _prelude_str: str = field(init=False, repr=False)
     _decl_pairs: tuple[tuple[str, str], ...] = field(init=False, repr=False)
+    _fn_decl_pairs: tuple[tuple[str, str], ...] | None = field(init=False, repr=False)
+    _allowed_decl_contexts: frozenset[str] | None = field(init=False, repr=False)
     _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _comment_str: str | None = field(init=False, repr=False)
 
@@ -908,7 +1032,8 @@ class AtRule:
                 or at_name in ATRULE_PRELUDE_SYNTAXES
                 or at_name in _PAGE_MARGIN_ATRULES
                 or at_name in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES
-                or at_name in _RULE_LIST_ONLY_ATRULES
+                or at_name in _NO_DECLARATION_ATRULES
+                or at_name in _CONDITIONAL_GROUP_ATRULES
             )
             if is_known and at_name not in _STATEMENT_CAPABLE_KNOWN_ATRULES:
                 raise StixisValidationError(
@@ -946,11 +1071,58 @@ class AtRule:
                         "@page only accepts margin at-rules in rules",
                     )
 
-        decls = _validate_and_normalize_declarations(
-            self.descriptors,
-            at_rule=at_name,
-            options=opts,
-        )
+        allowed_contexts: frozenset[str] | None = None
+        fn_decls: tuple[tuple[str, str], ...] | None = None
+        if at_name in _CONDITIONAL_GROUP_ATRULES:
+            if self.descriptors is not None:
+                decls, allowed_contexts, fn_decls = _validate_conditional_group_declarations(
+                    at_name,
+                    self.descriptors,
+                    options=opts,
+                )
+            else:
+                decls = ()
+            for child in rules_t:
+                if isinstance(child, AtRule) and child._allowed_decl_contexts is not None:
+                    child_ctx = (
+                        child._allowed_decl_contexts
+                        if at_name in _FUNCTION_CONDITIONAL_ATRULES
+                        else (child._allowed_decl_contexts & frozenset({"style"}))
+                    )
+                    allowed_contexts = (
+                        child_ctx if allowed_contexts is None else (allowed_contexts & child_ctx)
+                    )
+                    if not allowed_contexts:
+                        raise StixisValidationError(
+                            at_name,
+                            "compatible declaration context",
+                            child,
+                            f"{child._at_name} declarations are not valid inside {at_name}",
+                        )
+        else:
+            parent_ctx = (
+                "style"
+                if at_name in _STYLE_CONTEXT_ATRULES
+                else ("function" if at_name == "@function" else None)
+            )
+            for child in rules_t:
+                if (
+                    isinstance(child, AtRule)
+                    and child._allowed_decl_contexts is not None
+                    and (parent_ctx is None or parent_ctx not in child._allowed_decl_contexts)
+                ):
+                    raise StixisValidationError(
+                        at_name,
+                        "rule-list block",
+                        child,
+                        f"{child._at_name} with bare declarations is not valid inside {at_name}",
+                    )
+            decls = _validate_and_normalize_declarations(
+                self.descriptors,
+                at_rule=at_name,
+                options=opts,
+            )
+
         comm_s = (
             _validate_and_render_comment(self.comment, options=opts)
             if self.comment is not None
@@ -969,6 +1141,8 @@ class AtRule:
         object.__setattr__(self, "_at_name", at_name)
         object.__setattr__(self, "_prelude_str", prelude_s)
         object.__setattr__(self, "_decl_pairs", decls)
+        object.__setattr__(self, "_fn_decl_pairs", fn_decls)
+        object.__setattr__(self, "_allowed_decl_contexts", allowed_contexts)
         object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_comment_str", comm_s)
 
@@ -979,72 +1153,130 @@ class AtRule:
         indent: int = 0,
         options: SerializationOptions | None = None,
     ) -> str:
-        eff_opts = options if options is not None else self.options
-        if options is not None and _needs_rebuild_for_options(self._effective_options, options):
-            rebuilt = AtRule(
-                self.name,
-                self.prelude,
-                descriptors=self.descriptors,
-                rules=self.rules,
-                comment=self.comment,
-                statement=self.statement,
-                options=options,
-            )
-            return rebuilt.format(minify=minify, indent=indent, options=options)
-
-        pad = "" if minify else ("  " * indent)
-        inner_pad = "" if minify else ("  " * (indent + 1))
-        head = f"{self._at_name} {self._prelude_str}" if self._prelude_str else self._at_name
-
-        is_stmt = (
-            self.statement
-            or self._at_name in _STATEMENT_ONLY_ATRULES
-            or (
-                not self._decl_pairs
-                and not self._rules_tuple
-                and self.descriptors is None
-                and (
-                    (self._at_name in ("@layer", "@apply") and bool(self._prelude_str))
-                    or (self._at_name == "@contents" and not self._prelude_str)
-                )
-            )
+        return _format_at_rule(
+            self,
+            minify=minify,
+            indent=indent,
+            options=options,
+            decl_context=None,
         )
-        if is_stmt:
-            if self._comment_str and not minify:
-                return f"{pad}{self._comment_str}\n{pad}{head};"
-            return f"{pad}{head};"
-
-        lines: list[str] = []
-        if self._comment_str and not minify:
-            lines.append(f"{pad}{self._comment_str}")
-
-        if minify:
-            decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
-            child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
-                for c in self._rules_tuple
-            )
-            sep = ";" if (decl_part and child_part) else ""
-            return f"{head}{{{decl_part}{sep}{child_part}}}"
-
-        body_items: list[str] = []
-        for k, v in self._decl_pairs:
-            body_items.append(f"{inner_pad}{k}: {v};")
-        for child in self._rules_tuple:
-            body_items.append(
-                _format_rule_node(child, minify=minify, indent=indent + 1, options=eff_opts)
-            )
-
-        if not body_items:
-            lines.append(f"{pad}{head} {{}}")
-        else:
-            lines.append(f"{pad}{head} {{")
-            lines.extend(body_items)
-            lines.append(f"{pad}}}")
-        return "\n".join(lines)
 
     def __str__(self) -> str:
         return self.format(minify=False)
+
+
+def _format_at_rule(
+    node: AtRule,
+    *,
+    minify: bool,
+    indent: int,
+    options: SerializationOptions | None,
+    decl_context: str | None = None,
+) -> str:
+    eff_opts = options if options is not None else node.options
+    if options is not None and _needs_rebuild_for_options(node._effective_options, options):
+        rebuilt = AtRule(
+            node.name,
+            node.prelude,
+            descriptors=node.descriptors,
+            rules=node.rules,
+            comment=node.comment,
+            statement=node.statement,
+            options=options,
+        )
+        return _format_at_rule(
+            rebuilt,
+            minify=minify,
+            indent=indent,
+            options=options,
+            decl_context=decl_context,
+        )
+
+    if node._allowed_decl_contexts is not None and decl_context not in node._allowed_decl_contexts:
+        raise StixisValidationError(
+            node._at_name,
+            "rule-list block",
+            node.descriptors if node.descriptors is not None else node.rules,
+            f"{node._at_name} cannot contain bare declarations at top level; nest inside a StyleRule or @scope, or wrap declarations in child rules",
+        )
+
+    pad = "" if minify else ("  " * indent)
+    inner_pad = "" if minify else ("  " * (indent + 1))
+    head = f"{node._at_name} {node._prelude_str}" if node._prelude_str else node._at_name
+    decl_pairs = (
+        node._fn_decl_pairs
+        if (decl_context == "function" and node._fn_decl_pairs is not None)
+        else node._decl_pairs
+    )
+
+    is_stmt = (
+        node.statement
+        or node._at_name in _STATEMENT_ONLY_ATRULES
+        or (
+            not decl_pairs
+            and not node._rules_tuple
+            and node.descriptors is None
+            and (
+                (node._at_name in ("@layer", "@apply") and bool(node._prelude_str))
+                or (node._at_name == "@contents" and not node._prelude_str)
+            )
+        )
+    )
+    if is_stmt:
+        if node._comment_str and not minify:
+            return f"{pad}{node._comment_str}\n{pad}{head};"
+        return f"{pad}{head};"
+
+    child_decl_context = (
+        "style"
+        if node._at_name in _STYLE_CONTEXT_ATRULES
+        else (
+            "function"
+            if node._at_name == "@function"
+            else (decl_context if node._at_name in _CONDITIONAL_GROUP_ATRULES else None)
+        )
+    )
+
+    lines: list[str] = []
+    if node._comment_str and not minify:
+        lines.append(f"{pad}{node._comment_str}")
+
+    if minify:
+        decl_part = ";".join(f"{k}:{v}" for k, v in decl_pairs)
+        child_part = "".join(
+            _format_rule_node(
+                c,
+                minify=True,
+                indent=0,
+                options=eff_opts,
+                decl_context=child_decl_context,
+            )
+            for c in node._rules_tuple
+        )
+        sep = ";" if (decl_part and child_part) else ""
+        return f"{head}{{{decl_part}{sep}{child_part}}}"
+
+    body_items: list[str] = []
+    for k, v in decl_pairs:
+        body_items.append(f"{inner_pad}{k}: {v};")
+    for child in node._rules_tuple:
+        body_items.append(
+            _format_rule_node(
+                child,
+                minify=minify,
+                indent=indent + 1,
+                options=eff_opts,
+                decl_context=child_decl_context,
+            )
+        )
+
+    if not body_items:
+        lines.append(f"{pad}{head} {{}}")
+    else:
+        lines.append(f"{pad}{head} {{")
+        lines.extend(body_items)
+        lines.append(f"{pad}}}")
+    return "\n".join(lines)
 
 
 type Rule = StyleRule | AtRule | CommentNode
@@ -1100,6 +1332,14 @@ class StyleSheet:
     def __post_init__(self) -> None:
         opts = current_options(self.options)
         rules_t = _validate_child_rules(self.rules, options=opts)
+        for r in rules_t:
+            if isinstance(r, AtRule) and r._allowed_decl_contexts is not None:
+                raise StixisValidationError(
+                    r._at_name,
+                    "rule-list block",
+                    r.descriptors if r.descriptors is not None else r.rules,
+                    f"{r._at_name} cannot contain bare declarations at top level; nest inside a StyleRule or @scope, or wrap declarations in child rules",
+                )
         hdr_s = (
             _validate_and_render_comment(self.header_comment, options=opts)
             if self.header_comment is not None
@@ -1135,7 +1375,9 @@ class StyleSheet:
                 blocks.append(self._header_str)
 
         for r in self._rules_tuple:
-            blocks.append(_format_rule_node(r, minify=minify, indent=0, options=eff_opts))
+            blocks.append(
+                _format_rule_node(r, minify=minify, indent=0, options=eff_opts, decl_context=None)
+            )
 
         if minify:
             return "".join(blocks)
@@ -1153,7 +1395,16 @@ def _format_rule_node(
     minify: bool,
     indent: int,
     options: SerializationOptions | None,
+    decl_context: str | None = None,
 ) -> str:
+    if isinstance(node, AtRule):
+        return _format_at_rule(
+            node,
+            minify=minify,
+            indent=indent,
+            options=options,
+            decl_context=decl_context,
+        )
     if isinstance(node, CommentNode):
         return node.format(minify=minify, indent=indent, options=options)
     return node.format(minify=minify, indent=indent, options=options)
