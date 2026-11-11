@@ -46,26 +46,26 @@ def _preprocess_css_chunk(text: str) -> str:
     )
 
 
-def _trailing_escape_suffix(text: str) -> str:
-    """Return an unfinished trailing `\\` or `\\<1..6 hex>` suffix at the end of `text`, or `""`."""
-    n = len(text)
-    if n == 0:
+def _trailing_escape_suffix(text: str, min_pos: int = 0, end_pos: int | None = None) -> str:
+    """Return an unfinished trailing `\\` or `\\<1..6 hex>` suffix in `text[min_pos:end_pos]`, or `""`."""
+    n = len(text) if end_pos is None else end_pos
+    if n <= min_pos:
         return ""
     bs_end = n
-    while bs_end > 0 and text[bs_end - 1] == "\\":
+    while bs_end > min_pos and text[bs_end - 1] == "\\":
         bs_end -= 1
     if (n - bs_end) % 2 == 1:
         return "\\"
     hex_start = n
-    while hex_start > 0 and text[hex_start - 1] in _HEX_DIGITS:
+    while hex_start > min_pos and text[hex_start - 1] in _HEX_DIGITS:
         hex_start -= 1
     hex_len = n - hex_start
     if 1 <= hex_len <= 6:
         bs_start = hex_start
-        while bs_start > 0 and text[bs_start - 1] == "\\":
+        while bs_start > min_pos and text[bs_start - 1] == "\\":
             bs_start -= 1
         if (hex_start - bs_start) % 2 == 1:
-            return text[hex_start - 1 :]
+            return text[hex_start - 1 : n]
     return ""
 
 
@@ -98,9 +98,9 @@ def _escape_unquoted_url_value(text: str) -> str:
     return "".join(out)
 
 
-def _scan_string_body(text: str, quote: str) -> tuple[bool, int]:
-    """Scan inside an open CSS string up to `quote` or end of `text`."""
-    j = 0
+def _scan_string_body(text: str, quote: str, pos: int = 0) -> tuple[bool, int]:
+    """Scan inside an open CSS string from `pos` up to `quote` or end of `text`."""
+    j = pos
     m = len(text)
     while j < m:
         c = text[j]
@@ -118,9 +118,9 @@ def _scan_string_body(text: str, quote: str) -> tuple[bool, int]:
     return False, j
 
 
-def _scan_unquoted_url_body(text: str) -> tuple[bool, int]:
-    """Scan inside an unquoted `url(...)` up to an unescaped `)` or end of `text`."""
-    j = 0
+def _scan_unquoted_url_body(text: str, pos: int = 0) -> tuple[bool, int]:
+    """Scan inside an unquoted `url(...)` from `pos` up to an unescaped `)` or end of `text`."""
+    j = pos
     m = len(text)
     while j < m:
         c = text[j]
@@ -211,7 +211,7 @@ def _step_other_top_level(
         for cdo_prefix in ("<!-", "<!", "<"):
             if (
                 scan_str.endswith(cdo_prefix)
-                and _trailing_escape_suffix(scan_str[: n - len(cdo_prefix)]) != "\\"
+                and _trailing_escape_suffix(scan_str, 0, n - len(cdo_prefix)) != "\\"
             ):
                 return i, cdo_prefix, False
         if ch in (".", "+", "-", "/", "\\"):
@@ -238,11 +238,10 @@ def _advance_dynamic_tail(prev_tail: str, emitted: str) -> str:
             i = end_c + 2
             continue
         if ch in ('"', "'"):
-            closed, consumed = _scan_string_body(scan_str[i + 1 :], ch)
+            closed, i = _scan_string_body(scan_str, ch, i + 1)
             if not closed:
                 return ""
             tail = ""
-            i += 1 + consumed
             continue
         if not scan_str.startswith("-->", i) and _starts_an_ident_sequence(scan_str, i):
             tok_start = i
@@ -255,10 +254,9 @@ def _advance_dynamic_tail(prev_tail: str, emitted: str) -> str:
                     while look < n and scan_str[look] in (" ", "\t", "\n"):
                         look += 1
                     if look < n and scan_str[look] not in ('"', "'"):
-                        closed_u, consumed_u = _scan_unquoted_url_body(scan_str[look:])
+                        closed_u, i = _scan_unquoted_url_body(scan_str, look)
                         if not closed_u:
                             return ""
-                        i = look + consumed_u
             else:
                 tail = _tail_at_end(scan_str, tok_start, "x") if i == n else ""
             continue
@@ -329,27 +327,45 @@ def render_css_template(
                     continue
 
                 if in_quote is not None:
-                    pref_len = len(pending_escape)
-                    sub = pending_escape + scan_str[i:]
-                    pending_escape = ""
-                    closed_quote, consumed = _scan_string_body(sub, in_quote)
+                    start_i = i
+                    if pending_escape:
+                        win = pending_escape + scan_str[i : i + 8]
+                        pref_len = len(pending_escape)
+                        pending_escape = ""
+                        if win[1] == "\n":
+                            step = 2
+                        else:
+                            _, step = _consume_escape(win, 1)
+                        i += step - pref_len
+                        if i >= n:
+                            pending_escape = _trailing_escape_suffix(win)
+                            break
+                        start_i = i
+                    closed_quote, i = _scan_string_body(scan_str, in_quote, i)
                     if closed_quote:
                         in_quote = None
-                        i += consumed - pref_len
                         continue
-                    pending_escape = _trailing_escape_suffix(sub)
+                    pending_escape = _trailing_escape_suffix(scan_str, start_i)
                     break
 
                 if url_mode == "unquoted":
-                    pref_len = len(pending_escape)
-                    sub = pending_escape + scan_str[i:]
-                    pending_escape = ""
-                    closed_url, consumed = _scan_unquoted_url_body(sub)
+                    start_i = i
+                    if pending_escape:
+                        win = pending_escape + scan_str[i : i + 8]
+                        pref_len = len(pending_escape)
+                        pending_escape = ""
+                        if _starts_with_valid_escape(win, 0):
+                            _, step = _consume_escape(win, 1)
+                            i += step - pref_len
+                            if i >= n:
+                                pending_escape = _trailing_escape_suffix(win)
+                                break
+                        start_i = i
+                    closed_url, i = _scan_unquoted_url_body(scan_str, i)
                     if closed_url:
                         url_mode = None
-                        i += consumed - pref_len
                         continue
-                    pending_escape = _trailing_escape_suffix(sub)
+                    pending_escape = _trailing_escape_suffix(scan_str, start_i)
                     break
 
                 ch = scan_str[i]

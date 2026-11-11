@@ -241,6 +241,11 @@ def test_template_url_single_slot_modifiers_and_token_boundaries() -> None:
     )
     assert render_css_template(many_urls) == 'url("a") ' * 200
 
+    # Linear in-place scanning over large static chunks with many quoted strings and unquoted URLs
+    big_static = ('"' + "x" * 64 + '" url(a) ') * 5000 + "url("
+    big_tpl = Template(big_static, Interpolation("Noto Sans.woff2", "p"), ")")
+    assert render_css_template(big_tpl).endswith('url("Noto Sans.woff2")')
+
     order: list[str] = []
 
     class OnceValue:
@@ -284,6 +289,7 @@ def test_template_pending_escape_and_split_comment_security() -> None:
 
     digit_two = "2"
     assert serialize_value("content", t'"\\41{digit_two}"') == '"A2"'
+    assert serialize_value("content", t'"a\\{""}\\41{digit_two}"') == '"a\\\\412"'
 
     with pytest.raises(StixisSyntaxError, match="Unclosed CSS string quote"):
         render_css_template(t'"a\\{""}"')
