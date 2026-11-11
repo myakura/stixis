@@ -27,7 +27,7 @@ When `serialize_value`, `StyleRule`, `AtRule`, `FontFace`, `CommentNode`, or `St
 
 1. **Inside a CSS comment (`/* ... */`).** Replaces `*/` in the interpolated value with `* /` and normalizes newlines to spaces so interpolated text cannot close the comment early.
 2. **Inside a quoted string (`"..."` or `'...'`).** Escapes characters using CSSOM string rules without adding outer quotes.
-3. **Inside `url(...)`.** Formats the URL string with `serialize_string` so spaces, quotes, and parentheses cannot break out of `url(...)`.
+3. **Inside `url(...)`.** Scans top-level CSS token boundaries (`comments`, `CDO`/`CDC`, `strings`, `hash`, `numeric`/`dimension`/`percentage`, `ident`/`function`, `at-keyword`) so `1url(...)`, `#url(...)`, and `image-url(...)` are not mistaken for `url(...)`. When only optional ASCII whitespace precedes the first slot after `url(` and any remaining tokens before the matching `)` validate via `consume_url_modifier_tokens`, formats the first slot with `serialize_string` (`"quoted_single"`). Otherwise (`"unquoted"`), escapes unsafe `<url-token>` code points and comment delimiters (`_escape_unquoted_url_value`) across every slot until the unescaped closing `)`.
 4. **Top-level value slot.** Formats unformatted `int` and `float` (not `bool`) with `serialize_number` and interpolates other values with `format(val, item.format_spec)` or `str(val)` as-is, then passes the assembled CSS string to `evaluate_canonicalize` (or selector/prelude token validation) for `ValueNode` grammar validation.
 
 ## Declarative spec patches (`codegen/spec_patches.toml`)
