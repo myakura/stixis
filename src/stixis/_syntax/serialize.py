@@ -36,6 +36,7 @@ __all__ = [
     "_serialize_dimension_unit",
     "canonicalize_unit",
     "check_numeric_bounds",
+    "consume_url_modifier_tokens",
     "escape_char",
     "escape_code_point",
     "format_token_sequence",
@@ -170,6 +171,38 @@ def serialize_string(
     return "".join(out)
 
 
+def consume_url_modifier_tokens(
+    non_ws: Sequence[CssToken],
+    pos: int = 0,
+    end: int | None = None,
+) -> int | None:
+    """Return the index after one `<url-modifier>` (`<ident> | <function-token> <any-value> )`) at `pos`, or `None`."""
+    limit = len(non_ws) if end is None else end
+    if pos >= limit:
+        return None
+    first = non_ws[pos]
+    if first.kind == "ident":
+        return pos + 1
+    if first.kind != "function":
+        return None
+    stack: list[str] = [")"]
+    matching = {"(": ")", "[": "]", "{": "}"}
+    closing = {")", "]", "}"}
+    for idx in range(pos + 1, limit):
+        tok = non_ws[idx]
+        if tok.kind == "function":
+            stack.append(")")
+        elif tok.kind in matching:
+            stack.append(matching[tok.kind])
+        elif tok.kind in closing:
+            if tok.kind != stack[-1]:
+                return None
+            stack.pop()
+            if not stack:
+                return None if idx == pos + 1 else idx + 1
+    return None
+
+
 def serialize_url_modifier(
     modifier: str,
     *,
@@ -188,23 +221,11 @@ def serialize_url_modifier(
         target="<url-modifier>",
     )
     non_ws = [t for t in tokens if t.kind != "whitespace"]
-    if len(non_ws) == 1 and non_ws[0].kind == "ident":
+    if consume_url_modifier_tokens(non_ws, 0) != len(non_ws):
+        raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
+    if len(non_ws) == 1:
         return serialize_ident(non_ws[0].value)
-    if len(non_ws) >= 2 and non_ws[0].kind == "function" and non_ws[-1].kind == ")":
-        if len(non_ws) == 2:
-            raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
-        depth = 0
-        matching = {"(": ")", "[": "]", "{": "}"}
-        closing = {")", "]", "}"}
-        for idx, tok in enumerate(non_ws):
-            if tok.kind == "function" or tok.kind in matching:
-                depth += 1
-            elif tok.kind in closing:
-                depth -= 1
-                if depth == 0 and idx != len(non_ws) - 1:
-                    raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
-        return format_token_sequence(non_ws, options=options)
-    raise StixisValidationError("<url-modifier>", "<url-modifier>", modifier)
+    return format_token_sequence(non_ws, options=options)
 
 
 def _is_values_instance(value: object, class_name: str) -> bool:
