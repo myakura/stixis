@@ -493,11 +493,7 @@ def _validate_and_normalize_declarations(
     else:
         raise StixisValidationError("declarations", "Mapping[str, Any]", declarations)
 
-    if (
-        norm_at in _STATEMENT_ONLY_ATRULES
-        or norm_at in _NO_DECLARATION_ATRULES
-        or norm_at in _CONDITIONAL_GROUP_ATRULES
-    ):
+    if norm_at in _STATEMENT_ONLY_ATRULES:
         raise StixisValidationError(
             norm_at,
             "no declarations",
@@ -505,13 +501,31 @@ def _validate_and_normalize_declarations(
             f"{norm_at} does not accept declarations in its block",
         )
 
-    if not items:
+    effective_items: list[tuple[str, Any] | RawDeclaration] = []
+    for item in items:
+        if isinstance(item, RawDeclaration):
+            effective_items.append(item)
+        elif isinstance(item, tuple) and len(item) == 2:
+            if item[1] is not None:
+                effective_items.append(item)
+        else:
+            raise StixisValidationError("declarations", "(property, value)", item)
+
+    if not effective_items:
         return ()
+
+    if norm_at in _NO_DECLARATION_ATRULES or norm_at in _CONDITIONAL_GROUP_ATRULES:
+        raise StixisValidationError(
+            norm_at,
+            "no declarations",
+            declarations,
+            f"{norm_at} does not accept declarations in its block",
+        )
 
     effective_at = None if norm_at in _STYLE_DECLARATION_ATRULES else norm_at
     normalized_pairs: list[tuple[str, str]] = []
 
-    for item in items:
+    for item in effective_items:
         if isinstance(item, RawDeclaration):
             raw_val_str = (
                 serialize_value("--raw", item._raw_value, options=options)
@@ -520,11 +534,7 @@ def _validate_and_normalize_declarations(
             )
             normalized_pairs.append((item.property, raw_val_str))
             continue
-        if not isinstance(item, tuple) or len(item) != 2:
-            raise StixisValidationError("declarations", "(property, value)", item)
         raw_key, val = item
-        if val is None:
-            continue
 
         if effective_at in _FONT_FEATURE_VALUE_SUBRULE_SYNTAXES:
             feat_name = _normalize_feature_value_name(raw_key, at_rule=effective_at)
@@ -813,7 +823,11 @@ def _validate_conditional_group_declarations(
     descriptors: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration],
     *,
     options: SerializationOptions,
-) -> tuple[tuple[tuple[str, str], ...], frozenset[str], tuple[tuple[str, str], ...] | None]:
+) -> tuple[
+    tuple[tuple[str, str], ...],
+    frozenset[str] | None,
+    tuple[tuple[str, str], ...] | None,
+]:
     style_decls: tuple[tuple[str, str], ...] | None = None
     style_err: StixisValidationError | None = None
     try:
@@ -846,6 +860,8 @@ def _validate_conditional_group_declarations(
     if not contexts or primary_decls is None:
         assert style_err is not None
         raise style_err
+    if not primary_decls and not fn_decls:
+        return (), None, None
     return primary_decls, frozenset(contexts), fn_decls
 
 

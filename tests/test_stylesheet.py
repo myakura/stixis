@@ -396,6 +396,27 @@ def test_at_rule_block_kinds_and_query_features() -> None:
                 )
             ]
         )
+    with pytest.raises(StixisValidationError):
+        StyleSheet(
+            [
+                AtRule(
+                    "@media",
+                    "screen",
+                    descriptors={},
+                    rules=[AtRule("@supports", "(display: grid)", descriptors={"color": "red"})],
+                )
+            ]
+        )
+
+    # Empty or all-None `descriptors` containers on conditional rules emit no declarations and stay valid at top level
+    for empty_descs in ({}, [], {"color": None}):
+        top_media = AtRule(
+            "@media",
+            "screen",
+            descriptors=empty_descs,
+            rules=[StyleRule("p", {"color": "red"})],
+        )
+        assert dumps(StyleSheet([top_media])) == "@media screen {\n  p {\n    color: red;\n  }\n}\n"
 
     # Nested conditional rules inside `StyleRule` and `@scope` serialize bare declarations and honor `options`
     nested_supports = StyleRule(
