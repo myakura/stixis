@@ -1,36 +1,29 @@
-"""Unit tests for PEP 750 CSS template rendering and context-aware escaping."""
+"""Unit tests for comment-only PEP 750 Template rendering and CSS-position rejection."""
 
 from __future__ import annotations
 
 import pytest
 
 from stixis import (
+    AtRule,
     CommentNode,
     FontFace,
+    LocalFont,
+    Px,
+    RawDeclaration,
+    Rem,
+    SerializationOptions,
     StixisValidationError,
+    StyleRule,
+    StyleSheet,
     Url,
     dumps,
     serialize_value,
 )
+from stixis._syntax import tokenize_css
 
 
-def test_pep750_template_integration_and_context_escaping() -> None:
-    url_val = "https://example.com/fonts/Noto Sans (v1).woff2"
-    src_css = serialize_value(
-        "src",
-        t"url({url_val}) format(woff2) tech(variations)",
-        at_rule="@font-face",
-    )
-    assert (
-        src_css
-        == 'url("https://example.com/fonts/Noto Sans (v1).woff2") format(woff2) tech(variations)'
-    )
-
-    lo, hi = -10, 20
-    style_css = serialize_value("font-style", t"oblique {lo}deg {hi}deg", at_rule="@font-face")
-    assert style_css == "oblique -10deg 20deg"
-
-    # Comment injection prevention (`*/` inside interpolated slot is neutralized to `* /`)
+def test_comment_template_sanitization_and_all_comment_paths() -> None:
     slice_id = "latin-ext"
     malicious_desc = "injected */ body { display: none } /*"
     kb = 14.256
@@ -48,9 +41,7 @@ def test_pep750_template_integration_and_context_escaping() -> None:
         CommentNode("premature */ close")
     assert str(CommentNode("/* foo**/")) == "/* foo* */"
 
-    # Comment Template without outer `/* ... */` is evaluated in comment context from the start
-    from stixis._syntax import render_css_template, tokenize_css
-
+    # CommentNode without outer `/* ... */`
     name = "header"
     assert str(CommentNode(t"Don't edit: {name}")) == "/* Don't edit: header */"
     assert str(CommentNode(t"Section '{name}'")) == "/* Section 'header' */"
@@ -66,8 +57,141 @@ def test_pep750_template_integration_and_context_escaping() -> None:
     assert str(node_star) == "/* foo* */"
     assert tokenize_css(str(node_star)) == []
 
-    # Hyphenated function names ending in `url(` do not trigger unquoted `url()` string wrapping
-    arg = "test"
-    assert render_css_template(t"image-url({arg})") == "image-url(test)"
-    assert render_css_template(t"my-url({arg})") == "my-url(test)"
-    assert render_css_template(t"url({arg})") == 'url("test")'
+    # Split `*/` across static text and interpolation boundaries
+    slash_payload = "/ body { display: none }"
+    star = "*"
+    for boundary_node in (
+        CommentNode(t"*{slash_payload}"),
+        CommentNode(t"/* {star}/ body */"),
+        CommentNode(t"/*/"),
+    ):
+        rendered = str(boundary_node)
+        assert rendered.startswith("/*")
+        assert rendered.endswith("*/")
+        assert tokenize_css(rendered) == []
+
+    # All 6 comment entry points accept Template and sanitize `*/`
+    sheet = StyleSheet(
+        header_comment=t"Header {malicious_desc}",
+        rules=[
+            t"Top {malicious_desc}",
+            StyleRule("body", {"margin": Px(0)}, comment=t"Rule {malicious_desc}"),
+            AtRule(
+                "@media",
+                "(min-width: 48rem)",
+                comment=t"Media {malicious_desc}",
+                rules=[
+                    t"Nested {malicious_desc}",
+                    StyleRule("p", {"color": "red"}),
+                ],
+            ),
+            ff,
+        ],
+    )
+    sheet_css = dumps(sheet)
+    assert "*/ body" not in sheet_css
+    assert "/* Header injected * / body { display: none } /* */" in sheet_css
+    assert "/* Top injected * / body { display: none } /* */" in sheet_css
+    assert "/* Rule injected * / body { display: none } /* */" in sheet_css
+    assert "/* Media injected * / body { display: none } /* */" in sheet_css
+    assert "  /* Nested injected * / body { display: none } /* */" in sheet_css
+
+
+def test_comment_template_snapshots_mutable_and_custom_interpolations() -> None:
+    items = ["alpha"]
+    cleome = SerializationOptions.cleome()
+
+    class CustomUrl(Url):
+        def __str__(self) -> str:
+            return "custom-url"
+
+    class CustomLocal(LocalFont):
+        def __str__(self) -> str:
+            return "custom-local"
+
+    c_node = CommentNode(
+        t"{items} {Url('a.woff2')} {LocalFont('Inter')} {CustomUrl('b.woff2')} {CustomLocal('Mono')}"
+    )
+    s_rule = StyleRule("a", {"color": "red"}, comment=t"{items} {Url('a.woff2')}")
+    sheet = StyleSheet([], header_comment=t"{items} {Url('a.woff2')}")
+    items.append("beta")
+
+    assert (
+        c_node.format(options=cleome)
+        == "/* ['alpha'] url('a.woff2') local('Inter') custom-url custom-local */"
+    )
+    assert "/* ['alpha'] url('a.woff2') */" in s_rule.format(options=cleome)
+    assert "/* ['alpha'] url('a.woff2') */" in sheet.format(options=cleome)
+
+
+def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> None:
+    # Trailing `\` before quote and unfinished hex escapes
+    payload = '"], body /*'
+    digit_two = "2"
+    with pytest.raises(StixisValidationError):
+        StyleRule(t'[data-x="a\\{payload}"] /*end*/', {"color": "red"})
+    with pytest.raises(StixisValidationError):
+        serialize_value("content", t'"\\41{digit_two}"')
+    with pytest.raises(StixisValidationError):
+        serialize_value("content", t'"a\\{""}"b"')
+
+    # Unquoted `url(...)` trailing `\` and escaped function names
+    with pytest.raises(StixisValidationError):
+        serialize_value("<url>", t"url(a\\{')red'})")
+    with pytest.raises(StixisValidationError):
+        serialize_value("<url>", t"url(\\41{digit_two})")
+    with pytest.raises(StixisValidationError):
+        serialize_value("background-image", t"\\url({'a),url(b'})")
+    with pytest.raises(StixisValidationError):
+        serialize_value("<url>", t"u\\72 l({'Noto Sans.woff2'})")
+
+    # Split `/*` / `*/` across empty or dynamic slots
+    comment_break = "*/body/*"
+    slash = "/"
+    slash_payload = "/ body { display: none }"
+    with pytest.raises(StixisValidationError):
+        StyleRule(t".ok /{' ' if False else ''}*{comment_break}*/", {"color": "red"})
+    with pytest.raises(StixisValidationError):
+        StyleRule(t".ok {slash}*{comment_break}*/", {"color": "red"})
+    with pytest.raises(StixisValidationError):
+        serialize_value("color", t"/* *{slash_payload} */")
+
+    # Issue #103 partial url() and all CSS value, declaration, descriptor, selector, and prelude entry points
+    base = "https://example.com"
+    slug = "Noto Sans"
+    url_val = "https://example.com/fonts/Noto Sans (v1).woff2"
+    lo, hi = -10, 20
+    name = "accent"
+
+    for target, val, at_rule in (
+        ("<url>", t"url({base}/{slug}.woff2)", None),
+        ("<any-value>", t"url({base}/{slug}.woff2)", None),
+        ("src", t"url({url_val}) format(woff2) tech(variations)", "@font-face"),
+        ("font-style", t"oblique {lo}deg {hi}deg", "@font-face"),
+        ("margin", [Px(10), t"{Px(20)}"], None),
+    ):
+        with pytest.raises(StixisValidationError):
+            serialize_value(target, val, at_rule=at_rule)
+
+    with pytest.raises(StixisValidationError):
+        FontFace(font_family="Inter", src=t"url(/fonts/{slug}.woff2) format(woff2)")
+    with pytest.raises(StixisValidationError):
+        FontFace(font_family="Inter", src=[t"url(/fonts/{slug}.woff2)"])
+    with pytest.raises(StixisValidationError):
+        RawDeclaration("--t", t"url({'a.woff2'})")
+    with pytest.raises(StixisValidationError):
+        StyleRule(":root", {"--t": t"{Url('b.woff2')}"})
+    with pytest.raises(StixisValidationError):
+        StyleRule("div", {"margin": [Px(10), t"{Px(20)}"]})
+    with pytest.raises(StixisValidationError):
+        StyleRule(t".a", {"color": "red"})
+    with pytest.raises(StixisValidationError):
+        StyleRule([t".a"], {"color": "red"})
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", t"(min-width: {Rem(48)})")
+    with pytest.raises(StixisValidationError):
+        AtRule("@media", [t"(min-width: {Rem(48)})"])
+    with pytest.raises(StixisValidationError):
+        AtRule("@property", t"--{name}", descriptors={"syntax": '"*"', "inherits": "false"})
+    with pytest.raises(StixisValidationError):
+        AtRule("@layer", [t"base"])

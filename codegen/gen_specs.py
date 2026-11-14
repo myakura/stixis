@@ -473,7 +473,7 @@ def infer_python_type_expr(
     if kws:
         lit_items = ", ".join(repr(k) for k in kws[:24])
         types.append(f"Literal[{lit_items}]")
-    types.extend(["str", "Template", "Keyword"])
+    types.extend(["str", "Keyword"])
 
     if any(
         tok in syntax
@@ -644,7 +644,6 @@ def format_types_py(
         "from __future__ import annotations",
         "",
         "from collections.abc import Mapping, Sequence",
-        "from string.templatelib import Template",
         "from typing import Any, Literal, TypedDict",
         "",
         "from stixis.values import Dimension, Keyword, Percentage",

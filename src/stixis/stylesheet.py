@@ -14,7 +14,7 @@ from stixis._generated.specs import (
     PROPERTY_SYNTAXES,
 )
 from stixis._generated.types import FontFaceDescriptors
-from stixis._grammar.matcher import evaluate_canonicalize, evaluate_serialize_value
+from stixis._grammar.matcher import evaluate_serialize_value
 from stixis._grammar.targets import (
     is_property_enabled,
     lookup_value_node,
@@ -176,7 +176,7 @@ def _validate_and_render_comment(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     if isinstance(comment, Template):
-        rendered = render_css_template(comment, options=options, start_in_comment=True).strip()
+        rendered = render_css_template(comment, options=options).strip()
         if rendered.startswith("/*") and rendered.endswith("*/") and len(rendered) >= 4:
             # Ensure no premature `*/` exists inside the body
             body = rendered[2:-2]
@@ -484,14 +484,24 @@ def serialize_declarations(
     return " ".join(f"{k}: {v};" for k, v in pairs)
 
 
+def _contains_template(val: Any) -> bool:
+    if isinstance(val, Template):
+        return True
+    if isinstance(val, Mapping):
+        return any(_contains_template(k) or _contains_template(v) for k, v in val.items())
+    if isinstance(val, (set, frozenset)):
+        return any(_contains_template(x) for x in val)
+    if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+        return any(_contains_template(x) for x in val)
+    return False
+
+
 def _validate_selector(
-    selector: str | Sequence[str] | Template,
+    selector: str | Sequence[str],
     *,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
-    if isinstance(selector, Template):
-        sel_str = render_css_template(selector, options=options).strip()
-    elif isinstance(selector, str):
+    if isinstance(selector, str):
         sel_str = selector.strip()
     elif isinstance(selector, Sequence):
         parts = [s.strip() for s in selector if isinstance(s, str) and s.strip()]
@@ -552,18 +562,16 @@ def _validate_at_rule_prelude(
             f"{at_name} does not accept a prelude",
         )
 
+    if _contains_template(prelude):
+        raise StixisValidationError(
+            f"{at_name} prelude",
+            prelude_syntax or "<prelude>",
+            prelude,
+            "PEP 750 Template is only supported in CSS comments",
+        )
+
     if prelude_syntax:
         node = compile_value_syntax(prelude_syntax)
-        if isinstance(prelude, Template):
-            rendered = render_css_template(prelude, options=options)
-            return evaluate_canonicalize(
-                f"{at_name} prelude",
-                prelude_syntax,
-                node,
-                rendered,
-                specs_lookup=lookup_value_node,
-                options=options,
-            )
         return evaluate_serialize_value(
             f"{at_name} prelude",
             prelude_syntax,
@@ -574,11 +582,7 @@ def _validate_at_rule_prelude(
         )
 
     # Conditional or general prelude (`@media`, `@supports`, `@container`, `@scope`, `@import`, etc.)
-    raw_prelude = (
-        render_css_template(prelude, options=options).strip()
-        if isinstance(prelude, Template)
-        else str(prelude).strip()
-    )
+    raw_prelude = str(prelude).strip()
     if not raw_prelude:
         return ""
     validate_token_stream_safety(
@@ -644,7 +648,7 @@ def _has_mismatched_raw_decl_options(
 class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
 
-    selector: str | Sequence[str] | Template
+    selector: str | Sequence[str]
     declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] = ()
     rules: Sequence[Rule] = ()
     comment: str | Template | None = None
@@ -669,13 +673,9 @@ class StyleRule:
             else None
         )
         frozen_sel = (
-            _freeze_value(self.selector)
-            if isinstance(self.selector, Template)
-            else (
-                self.selector
-                if isinstance(self.selector, str)
-                else tuple(s.strip() for s in self.selector)
-            )
+            self.selector
+            if isinstance(self.selector, str)
+            else tuple(s.strip() for s in self.selector)
         )
         frozen_decls = _freeze_declarations(self.declarations)
         frozen_comm = (

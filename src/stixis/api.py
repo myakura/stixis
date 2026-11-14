@@ -21,7 +21,7 @@ def serialize_value(
     at_rule: str | None = None,
     options: SerializationOptions | None = None,
 ) -> str:
-    """Validate and serialize a structured Python `value` (or PEP 750 `Template`) for `target`."""
+    """Validate and serialize a structured Python `value` for `target`."""
     opts = current_options(options)
     norm_target, norm_at, syntax, node = resolve_target_syntax(
         target, at_rule=at_rule, options=opts
