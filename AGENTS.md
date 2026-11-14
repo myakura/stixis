@@ -17,7 +17,7 @@ Stixis (`stixis`) builds and validates everyday static CSS from Python 3.14+ dat
 Apply `Scope and principles` in [README.md](README.md) when triaging issues, scoping features, and fixing bugs:
 
 * Do not add ambiguous type inference, positional tuple aliases, or fragment/partial-token lexers.
-* Do not expand PEP 750 `Template` features in CSS syntax positions (values, selectors, preludes), which are deprecated; removing CSS-position `Template` support and addressing its unresolved escaping edge cases will be handled as a separate change.
+* Keep PEP 750 `Template` support comment-only (`CommentNode`, `comment=`, `header_comment=`, and `rules=[t"..."]`); CSS syntax positions reject `Template` with `StixisValidationError`.
 * Within the supported scope, keep syntactic validation separate from expression rewriting: do not add computed-value normalization, color conversion, shorthand collapsing, or new `calc()` simplification rules (changing existing `calc()` simplification requires explicit scope).
 * Exclude out-of-scope WPT cases with a stated reason or mark them `xfail` when useful; do not treat full browser WPT coverage as a goal.
 * Verify issue claims against live runtime output and W3C CSS specifications before editing code, and close or scope out claims that contradict CSS specs.
