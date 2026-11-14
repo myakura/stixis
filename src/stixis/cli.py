@@ -37,7 +37,7 @@ class _StixisArgumentParser(argparse.ArgumentParser):
 
 def _describe_python_inputs(target_kind: str, name: str, syntax: str) -> list[str]:
     """Return concise descriptions of accepted Python input types for `name`."""
-    hints: list[str] = ["str", "Template (PEP 750 t'...')"]
+    hints: list[str] = ["str"]
     if name in ("unicode-range", "<urange>"):
         hints.append("Sequence[int | tuple[int, int] | str] (code points or (start, end) ranges)")
     elif name in ("font-weight", "<font-weight-absolute>"):

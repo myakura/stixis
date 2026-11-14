@@ -51,7 +51,6 @@ from stixis._syntax.serialize import (
     serialize_string,
     serialize_url,
 )
-from stixis._syntax.template import render_css_template
 from stixis._syntax.tokenizer import (
     CssToken,
     tokenize_css,
@@ -1448,8 +1447,6 @@ def _match_clauses_subsequence(
 
 
 def _value_item_to_css_fragment(item: Any, options: SerializationOptions) -> str | None:
-    if isinstance(item, Template):
-        return render_css_template(item, options=options)
     if isinstance(item, Url):
         return serialize_url(item, options=options)
     if isinstance(item, LocalFont):
@@ -1655,15 +1652,6 @@ def _serialize_primitive_python_value(
             return s[5:-1]
 
         if kind in ("<declaration-value>", "<any-value>"):
-            if isinstance(value, Template):
-                rendered = render_css_template(value, options=options)
-                validate_token_stream_safety(
-                    rendered,
-                    forbid_top_level_semicolon=(kind == "<declaration-value>"),
-                    forbid_top_level_bang=(kind == "<declaration-value>"),
-                    target=kind,
-                )
-                return rendered.strip()
             if isinstance(value, str):
                 validate_token_stream_safety(
                     value,
@@ -1839,17 +1827,13 @@ def evaluate_serialize_value(
     at_rule: str | None = None,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
-    """Validate and serialize a structured Python `value` (or PEP 750 `Template`) against `node`."""
+    """Validate and serialize a structured Python `value` against `node`."""
     if isinstance(value, Template):
-        rendered_tpl = render_css_template(value, options=options)
-        return evaluate_canonicalize(
+        raise StixisValidationError(
             target,
             syntax,
-            node,
-            rendered_tpl,
-            specs_lookup=specs_lookup,
-            at_rule=at_rule,
-            options=options,
+            value,
+            "PEP 750 Template is only supported in CSS comments",
         )
 
     is_font_face = at_rule == "@font-face"

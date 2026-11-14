@@ -14,7 +14,7 @@ from stixis._generated.specs import (
     PROPERTY_SYNTAXES,
 )
 from stixis._generated.types import FontFaceDescriptors
-from stixis._grammar.matcher import evaluate_canonicalize, evaluate_serialize_value
+from stixis._grammar.matcher import evaluate_serialize_value
 from stixis._grammar.targets import (
     is_property_enabled,
     lookup_value_node,
@@ -140,10 +140,10 @@ class CommentNode:
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
-        has_nl = bool(self.leading_newline) or _has_leading_newline(self.text)
-        rendered = _validate_and_render_comment(self.text, options=opts)
-        if isinstance(self.text, Template):
-            object.__setattr__(self, "text", _freeze_value(self.text))
+        frozen_text = _freeze_value(self.text) if isinstance(self.text, Template) else self.text
+        has_nl = bool(self.leading_newline) or _has_leading_newline(frozen_text)
+        rendered = _validate_and_render_comment(frozen_text, options=opts)
+        object.__setattr__(self, "text", frozen_text)
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_has_leading_nl", has_nl)
         object.__setattr__(self, "_rendered", rendered)
@@ -176,7 +176,7 @@ def _validate_and_render_comment(
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
     if isinstance(comment, Template):
-        rendered = render_css_template(comment, options=options, start_in_comment=True).strip()
+        rendered = render_css_template(comment, options=options).strip()
         if rendered.startswith("/*") and rendered.endswith("*/") and len(rendered) >= 4:
             # Ensure no premature `*/` exists inside the body
             body = rendered[2:-2]
@@ -278,7 +278,14 @@ def _freeze_interpolation(item: Interpolation) -> Interpolation:
     val = item.value
     if not isinstance(val, bool) and isinstance(val, (int, float, str)):
         return item
-    if item.conversion is None and not item.format_spec and type(val) in (Url, LocalFont):
+    if (
+        item.conversion is None
+        and not item.format_spec
+        and (
+            (isinstance(val, Url) and type(val).__str__ is Url.__str__)
+            or (isinstance(val, LocalFont) and type(val).__str__ is LocalFont.__str__)
+        )
+    ):
         return item
     converted = convert(val, item.conversion)
     text = format(converted, item.format_spec) if item.format_spec else str(converted)
@@ -484,14 +491,24 @@ def serialize_declarations(
     return " ".join(f"{k}: {v};" for k, v in pairs)
 
 
+def _contains_template(val: Any) -> bool:
+    if isinstance(val, Template):
+        return True
+    if isinstance(val, Mapping):
+        return any(_contains_template(k) or _contains_template(v) for k, v in val.items())
+    if isinstance(val, (set, frozenset)):
+        return any(_contains_template(x) for x in val)
+    if isinstance(val, Sequence) and not isinstance(val, (str, bytes)):
+        return any(_contains_template(x) for x in val)
+    return False
+
+
 def _validate_selector(
-    selector: str | Sequence[str] | Template,
+    selector: str | Sequence[str],
     *,
     options: SerializationOptions = DEFAULT_OPTIONS,
 ) -> str:
-    if isinstance(selector, Template):
-        sel_str = render_css_template(selector, options=options).strip()
-    elif isinstance(selector, str):
+    if isinstance(selector, str):
         sel_str = selector.strip()
     elif isinstance(selector, Sequence):
         parts = [s.strip() for s in selector if isinstance(s, str) and s.strip()]
@@ -552,18 +569,16 @@ def _validate_at_rule_prelude(
             f"{at_name} does not accept a prelude",
         )
 
+    if _contains_template(prelude):
+        raise StixisValidationError(
+            f"{at_name} prelude",
+            prelude_syntax or "<prelude>",
+            prelude,
+            "PEP 750 Template is only supported in CSS comments",
+        )
+
     if prelude_syntax:
         node = compile_value_syntax(prelude_syntax)
-        if isinstance(prelude, Template):
-            rendered = render_css_template(prelude, options=options)
-            return evaluate_canonicalize(
-                f"{at_name} prelude",
-                prelude_syntax,
-                node,
-                rendered,
-                specs_lookup=lookup_value_node,
-                options=options,
-            )
         return evaluate_serialize_value(
             f"{at_name} prelude",
             prelude_syntax,
@@ -574,11 +589,7 @@ def _validate_at_rule_prelude(
         )
 
     # Conditional or general prelude (`@media`, `@supports`, `@container`, `@scope`, `@import`, etc.)
-    raw_prelude = (
-        render_css_template(prelude, options=options).strip()
-        if isinstance(prelude, Template)
-        else str(prelude).strip()
-    )
+    raw_prelude = str(prelude).strip()
     if not raw_prelude:
         return ""
     validate_token_stream_safety(
@@ -644,7 +655,7 @@ def _has_mismatched_raw_decl_options(
 class StyleRule:
     """An immutable CSS qualified style rule (`selector { declarations; nested_rules }`), eagerly validated on construction."""
 
-    selector: str | Sequence[str] | Template
+    selector: str | Sequence[str]
     declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] = ()
     rules: Sequence[Rule] = ()
     comment: str | Template | None = None
@@ -663,24 +674,20 @@ class StyleRule:
             self.declarations, at_rule=None, options=opts, raw_override_options=raw_override
         )
         rules_t = _validate_child_rules(self.rules, options=opts)
-        comm_s = (
-            _validate_and_render_comment(self.comment, options=opts)
-            if self.comment is not None
-            else None
-        )
-        frozen_sel = (
-            _freeze_value(self.selector)
-            if isinstance(self.selector, Template)
-            else (
-                self.selector
-                if isinstance(self.selector, str)
-                else tuple(s.strip() for s in self.selector)
-            )
-        )
-        frozen_decls = _freeze_declarations(self.declarations)
         frozen_comm = (
             _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
         )
+        comm_s = (
+            _validate_and_render_comment(frozen_comm, options=opts)
+            if frozen_comm is not None
+            else None
+        )
+        frozen_sel = (
+            self.selector
+            if isinstance(self.selector, str)
+            else tuple(s.strip() for s in self.selector)
+        )
+        frozen_decls = _freeze_declarations(self.declarations)
         object.__setattr__(self, "selector", frozen_sel)
         object.__setattr__(self, "declarations", frozen_decls)
         object.__setattr__(self, "rules", rules_t)
@@ -796,15 +803,15 @@ class AtRule:
             raw_override_options=active_or_explicit_options(self.options),
         )
         rules_t = _validate_child_rules(self.rules, options=opts)
-        comm_s = (
-            _validate_and_render_comment(self.comment, options=opts)
-            if self.comment is not None
-            else None
-        )
-        frozen_decls = None if self.descriptors is None else _freeze_declarations(self.descriptors)
         frozen_comm = (
             _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
         )
+        comm_s = (
+            _validate_and_render_comment(frozen_comm, options=opts)
+            if frozen_comm is not None
+            else None
+        )
+        frozen_decls = None if self.descriptors is None else _freeze_declarations(self.descriptors)
 
         object.__setattr__(self, "prelude", _freeze_value(self.prelude))
         object.__setattr__(self, "descriptors", frozen_decls)
@@ -945,15 +952,15 @@ class StyleSheet:
     def __post_init__(self) -> None:
         opts = current_options(self.options)
         rules_t = _validate_child_rules(self.rules, options=opts)
-        hdr_s = (
-            _validate_and_render_comment(self.header_comment, options=opts)
-            if self.header_comment is not None
-            else None
-        )
         frozen_hdr = (
             _freeze_value(self.header_comment)
             if isinstance(self.header_comment, Template)
             else self.header_comment
+        )
+        hdr_s = (
+            _validate_and_render_comment(frozen_hdr, options=opts)
+            if frozen_hdr is not None
+            else None
         )
         object.__setattr__(self, "rules", rules_t)
         object.__setattr__(self, "header_comment", frozen_hdr)

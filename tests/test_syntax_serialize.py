@@ -7,6 +7,7 @@ import math
 import pytest
 
 from stixis import (
+    Dimension,
     Pct,
     Px,
     StixisSyntaxError,
@@ -46,7 +47,10 @@ def test_large_number_serialization_and_overflow_rejection(
     assert serialize_number(1e30) == "1" + "0" * 30
     assert serialize_number(-1e30) == "-1" + "0" * 30
     assert canonicalize("width", "1e30px") == "1" + "0" * 30 + "px"
-    assert str(StyleRule("a", {"width": t"{1e30}px"})) == f"a {{\n  width: {'1' + '0' * 30}px;\n}}"
+    assert (
+        str(StyleRule("a", {"width": Dimension(1e30, "px")}))
+        == f"a {{\n  width: {'1' + '0' * 30}px;\n}}"
+    )
 
     rc = cli_main(["check", "width", "1e22px"])
     captured = capsys.readouterr()
