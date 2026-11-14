@@ -140,10 +140,10 @@ class CommentNode:
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
-        has_nl = bool(self.leading_newline) or _has_leading_newline(self.text)
-        rendered = _validate_and_render_comment(self.text, options=opts)
-        if isinstance(self.text, Template):
-            object.__setattr__(self, "text", _freeze_value(self.text))
+        frozen_text = _freeze_value(self.text) if isinstance(self.text, Template) else self.text
+        has_nl = bool(self.leading_newline) or _has_leading_newline(frozen_text)
+        rendered = _validate_and_render_comment(frozen_text, options=opts)
+        object.__setattr__(self, "text", frozen_text)
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_has_leading_nl", has_nl)
         object.__setattr__(self, "_rendered", rendered)
@@ -667,9 +667,12 @@ class StyleRule:
             self.declarations, at_rule=None, options=opts, raw_override_options=raw_override
         )
         rules_t = _validate_child_rules(self.rules, options=opts)
+        frozen_comm = (
+            _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
+        )
         comm_s = (
-            _validate_and_render_comment(self.comment, options=opts)
-            if self.comment is not None
+            _validate_and_render_comment(frozen_comm, options=opts)
+            if frozen_comm is not None
             else None
         )
         frozen_sel = (
@@ -678,9 +681,6 @@ class StyleRule:
             else tuple(s.strip() for s in self.selector)
         )
         frozen_decls = _freeze_declarations(self.declarations)
-        frozen_comm = (
-            _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
-        )
         object.__setattr__(self, "selector", frozen_sel)
         object.__setattr__(self, "declarations", frozen_decls)
         object.__setattr__(self, "rules", rules_t)
@@ -796,15 +796,15 @@ class AtRule:
             raw_override_options=active_or_explicit_options(self.options),
         )
         rules_t = _validate_child_rules(self.rules, options=opts)
-        comm_s = (
-            _validate_and_render_comment(self.comment, options=opts)
-            if self.comment is not None
-            else None
-        )
-        frozen_decls = None if self.descriptors is None else _freeze_declarations(self.descriptors)
         frozen_comm = (
             _freeze_value(self.comment) if isinstance(self.comment, Template) else self.comment
         )
+        comm_s = (
+            _validate_and_render_comment(frozen_comm, options=opts)
+            if frozen_comm is not None
+            else None
+        )
+        frozen_decls = None if self.descriptors is None else _freeze_declarations(self.descriptors)
 
         object.__setattr__(self, "prelude", _freeze_value(self.prelude))
         object.__setattr__(self, "descriptors", frozen_decls)
@@ -945,15 +945,15 @@ class StyleSheet:
     def __post_init__(self) -> None:
         opts = current_options(self.options)
         rules_t = _validate_child_rules(self.rules, options=opts)
-        hdr_s = (
-            _validate_and_render_comment(self.header_comment, options=opts)
-            if self.header_comment is not None
-            else None
-        )
         frozen_hdr = (
             _freeze_value(self.header_comment)
             if isinstance(self.header_comment, Template)
             else self.header_comment
+        )
+        hdr_s = (
+            _validate_and_render_comment(frozen_hdr, options=opts)
+            if frozen_hdr is not None
+            else None
         )
         object.__setattr__(self, "rules", rules_t)
         object.__setattr__(self, "header_comment", frozen_hdr)

@@ -124,6 +124,72 @@ def test_comment_template_snapshots_mutable_and_custom_interpolations() -> None:
     assert "/* ['alpha'] url('a.woff2') */" in sheet.format(options=cleome)
 
 
+def test_comment_template_evaluates_interpolations_once_before_rendering() -> None:
+    cleome = SerializationOptions.cleome()
+
+    class CountingStr:
+        def __init__(self, label: str) -> None:
+            self.label = label
+            self.str_calls = 0
+            self.format_calls = 0
+
+        def __str__(self) -> str:
+            self.str_calls += 1
+            return f"{self.label}#{self.str_calls}"
+
+        def __format__(self, spec: str) -> str:
+            self.format_calls += 1
+            return f"{self.label}:{spec}#{self.format_calls}"
+
+    class OneShotStr:
+        def __init__(self, value: str) -> None:
+            self._it = iter((value,))
+
+        def __str__(self) -> str:
+            return next(self._it)
+
+        def __format__(self, spec: str) -> str:
+            return f"{next(self._it)}:{spec}"
+
+    c_str = CountingStr("s")
+    c_fmt = CountingStr("f")
+    c_node = CommentNode(t"{c_str} {c_fmt:tag} {Url('a.woff2')}")
+    assert c_str.str_calls == 1
+    assert c_fmt.format_calls == 1
+    assert str(c_node) == '/* s#1 f:tag#1 url("a.woff2") */'
+    assert c_node.format(options=cleome) == "/* s#1 f:tag#1 url('a.woff2') */"
+    assert c_str.str_calls == 1
+    assert c_fmt.format_calls == 1
+
+    o_node = CommentNode(t"{OneShotStr('once-node')} {Url('a.woff2')}")
+    o_rule = StyleRule("a", {"color": "red"}, comment=t"{OneShotStr('once-rule')} {Url('a.woff2')}")
+    o_at = AtRule(
+        "@media",
+        "(min-width: 48rem)",
+        comment=t"{OneShotStr('once-at')}",
+        rules=[t"{OneShotStr('once-child')}"],
+    )
+    o_ff = FontFace(
+        font_family="Inter",
+        src=Url("inter.woff2"),
+        comment=t"{OneShotStr('once-ff')}",
+    )
+    o_sheet = StyleSheet(
+        rules=[t"{OneShotStr('once-top')}", o_rule, o_at, o_ff],
+        header_comment=t"{OneShotStr('once-hdr')} {Url('b.woff2')}",
+    )
+
+    assert str(o_node) == '/* once-node url("a.woff2") */'
+    assert o_node.format(options=cleome) == "/* once-node url('a.woff2') */"
+    assert "/* once-rule url('a.woff2') */" in o_rule.format(options=cleome)
+    assert "/* once-at */" in o_at.format(options=cleome)
+    assert "/* once-child */" in o_at.format(options=cleome)
+    assert "/* once-ff */" in o_ff.format(options=cleome)
+    cleome_sheet = o_sheet.format(options=cleome)
+    assert "/* once-hdr url('b.woff2') */" in cleome_sheet
+    assert "/* once-top */" in cleome_sheet
+
+
 def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> None:
     # Trailing `\` before quote and unfinished hex escapes
     payload = '"], body /*'
