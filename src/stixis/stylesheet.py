@@ -278,7 +278,14 @@ def _freeze_interpolation(item: Interpolation) -> Interpolation:
     val = item.value
     if not isinstance(val, bool) and isinstance(val, (int, float, str)):
         return item
-    if item.conversion is None and not item.format_spec and type(val) in (Url, LocalFont):
+    if (
+        item.conversion is None
+        and not item.format_spec
+        and (
+            (isinstance(val, Url) and type(val).__str__ is Url.__str__)
+            or (isinstance(val, LocalFont) and type(val).__str__ is LocalFont.__str__)
+        )
+    ):
         return item
     converted = convert(val, item.conversion)
     text = format(converted, item.format_spec) if item.format_spec else str(converted)

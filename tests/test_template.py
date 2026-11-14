@@ -109,8 +109,14 @@ def test_comment_template_snapshots_mutable_and_custom_interpolations() -> None:
         def __str__(self) -> str:
             return "custom-local"
 
+    class InheritedUrl(Url):
+        pass
+
+    class InheritedLocal(LocalFont):
+        pass
+
     c_node = CommentNode(
-        t"{items} {Url('a.woff2')} {LocalFont('Inter')} {CustomUrl('b.woff2')} {CustomLocal('Mono')}"
+        t"{items} {Url('a.woff2')} {LocalFont('Inter')} {InheritedUrl('c.woff2')} {InheritedLocal('Serif')} {CustomUrl('b.woff2')} {CustomLocal('Mono')}"
     )
     s_rule = StyleRule("a", {"color": "red"}, comment=t"{items} {Url('a.woff2')}")
     sheet = StyleSheet([], header_comment=t"{items} {Url('a.woff2')}")
@@ -118,7 +124,7 @@ def test_comment_template_snapshots_mutable_and_custom_interpolations() -> None:
 
     assert (
         c_node.format(options=cleome)
-        == "/* ['alpha'] url('a.woff2') local('Inter') custom-url custom-local */"
+        == "/* ['alpha'] url('a.woff2') local('Inter') url('c.woff2') local('Serif') custom-url custom-local */"
     )
     assert "/* ['alpha'] url('a.woff2') */" in s_rule.format(options=cleome)
     assert "/* ['alpha'] url('a.woff2') */" in sheet.format(options=cleome)
