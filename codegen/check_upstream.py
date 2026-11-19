@@ -739,9 +739,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.bcd_dir is not None:
         bcd_dir = args.bcd_dir.expanduser()
     else:
-        bcd_dir = gen_specs.resolve_default_bcd_dir(
-            patches, explicit_patches=explicit_patches
-        )
+        bcd_dir = gen_specs.resolve_default_bcd_dir(patches, explicit_patches=explicit_patches)
 
     wpt_dir = args.wpt_dir.expanduser()
     if not webref_dir.is_dir():

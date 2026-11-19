@@ -141,9 +141,7 @@ def _validate_finite_number(value: object, target: str) -> None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise StixisValidationError(target, target, value)
     try:
-        is_finite = (
-            math.isfinite(float(value)) if isinstance(value, int) else math.isfinite(value)
-        )
+        is_finite = math.isfinite(float(value)) if isinstance(value, int) else math.isfinite(value)
     except OverflowError as exc:
         raise StixisValidationError(target, target, value) from exc
     if not is_finite:
