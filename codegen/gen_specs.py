@@ -465,6 +465,7 @@ def infer_python_type_expr(
     syntax: str,
     properties: dict[str, str],
     values: dict[str, str],
+    name: str = "",
 ) -> str:
     """Derive a descriptive Python type annotation string from a Value Definition Syntax."""
     node = compile_value_syntax(syntax)
@@ -486,7 +487,13 @@ def infer_python_type_expr(
         types.append("Sequence[Any]")
     if "urange" in syntax or "unicode-range" in syntax:
         types.extend(["set[int]", "frozenset[int]", "tuple[int, int]"])
-    if "settings" in syntax or "src" in syntax:
+    if name == "src":
+        types.extend(["FontSrc", "Url", "LocalFont"])
+    if (
+        name in ("font-feature-settings", "font-variation-settings")
+        or "settings" in syntax
+        or "src" in syntax
+    ):
         types.append("Mapping[str, Any]")
 
     # Deduplicate while preserving order
@@ -646,7 +653,8 @@ def format_types_py(
         "from collections.abc import Mapping, Sequence",
         "from typing import Any, Literal, TypedDict",
         "",
-        "from stixis.values import Dimension, Keyword, Percentage",
+        "from stixis.microsyntax.font_src import FontSrc",
+        "from stixis.values import Dimension, Keyword, LocalFont, Percentage, Url",
         "",
     ]
 
@@ -677,17 +685,17 @@ def format_types_py(
     )
 
     # Support both hyphenated (`font-family`) and snake_case (`font_family`) keys in FontFaceDescriptors
-    all_ff_keys: list[tuple[str, str]] = []
-    for dname in sorted(font_face_descs):
-        dsyn = font_face_descs[dname]
-        py_t = infer_python_type_expr(dsyn, properties, values)
-        all_ff_keys.append((dname, f"{py_t} | None"))
-        snake = dname.replace("-", "_")
-        if snake != dname:
-            all_ff_keys.append((snake, f"{py_t} | None"))
+    inferred: dict[str, str] = {
+        dname: (
+            f"{infer_python_type_expr(font_face_descs[dname], properties, values, name=dname)}"
+            " | None"
+        )
+        for dname in sorted(font_face_descs)
+    }
 
-    for key_name, type_expr in all_ff_keys:
-        lines.append(f"        {key_name!r}: {type_expr},")
+    for dname, type_expr in inferred.items():
+        if "-" in dname:
+            lines.append(f"        {dname!r}: {type_expr},")
 
     lines.extend(
         [
@@ -701,12 +709,10 @@ def format_types_py(
             "",
         ]
     )
-    for dname in sorted(font_face_descs):
+    for dname, type_expr in inferred.items():
         snake = dname.replace("-", "_")
         if snake.isidentifier():
-            dsyn = font_face_descs[dname]
-            py_t = infer_python_type_expr(dsyn, properties, values)
-            lines.append(f"    {snake}: {py_t} | None")
+            lines.append(f"    {snake}: {type_expr}")
 
     lines.append("")
     return "\n".join(lines)
