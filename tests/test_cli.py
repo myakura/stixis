@@ -69,7 +69,14 @@ def test_cli_inspect_and_check_exit_codes(capsys: pytest.CaptureFixture[str]) ->
     assert rc == EXIT_NOT_FOUND
     assert len(captured.err.strip().splitlines()) == 1
 
-    # 8. Bad CLI arguments -> EXIT_USAGE_ERROR (2)
+    # 8. `stixis check @font-face "foo"` -> EXIT_NOT_FOUND (4) (at-rule is not a checkable value target)
+    rc = cli_main(["check", "@font-face", "foo"])
+    captured = capsys.readouterr()
+    assert rc == EXIT_NOT_FOUND
+    assert captured.out == ""
+    assert len(captured.err.strip().splitlines()) == 1
+
+    # 9. Bad CLI arguments -> EXIT_USAGE_ERROR (2)
     rc = cli_main(["check"])
     captured = capsys.readouterr()
     assert rc == EXIT_USAGE_ERROR
