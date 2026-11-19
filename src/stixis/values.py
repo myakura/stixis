@@ -6,8 +6,6 @@ import math
 from dataclasses import dataclass
 
 from stixis._syntax.serialize import (
-    CSS_WIDE_KEYWORDS,
-    RESERVED_CUSTOM_IDENT_KEYWORDS,
     _is_valid_dimension_unit,
     _serialize_dimension_unit,
     serialize_ident,
@@ -44,10 +42,8 @@ GENERIC_SCRIPT_KEYWORDS: frozenset[str] = frozenset(
 )
 
 __all__ = [
-    "CSS_WIDE_KEYWORDS",
     "GENERIC_FAMILY_KEYWORDS",
     "GENERIC_SCRIPT_KEYWORDS",
-    "RESERVED_CUSTOM_IDENT_KEYWORDS",
     "Deg",
     "Dimension",
     "Em",
@@ -141,6 +137,17 @@ class LocalFont:
         return f"local({serialize_string(self.family)})"
 
 
+def _validate_finite_number(value: object, target: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise StixisValidationError(target, target, value)
+    try:
+        is_finite = math.isfinite(float(value)) if isinstance(value, int) else math.isfinite(value)
+    except OverflowError as exc:
+        raise StixisValidationError(target, target, value) from exc
+    if not is_finite:
+        raise StixisValidationError(target, target, value)
+
+
 @dataclass(frozen=True, slots=True)
 class Dimension:
     """A numeric value paired with a CSS unit (`<length>`, `<angle>`, `<time>`, `<frequency>`, `<resolution>`, `<flex>`)."""
@@ -149,18 +156,7 @@ class Dimension:
     unit: str
 
     def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
-            raise StixisValidationError("<dimension>", "<dimension>", self.value)
-        try:
-            is_finite = (
-                math.isfinite(float(self.value))
-                if isinstance(self.value, int)
-                else math.isfinite(self.value)
-            )
-        except OverflowError as exc:
-            raise StixisValidationError("<dimension>", "<dimension>", self.value) from exc
-        if not is_finite:
-            raise StixisValidationError("<dimension>", "<dimension>", self.value)
+        _validate_finite_number(self.value, "<dimension>")
         if not _is_valid_dimension_unit(self.unit):
             raise StixisValidationError("<dimension>", "<dimension>", self.unit)
 
@@ -175,18 +171,7 @@ class Percentage:
     value: int | float
 
     def __post_init__(self) -> None:
-        if isinstance(self.value, bool) or not isinstance(self.value, (int, float)):
-            raise StixisValidationError("<percentage>", "<percentage>", self.value)
-        try:
-            is_finite = (
-                math.isfinite(float(self.value))
-                if isinstance(self.value, int)
-                else math.isfinite(self.value)
-            )
-        except OverflowError as exc:
-            raise StixisValidationError("<percentage>", "<percentage>", self.value) from exc
-        if not is_finite:
-            raise StixisValidationError("<percentage>", "<percentage>", self.value)
+        _validate_finite_number(self.value, "<percentage>")
 
     def __str__(self) -> str:
         return f"{serialize_number(self.value)}%"

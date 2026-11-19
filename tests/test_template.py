@@ -20,7 +20,7 @@ from stixis import (
     dumps,
     serialize_value,
 )
-from stixis._syntax import tokenize_css
+from stixis._syntax.tokenizer import tokenize_css
 
 
 def test_comment_template_sanitization_and_all_comment_paths() -> None:

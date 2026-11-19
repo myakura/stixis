@@ -47,7 +47,6 @@ def is_valid_unquoted_family_name(name: str) -> bool:
 def serialize_generic_family(
     value: str | GenericFamily | Keyword,
     *,
-    allow_webkit_prefix: bool = False,
     target: str = "<generic-family>",
 ) -> str:
     """Validate and serialize a `<generic-family>` keyword or `generic(...)` function."""
@@ -64,10 +63,6 @@ def serialize_generic_family(
     lower = raw.strip().lower()
     if lower in GENERIC_FAMILY_KEYWORDS:
         return lower
-    if allow_webkit_prefix and lower.startswith("-webkit-"):
-        tail = lower[len("-webkit-") :]
-        if tail in GENERIC_FAMILY_KEYWORDS:
-            return lower
     if lower.startswith("generic(") and lower.endswith(")"):
         inner = lower[8:-1].strip()
         if inner in GENERIC_SCRIPT_KEYWORDS:

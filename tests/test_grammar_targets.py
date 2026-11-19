@@ -310,8 +310,7 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     patches = tomllib.loads(
         (repo_root / "codegen" / "spec_patches.toml").read_text(encoding="utf-8")
     )
-    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-    webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+    webref_dir = gen_specs.resolve_default_webref_dir(patches, explicit_patches=False)
     if not webref_dir.is_dir():
         pytest.skip(f"Local @webref/css directory not available: {webref_dir}")
 
@@ -326,11 +325,11 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     assert report.has_changes
     assert any("`hanging-punctuation`: 1 -> 2 engines" in s for s in report.support_changes)
 
-    # 4. `_extract_css_fonts_property_cases` filters by `min_engines` (e.g. `min_engines=3` excludes 2-engine `font-language-override`)
-    fonts_v_3, _ = gen_wpt_tests._extract_css_fonts_property_cases(
+    # 4. `extract_css_fonts_property_suite` filters by `min_engines` (e.g. `min_engines=3` excludes 2-engine `font-language-override`)
+    fonts_suite_3 = gen_wpt_tests.extract_css_fonts_property_suite(
         gen_wpt_tests.DEFAULT_WPT_CSS_DIR, min_engines=3
     )
-    assert all(prop != "font-language-override" for prop, _, _ in fonts_v_3)
+    assert all(prop != "font-language-override" for prop, _, _ in fonts_suite_3.valid)
 
 
 def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(

@@ -1838,6 +1838,15 @@ def evaluate_serialize_value(
 
     is_font_face = at_rule == "@font-face"
 
+    if (
+        _is_property_target(target, at_rule)
+        and isinstance(value, (str, Keyword))
+        and not (target == "font-family" and isinstance(value, str))
+    ):
+        raw_kw = value.value if isinstance(value, Keyword) else value
+        if raw_kw.strip().lower() in CSS_WIDE_KEYWORDS:
+            return raw_kw.strip().lower()
+
     # Dedicated microsyntax handlers for structured Python inputs
     if target == "unicode-range":
         return format_urange(value, options=options)
@@ -1931,9 +1940,7 @@ def evaluate_serialize_value(
         return serialize_single_font_src(value, options=options, target=target)
 
     if target == "font-weight":
-        if isinstance(value, str) and (
-            " " in value.strip() or value.strip().lower().startswith("calc(")
-        ):
+        if isinstance(value, str):
             return evaluate_canonicalize(
                 target,
                 syntax,
@@ -1946,9 +1953,7 @@ def evaluate_serialize_value(
         return serialize_font_weight(value, is_descriptor=is_font_face, target=target)
 
     if target in ("font-width", "font-stretch"):
-        if isinstance(value, str) and (
-            " " in value.strip() or value.strip().lower().startswith("calc(")
-        ):
+        if isinstance(value, str):
             return evaluate_canonicalize(
                 target,
                 syntax,
@@ -1961,7 +1966,7 @@ def evaluate_serialize_value(
         return serialize_font_width(value, is_descriptor=is_font_face, target=target)
 
     if target == "font-style":
-        if isinstance(value, str) and "calc(" in value.lower():
+        if isinstance(value, str):
             return evaluate_canonicalize(
                 target,
                 syntax,
@@ -1976,7 +1981,7 @@ def evaluate_serialize_value(
         )
 
     if is_font_face and target in ("ascent-override", "descent-override", "line-gap-override"):
-        if isinstance(value, str) and " " in value.strip():
+        if isinstance(value, str):
             return evaluate_canonicalize(
                 target,
                 syntax,
@@ -1995,11 +2000,6 @@ def evaluate_serialize_value(
         return serialize_metric_override(value, allow_from_font=True, min_val=None, target=target)
 
     # General ValueNode evaluation
-    if _is_property_target(target, at_rule) and isinstance(value, (str, Keyword)):
-        raw_kw = value.value if isinstance(value, Keyword) else value
-        if raw_kw.strip().lower() in CSS_WIDE_KEYWORDS:
-            return raw_kw.strip().lower()
-
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
     try:
         direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)

@@ -347,3 +347,32 @@ def test_serialize_value_rejects_arbitrary_mappings_on_combinators() -> None:
     ):
         with pytest.raises(StixisValidationError):
             serialize_value(target, bad_map)
+
+
+def test_serialize_value_font_properties_css_wide_and_var() -> None:
+    assert serialize_value("font-weight", "inherit") == "inherit"
+    assert serialize_value("font-weight", Keyword("unset")) == "unset"
+    assert serialize_value("font-weight", "var(--w)") == "var(--w)"
+    assert serialize_value("font-width", "inherit") == "inherit"
+    assert serialize_value("font-width", "var(--wd)") == "var(--wd)"
+    assert serialize_value("font-stretch", "inherit") == "inherit"
+    assert serialize_value("font-style", "inherit") == "inherit"
+    assert serialize_value("font-style", "var(--s)") == "var(--s)"
+    assert serialize_value("font-style", "oblique 14deg") == "oblique 14deg"
+    assert serialize_value("font-feature-settings", "inherit") == "inherit"
+    assert serialize_value("font-variation-settings", "inherit") == "inherit"
+    assert serialize_value("font-language-override", "inherit") == "inherit"
+
+    # Plain `str` on `font-family` stays quoted as a `<family-name>` per principle 1
+    assert serialize_value("font-family", "inherit") == '"inherit"'
+    assert serialize_value("font-family", Keyword("inherit")) == "inherit"
+
+    # `@font-face` descriptors reject CSS-wide keywords and still support `calc(...)` strings
+    for desc in ("font-weight", "font-width", "font-style", "ascent-override"):
+        with pytest.raises(StixisValidationError):
+            serialize_value(desc, "inherit", at_rule="@font-face")
+    assert serialize_value("ascent-override", "90%", at_rule="@font-face") == "90%"
+    assert serialize_value("ascent-override", "calc(90%)", at_rule="@font-face") == "calc(90%)"
+    assert (
+        serialize_value("ascent-override", "calc(80% + 10%)", at_rule="@font-face") == "calc(90%)"
+    )

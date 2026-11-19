@@ -366,7 +366,8 @@ def test_relative_color_bare_channel_keywords(
 
 def test_math_functions_and_token_formatting_have_no_dead_entries() -> None:
     from stixis._grammar.calc import MATH_FUNCTIONS
-    from stixis._syntax import format_token_sequence, serialize_url, tokenize_css
+    from stixis._syntax.serialize import format_token_sequence, serialize_url
+    from stixis._syntax.tokenizer import tokenize_css
 
     assert all(fn == fn.strip() for fn in MATH_FUNCTIONS)
     assert "sibling-index" in MATH_FUNCTIONS

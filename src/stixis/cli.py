@@ -35,7 +35,7 @@ class _StixisArgumentParser(argparse.ArgumentParser):
         raise SystemExit(EXIT_USAGE_ERROR)
 
 
-def _describe_python_inputs(target_kind: str, name: str, syntax: str) -> list[str]:
+def _describe_python_inputs(name: str, syntax: str) -> list[str]:
     """Return concise descriptions of accepted Python input types for `name`."""
     hints: list[str] = ["str"]
     if name in ("unicode-range", "<urange>"):
@@ -72,6 +72,26 @@ def _describe_python_inputs(target_kind: str, name: str, syntax: str) -> list[st
     return hints
 
 
+def _lookup_bare_descriptor(norm: str) -> dict[str, Any] | None:
+    matching_at = [
+        (at_name, descs[norm])
+        for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
+        if norm in descs
+    ]
+    if not matching_at:
+        return None
+    at_name, desc_syn = matching_at[0]
+    return {
+        "kind": "descriptor",
+        "name": norm,
+        "at_rule": at_name,
+        "all_at_rules": [a for a, _ in matching_at],
+        "python_key": norm.replace("-", "_"),
+        "syntax": desc_syn,
+        "python_inputs": _describe_python_inputs(norm, desc_syn),
+    }
+
+
 def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str, Any] | None:
     target = raw_target.strip()
     if not target:
@@ -102,22 +122,7 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
                 norm = normalize_identifier_key(target)
             except StixisError:
                 return None
-            matching_at = [
-                (at_name, descs[norm])
-                for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
-                if norm in descs
-            ]
-            if matching_at:
-                at_name, desc_syn = matching_at[0]
-                return {
-                    "kind": "descriptor",
-                    "name": norm,
-                    "at_rule": at_name,
-                    "all_at_rules": [a for a, _ in matching_at],
-                    "python_key": norm.replace("-", "_"),
-                    "syntax": desc_syn,
-                    "python_inputs": _describe_python_inputs("descriptor", norm, desc_syn),
-                }
+            return _lookup_bare_descriptor(norm)
         return None
 
     if norm_at is not None:
@@ -127,34 +132,20 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
             "at_rule": norm_at,
             "python_key": norm_name.replace("-", "_"),
             "syntax": syn,
-            "python_inputs": _describe_python_inputs("descriptor", norm_name, syn),
+            "python_inputs": _describe_python_inputs(norm_name, syn),
         }
 
     if norm_name.startswith("<") and norm_name.endswith(">"):
         # If bare identifier matched both a descriptor-only name and a `<type>`, check if `target` was bare
         if not target.startswith("<") and norm_name[1:-1] not in PROPERTY_SYNTAXES:
-            bare_norm = norm_name[1:-1]
-            matching_at = [
-                (at_name, descs[bare_norm])
-                for at_name, descs in sorted(ATRULE_DESCRIPTORS.items())
-                if bare_norm in descs
-            ]
-            if matching_at:
-                at_name, desc_syn = matching_at[0]
-                return {
-                    "kind": "descriptor",
-                    "name": bare_norm,
-                    "at_rule": at_name,
-                    "all_at_rules": [a for a, _ in matching_at],
-                    "python_key": bare_norm.replace("-", "_"),
-                    "syntax": desc_syn,
-                    "python_inputs": _describe_python_inputs("descriptor", bare_norm, desc_syn),
-                }
+            desc_info = _lookup_bare_descriptor(norm_name[1:-1])
+            if desc_info is not None:
+                return desc_info
         return {
             "kind": "type",
             "name": norm_name,
             "syntax": syn,
-            "python_inputs": _describe_python_inputs("type", norm_name, syn),
+            "python_inputs": _describe_python_inputs(norm_name, syn),
         }
 
     if norm_name in PROPERTY_SYNTAXES:
@@ -171,7 +162,7 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
             "enabled_by_default": eng >= DEFAULT_MIN_ENGINES
             or norm_name in ALWAYS_ALLOWED_PROPERTIES,
             "also_descriptor_in": also_in_at_rules,
-            "python_inputs": _describe_python_inputs("property", norm_name, syn),
+            "python_inputs": _describe_python_inputs(norm_name, syn),
         }
 
     return None
@@ -191,8 +182,6 @@ def _run_inspect(args: argparse.Namespace) -> int:
     kind = info["kind"]
     if kind == "at-rule":
         sys.stdout.write(f"{info['name']} (at-rule)\n")
-        if info.get("syntax"):
-            sys.stdout.write(f"  syntax: {info['syntax']}\n")
         prelude = info.get("prelude_syntax")
         if prelude:
             sys.stdout.write(f"  prelude: {prelude}\n")
@@ -244,7 +233,7 @@ def _run_check(args: argparse.Namespace) -> int:
             is_custom_prop = False
 
     info = _inspect_target(target, at_rule=at_rule)
-    if not is_custom_prop and info is None:
+    if not is_custom_prop and (info is None or info["kind"] == "at-rule"):
         ctx = f" (in {at_rule})" if at_rule else ""
         sys.stderr.write(f"error: unknown CSS target {target!r}{ctx}\n")
         return EXIT_NOT_FOUND

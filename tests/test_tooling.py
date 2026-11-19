@@ -272,15 +272,13 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
         encoding="utf-8",
     )
 
-    valid, invalid = gen_wpt_tests._extract_broad_css_property_cases(wpt_css, min_engines=2)
-    assert ("width", "10px", "10px") in valid
-    assert ("width", "calc(10px + 20px)", "calc(30px)") in valid
-    assert ("width", "var(--w)", "var(--w)") in valid
-    assert ("transform-origin", "top center", "center top") in valid
-    assert ("width", "not-a-width") in invalid
-    assert ("width", "calc(10px + 20px) extra-invalid") in invalid
-
     suite = gen_wpt_tests.extract_broad_css_property_suite(wpt_css, min_engines=2)
+    assert ("width", "10px", "10px") in suite.valid
+    assert ("width", "calc(10px + 20px)", "calc(30px)") in suite.valid
+    assert ("width", "var(--w)", "var(--w)") in suite.valid
+    assert ("transform-origin", "top center", "center top") in suite.valid
+    assert ("width", "not-a-width") in suite.invalid
+    assert ("width", "calc(10px + 20px) extra-invalid") in suite.invalid
     assert any(
         prop == "width" and raw == "1px" and exp == "2px" and reason
         for prop, raw, exp, reason in suite.xfail_valid

@@ -196,26 +196,24 @@ def test_stylerule_format_minify_visits_nested_rules_once(
 ) -> None:
     import time
 
-    import stixis.stylesheet as nodes_mod
-
     node = StyleRule("a", {"color": "red"})
     for _ in range(17):
         node = StyleRule("a", {"color": "red"}, rules=[node])
 
     calls = 0
-    orig_format_rule_node = nodes_mod._format_rule_node
+    orig_format = StyleRule.format
 
-    def _counting_format_rule_node(*args: object, **kwargs: object) -> str:
+    def _counting_format(self: StyleRule, *args: object, **kwargs: object) -> str:
         nonlocal calls
         calls += 1
-        return orig_format_rule_node(*args, **kwargs)  # type: ignore[arg-type]
+        return orig_format(self, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(nodes_mod, "_format_rule_node", _counting_format_rule_node)
+    monkeypatch.setattr(StyleRule, "format", _counting_format)
     t0 = time.perf_counter()
     minified = node.format(minify=True)
     elapsed = time.perf_counter() - t0
 
-    assert calls == 17
+    assert calls == 18
     assert elapsed < 0.1
     assert minified == "a{color:red;" * 17 + "a{color:red}" + "}" * 17
 
