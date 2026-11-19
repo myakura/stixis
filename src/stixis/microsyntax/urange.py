@@ -324,13 +324,11 @@ def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]
                 out.append((elem, elem))
             else:
                 raise StixisValidationError("unicode-range", "<urange>#", value)
-        if coalesce:
-            if all_plain_ints:
-                return _coalesce_codepoint_set(int_cps)
-            # Merge overlapping/adjacent intervals when coalesce=True on mixed sequences
-            return _merge_intervals(out)
         if all_plain_ints:
             return _coalesce_codepoint_set(int_cps)
+        if coalesce:
+            # Merge overlapping/adjacent intervals when coalesce=True on mixed sequences
+            return _merge_intervals(out)
         return out
 
     raise StixisValidationError("unicode-range", "<urange>#", value)

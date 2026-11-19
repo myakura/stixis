@@ -333,6 +333,22 @@ def _freeze_declarations(
     return tuple(out)
 
 
+def _serialize_declaration_value(
+    prop: str,
+    val: Any,
+    *,
+    options: SerializationOptions,
+) -> str:
+    return evaluate_serialize_value(
+        prop,
+        "<declaration-value>",
+        compile_value_syntax("<declaration-value>"),
+        val,
+        specs_lookup=lookup_value_node,
+        options=options,
+    )
+
+
 def _validate_and_normalize_declarations(
     declarations: Mapping[str, Any] | Sequence[tuple[str, Any] | RawDeclaration] | None,
     *,
@@ -380,7 +396,7 @@ def _validate_and_normalize_declarations(
             continue
         prop = normalize_identifier_key(raw_key)
 
-        if prop.startswith("--") and len(prop) >= 2:
+        if prop.startswith("--"):
             if norm_at is not None and norm_at == "@font-face":
                 raise StixisValidationError(
                     f"{norm_at}/{prop}",
@@ -388,14 +404,7 @@ def _validate_and_normalize_declarations(
                     prop,
                     "Custom properties are not valid inside @font-face",
                 )
-            val_str = evaluate_serialize_value(
-                prop,
-                "<declaration-value>",
-                compile_value_syntax("<declaration-value>"),
-                val,
-                specs_lookup=lookup_value_node,
-                options=options,
-            )
+            val_str = _serialize_declaration_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
             continue
 
@@ -405,14 +414,7 @@ def _validate_and_normalize_declarations(
                 if options.allow_unknown_properties or (
                     options.allow_vendor_prefixes and prop.startswith("-")
                 ):
-                    val_str = evaluate_serialize_value(
-                        prop,
-                        "<declaration-value>",
-                        compile_value_syntax("<declaration-value>"),
-                        val,
-                        specs_lookup=lookup_value_node,
-                        options=options,
-                    )
+                    val_str = _serialize_declaration_value(prop, val, options=options)
                     normalized_pairs.append((prop, val_str))
                     continue
                 raise StixisValidationError(
@@ -443,14 +445,7 @@ def _validate_and_normalize_declarations(
         if options.allow_unknown_properties or (
             options.allow_vendor_prefixes and prop.startswith("-") and not prop.startswith("--")
         ):
-            val_str = evaluate_serialize_value(
-                prop,
-                "<declaration-value>",
-                compile_value_syntax("<declaration-value>"),
-                val,
-                specs_lookup=lookup_value_node,
-                options=options,
-            )
+            val_str = _serialize_declaration_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
             continue
 
@@ -503,11 +498,7 @@ def _contains_template(val: Any) -> bool:
     return False
 
 
-def _validate_selector(
-    selector: str | Sequence[str],
-    *,
-    options: SerializationOptions = DEFAULT_OPTIONS,
-) -> str:
+def _validate_selector(selector: str | Sequence[str]) -> str:
     if isinstance(selector, str):
         sel_str = selector.strip()
     elif isinstance(selector, Sequence):
@@ -663,13 +654,12 @@ class StyleRule:
     _effective_options: SerializationOptions = field(init=False, repr=False)
     _selector_str: str = field(init=False, repr=False)
     _decl_pairs: tuple[tuple[str, str], ...] = field(init=False, repr=False)
-    _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _comment_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         opts = current_options(self.options)
         raw_override = active_or_explicit_options(self.options)
-        sel_s = _validate_selector(self.selector, options=opts)
+        sel_s = _validate_selector(self.selector)
         decls = _validate_and_normalize_declarations(
             self.declarations, at_rule=None, options=opts, raw_override_options=raw_override
         )
@@ -695,7 +685,6 @@ class StyleRule:
         object.__setattr__(self, "_effective_options", opts)
         object.__setattr__(self, "_selector_str", sel_s)
         object.__setattr__(self, "_decl_pairs", decls)
-        object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_comment_str", comm_s)
 
     def format(
@@ -725,8 +714,7 @@ class StyleRule:
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
-                for c in self._rules_tuple
+                c.format(minify=True, indent=0, options=eff_opts) for c in self.rules
             )
             sep = ";" if (decl_part and child_part) else ""
             return f"{self._selector_str}{{{decl_part}{sep}{child_part}}}"
@@ -741,10 +729,8 @@ class StyleRule:
         for k, v in self._decl_pairs:
             body_items.append(f"{inner_pad}{k}: {v};")
 
-        for child in self._rules_tuple:
-            body_items.append(
-                _format_rule_node(child, minify=False, indent=indent + 1, options=eff_opts)
-            )
+        for child in self.rules:
+            body_items.append(child.format(minify=False, indent=indent + 1, options=eff_opts))
 
         if not body_items:
             lines.append(f"{pad}{self._selector_str} {{}}")
@@ -773,7 +759,6 @@ class AtRule:
     _at_name: str = field(init=False, repr=False)
     _prelude_str: str = field(init=False, repr=False)
     _decl_pairs: tuple[tuple[str, str], ...] = field(init=False, repr=False)
-    _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _comment_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -821,7 +806,6 @@ class AtRule:
         object.__setattr__(self, "_at_name", at_name)
         object.__setattr__(self, "_prelude_str", prelude_s)
         object.__setattr__(self, "_decl_pairs", decls)
-        object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_comment_str", comm_s)
 
     def format(
@@ -856,7 +840,7 @@ class AtRule:
 
         is_stmt = self.statement or (
             not self._decl_pairs
-            and not self._rules_tuple
+            and not self.rules
             and self.descriptors is None
             and self._at_name in ("@import", "@charset", "@namespace", "@layer", "@custom-media")
             and bool(self._prelude_str)
@@ -873,8 +857,7 @@ class AtRule:
         if minify:
             decl_part = ";".join(f"{k}:{v}" for k, v in self._decl_pairs)
             child_part = "".join(
-                _format_rule_node(c, minify=True, indent=0, options=eff_opts)
-                for c in self._rules_tuple
+                c.format(minify=True, indent=0, options=eff_opts) for c in self.rules
             )
             sep = ";" if (decl_part and child_part) else ""
             return f"{head}{{{decl_part}{sep}{child_part}}}"
@@ -882,10 +865,8 @@ class AtRule:
         body_items: list[str] = []
         for k, v in self._decl_pairs:
             body_items.append(f"{inner_pad}{k}: {v};")
-        for child in self._rules_tuple:
-            body_items.append(
-                _format_rule_node(child, minify=minify, indent=indent + 1, options=eff_opts)
-            )
+        for child in self.rules:
+            body_items.append(child.format(minify=minify, indent=indent + 1, options=eff_opts))
 
         if not body_items:
             lines.append(f"{pad}{head} {{}}")
@@ -946,7 +927,6 @@ class StyleSheet:
     header_comment: str | Template | None = None
     options: SerializationOptions | None = None
     _effective_options: SerializationOptions = field(init=False, repr=False)
-    _rules_tuple: tuple[Rule, ...] = field(init=False, repr=False)
     _header_str: str | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -965,7 +945,6 @@ class StyleSheet:
         object.__setattr__(self, "rules", rules_t)
         object.__setattr__(self, "header_comment", frozen_hdr)
         object.__setattr__(self, "_effective_options", opts)
-        object.__setattr__(self, "_rules_tuple", rules_t)
         object.__setattr__(self, "_header_str", hdr_s)
 
     def format(
@@ -986,8 +965,8 @@ class StyleSheet:
             else:
                 blocks.append(self._header_str)
 
-        for r in self._rules_tuple:
-            blocks.append(_format_rule_node(r, minify=minify, indent=0, options=eff_opts))
+        for r in self.rules:
+            blocks.append(r.format(minify=minify, indent=0, options=eff_opts))
 
         if minify:
             return "".join(blocks)
@@ -997,18 +976,6 @@ class StyleSheet:
 
     def __str__(self) -> str:
         return self.format(minify=False)
-
-
-def _format_rule_node(
-    node: Rule,
-    *,
-    minify: bool,
-    indent: int,
-    options: SerializationOptions | None,
-) -> str:
-    if isinstance(node, CommentNode):
-        return node.format(minify=minify, indent=indent, options=options)
-    return node.format(minify=minify, indent=indent, options=options)
 
 
 def dumps(
@@ -1021,7 +988,7 @@ def dumps(
     if isinstance(node_or_nodes, StyleSheet):
         return node_or_nodes.format(minify=minify, options=options)
     if isinstance(node_or_nodes, (StyleRule, AtRule, CommentNode)):
-        return _format_rule_node(node_or_nodes, minify=minify, indent=0, options=options)
+        return node_or_nodes.format(minify=minify, indent=0, options=options)
     if isinstance(node_or_nodes, Iterable) and not isinstance(node_or_nodes, (str, bytes, Mapping)):
         sheet = StyleSheet(tuple(node_or_nodes), options=options)
         return sheet.format(minify=minify, options=options)
