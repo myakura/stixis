@@ -508,11 +508,7 @@ def infer_python_type_expr(
         types.extend(["set[int]", "frozenset[int]", "tuple[int, int]"])
     if name == "src":
         types.extend(["FontSrc", "Url", "LocalFont"])
-    if (
-        name in ("font-feature-settings", "font-variation-settings")
-        or "settings" in syntax
-        or "src" in syntax
-    ):
+    if name in ("font-feature-settings", "font-variation-settings"):
         types.append("Mapping[str, Any]")
 
     # Deduplicate while preserving order

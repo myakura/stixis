@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -198,27 +198,6 @@ def serialize_single_font_src(
             parts.append(serialize_font_tech(item.tech, target=target))
         return " ".join(parts)
 
-    if isinstance(item, Mapping):
-        allowed_keys = {"url", "local", "format", "tech"}
-        if not item or any(k not in allowed_keys for k in item):
-            raise StixisValidationError(target, expected_syntax, item)
-        src_obj = FontSrc(
-            url=item.get("url"),
-            local=item.get("local"),
-            format=item.get("format"),
-            tech=item.get("tech"),
-        )
-        return serialize_single_font_src(src_obj, options=options, target=target)
-
-    if isinstance(item, tuple) and 1 <= len(item) <= 3:
-        url_val = item[0]
-        fmt_val = item[1] if len(item) >= 2 else None
-        tech_val = item[2] if len(item) == 3 else None
-        if not isinstance(url_val, (str, Url)):
-            raise StixisValidationError(target, expected_syntax, item)
-        src_obj = FontSrc(url=url_val, format=fmt_val, tech=tech_val)
-        return serialize_single_font_src(src_obj, options=options, target=target)
-
     raise StixisValidationError(target, expected_syntax, item)
 
 
@@ -230,22 +209,7 @@ def serialize_font_src_list(
 ) -> str:
     """Validate and serialize a `<font-src-list>` (`<font-src>#`)."""
     expected_syntax = "<font-src-list>"
-    if isinstance(value, (str, Url, LocalFont, FontSrc, Mapping)):
-        return serialize_single_font_src(value, options=options, target=target)
-
-    if (
-        isinstance(value, tuple)
-        and 1 <= len(value) <= 3
-        and isinstance(value[0], (str, Url))
-        and (
-            len(value) == 1
-            or value[1] is None
-            or (
-                isinstance(value[1], (str, Keyword))
-                and str(value[1]).lower() in FONT_FORMAT_KEYWORDS
-            )
-        )
-    ):
+    if isinstance(value, (str, Url, LocalFont, FontSrc)):
         return serialize_single_font_src(value, options=options, target=target)
 
     if isinstance(value, Sequence):

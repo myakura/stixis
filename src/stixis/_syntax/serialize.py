@@ -333,18 +333,9 @@ def serialize_percentage(
     target: str = "<percentage>",
     expected_syntax: str = "<percentage>",
 ) -> str:
-    """Validate and serialize a CSS `<percentage>` from `Percentage`, `(num, '%')`, or `%` string."""
-    num: int | float
+    """Validate and serialize a CSS `<percentage>` from `Percentage`."""
     if _is_values_instance(value, "Percentage"):
         num = value.value
-    elif (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and value[1] == "%"
-        and not isinstance(value[0], bool)
-        and isinstance(value[0], (int, float))
-    ):
-        num = value[0]
     else:
         raise StixisValidationError(target, expected_syntax, value)
 
@@ -386,7 +377,7 @@ def serialize_dimension(
     target: str = "<dimension>",
     expected_syntax: str = "<dimension>",
 ) -> str:
-    """Validate and serialize a dimension value (`Dimension(n, unit)`, `(n, unit)`, or unitless `0` for `<length>`)."""
+    """Validate and serialize a dimension value (`Dimension(n, unit)` or unitless `0` for `<length>`)."""
     if (
         allow_unitless_zero
         and not isinstance(value, bool)
@@ -396,20 +387,9 @@ def serialize_dimension(
         check_numeric_bounds(0, min_val, max_val, target, expected_syntax)
         return "0px"
 
-    num: int | float
-    unit: str
     if _is_values_instance(value, "Dimension"):
         num = value.value
         unit = value.unit
-    elif (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and not isinstance(value[0], bool)
-        and isinstance(value[0], (int, float))
-        and isinstance(value[1], str)
-    ):
-        num = value[0]
-        unit = value[1]
     else:
         raise StixisValidationError(target, expected_syntax, value)
 

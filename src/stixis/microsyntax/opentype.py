@@ -150,21 +150,6 @@ def serialize_font_feature_settings(
             )
         return ", ".join(parts)
 
-    if (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and isinstance(value[0], str)
-        and (isinstance(value[1], (str, Keyword)) or not isinstance(value[1], (Sequence, Mapping)))
-        and not (
-            isinstance(value[1], str)
-            and len(value[1]) == 4
-            and value[1].lower() not in ("on", "off")
-        )
-    ):
-        return _format_single_feature_tag_value(
-            value[0], value[1], options=options, target=target, expected_syntax=expected_syntax
-        )
-
     if isinstance(value, Sequence):
         if not value:
             raise StixisValidationError(target, expected_syntax, value)
@@ -239,17 +224,6 @@ def serialize_font_variation_settings(
                 )
             )
         return ", ".join(parts)
-
-    if (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and isinstance(value[0], str)
-        and not isinstance(value[1], bool)
-        and isinstance(value[1], (int, float))
-    ):
-        return _format_single_variation_tag_value(
-            value[0], value[1], options=options, target=target, expected_syntax=expected_syntax
-        )
 
     if isinstance(value, Sequence):
         if not value:
