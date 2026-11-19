@@ -166,10 +166,9 @@ def format_single_urange(
     ):
         raise StixisValidationError("unicode-range", "<urange>#", (start, end))
 
-    prefix = "U+" if options.uppercase_urange_prefix else "u+"
     if start == end:
-        return f"{prefix}{start:X}"
-    return f"{prefix}{start:X}-{end:X}"
+        return f"U+{start:X}"
+    return f"U+{start:X}-{end:X}"
 
 
 def serialize_single_urange(

@@ -411,12 +411,6 @@ def _validate_and_normalize_declarations(
         if norm_at is not None:
             descs = ATRULE_DESCRIPTORS.get(norm_at, {})
             if prop not in descs:
-                if options.allow_unknown_properties or (
-                    options.allow_vendor_prefixes and prop.startswith("-")
-                ):
-                    val_str = _serialize_declaration_value(prop, val, options=options)
-                    normalized_pairs.append((prop, val_str))
-                    continue
                 raise StixisValidationError(
                     f"{norm_at}/{prop}",
                     f"descriptor of {norm_at}",
@@ -427,9 +421,6 @@ def _validate_and_normalize_declarations(
             if norm_at == "@font-face" and prop in ("font-width", "font-stretch"):
                 if options.font_face_stretch_alias == "font-stretch":
                     normalized_pairs.append(("font-stretch", val_str))
-                elif options.font_face_stretch_alias == "both":
-                    normalized_pairs.append(("font-stretch", val_str))
-                    normalized_pairs.append(("font-width", val_str))
                 else:
                     normalized_pairs.append((prop, val_str))
             else:
@@ -439,13 +430,6 @@ def _validate_and_normalize_declarations(
         # Standard style rule property
         if prop in PROPERTY_SYNTAXES and is_property_enabled(prop, options):
             val_str = serialize_value(prop, val, options=options)
-            normalized_pairs.append((prop, val_str))
-            continue
-
-        if options.allow_unknown_properties or (
-            options.allow_vendor_prefixes and prop.startswith("-") and not prop.startswith("--")
-        ):
-            val_str = _serialize_declaration_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
             continue
 
@@ -600,7 +584,6 @@ def _formatting_profile(options: SerializationOptions) -> tuple[Any, ...]:
         options.normalize_zero_oblique,
         options.font_face_stretch_alias,
         options.quote_font_format,
-        options.uppercase_urange_prefix,
     )
 
 
@@ -612,21 +595,10 @@ def _needs_rebuild_for_options(
         return False
     if _formatting_profile(built_opts) != _formatting_profile(target_opts):
         return True
-    # When `allow_unknown_properties` or `allow_vendor_prefixes` was active, disabled known properties
-    # were accepted as `<declaration-value>` rather than validated against their specific property grammar.
-    if (built_opts.allow_unknown_properties or built_opts.allow_vendor_prefixes) and (
-        target_opts.min_engines != built_opts.min_engines
-        or target_opts.extra_properties != built_opts.extra_properties
-    ):
-        return True
     # Tightening validation gates requires re-validating declarations/descriptors
     if target_opts.min_engines > built_opts.min_engines:
         return True
-    if not (built_opts.extra_properties <= target_opts.extra_properties):
-        return True
-    if built_opts.allow_vendor_prefixes and not target_opts.allow_vendor_prefixes:
-        return True
-    return bool(built_opts.allow_unknown_properties and not target_opts.allow_unknown_properties)
+    return not (built_opts.extra_properties <= target_opts.extra_properties)
 
 
 def _has_mismatched_raw_decl_options(
