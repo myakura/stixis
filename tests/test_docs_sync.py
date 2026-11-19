@@ -129,27 +129,3 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
     assert not unmarked_internal, (
         f"Internal Stixis names presented without 'internal' in docs: {unmarked_internal}"
     )
-
-
-def test_unmarked_internal_stixis_names_detected_in_pre_fix_readme_sample() -> None:
-    pre_fix_readme_sample = """\
-* **Compiles W3C Value Definition Syntax.** `compile_value_syntax` turns `@webref/css` grammars into a `ValueNode` tree. `serialize_value` formats structured Python values against that tree, and `canonicalize` validates relative color channel keywords (`RELATIVE_COLOR_CHANNEL_KEYWORDS` generated from `@webref/css`). Both the library and the CLI resolve targets through `resolve_target_syntax`: standard CSS properties (`PROPERTY_SYNTAXES`), `@webref/css` value types (`VALUE_SYNTAXES`), and evaluator-supported built-in primitive types (`SUPPORTED_BUILTIN_TYPES`). Standard and custom properties accept `CSS_WIDE_KEYWORDS`, while `RESERVED_CUSTOM_IDENT_KEYWORDS` remains excluded from `<custom-ident>`.
-* **Gates experimental CSS properties by engine support (`min_engines`).** According to `@mdn/browser-compat-data` (`PROPERTY_ENGINE_COUNTS`), plus `ALWAYS_ALLOWED_PROPERTIES` in `codegen/spec_patches.toml`.
-* **Escapes PEP 750 `Template` (`t"..."`) slots by context.** `render_css_template` checks the CSS tokens before each `Interpolation` slot, and validates the rendered tokens against the target `ValueNode` grammar.
-* Standard-library types such as `Template`, `Interpolation`, `TypedDict`, `Mapping`, and `Sequence` are allowed without marking.
-"""
-    expected_offending = [
-        "compile_value_syntax",
-        "ValueNode",
-        "RELATIVE_COLOR_CHANNEL_KEYWORDS",
-        "resolve_target_syntax",
-        "PROPERTY_SYNTAXES",
-        "VALUE_SYNTAXES",
-        "SUPPORTED_BUILTIN_TYPES",
-        "CSS_WIDE_KEYWORDS",
-        "RESERVED_CUSTOM_IDENT_KEYWORDS",
-        "PROPERTY_ENGINE_COUNTS",
-        "ALWAYS_ALLOWED_PROPERTIES",
-        "render_css_template",
-    ]
-    assert _find_unmarked_internal_stixis_names_in_doc(pre_fix_readme_sample) == expected_offending

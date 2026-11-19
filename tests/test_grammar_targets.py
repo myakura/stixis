@@ -310,8 +310,7 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     patches = tomllib.loads(
         (repo_root / "codegen" / "spec_patches.toml").read_text(encoding="utf-8")
     )
-    raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-    webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+    webref_dir = gen_specs.resolve_default_webref_dir(patches, explicit_patches=False)
     if not webref_dir.is_dir():
         pytest.skip(f"Local @webref/css directory not available: {webref_dir}")
 
