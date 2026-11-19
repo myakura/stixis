@@ -25,26 +25,12 @@ sys.path.insert(0, str(REPO_ROOT))
 
 import gen_specs
 import gen_wpt_tests
+from gen_specs import find_unresolved_refs
 
 from stixis import SerializationOptions, StixisError, canonicalize
 from stixis._generated import specs as current_specs
 from stixis._generated import units as current_units
-from stixis._grammar.vds import (
-    _BUILTIN_PRIMITIVES,
-    AllOfNode,
-    AnyOrderNode,
-    DelimNode,
-    ExclusiveOrNode,
-    FunctionNode,
-    JuxtaposeNode,
-    KeywordNode,
-    MultiplierNode,
-    NonEmptyGroupNode,
-    PrimitiveNode,
-    RefNode,
-    ValueNode,
-    compile_value_syntax,
-)
+from stixis._grammar.vds import compile_value_syntax
 
 
 @dataclass(slots=True)
@@ -132,56 +118,6 @@ def _detect_git_commit(directory: Path) -> str:
     except OSError:
         return "unknown"
     return "unknown"
-
-
-def find_unresolved_refs(
-    node: ValueNode,
-    properties: dict[str, str],
-    values: dict[str, str],
-    visited: set[tuple[str, bool]] | None = None,
-) -> list[str]:
-    """Return a sorted list of unresolved `<type>` or `<'prop'>` references in `node`."""
-    if visited is None:
-        visited = set()
-    missing: set[str] = set()
-
-    if isinstance(node, (KeywordNode, DelimNode, PrimitiveNode)):
-        return []
-    if isinstance(node, FunctionNode):
-        if node.arg is not None:
-            missing.update(find_unresolved_refs(node.arg, properties, values, visited))
-        return sorted(missing)
-    if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
-        return find_unresolved_refs(node.child, properties, values, visited)
-    if isinstance(node, (JuxtaposeNode, AllOfNode, AnyOrderNode, ExclusiveOrNode)):
-        for c in node.items:
-            missing.update(find_unresolved_refs(c, properties, values, visited))
-        return sorted(missing)
-    if isinstance(node, RefNode):
-        key = (node.name, node.is_property)
-        if key in visited:
-            return []
-        visited.add(key)
-        if node.is_property:
-            syn = properties.get(node.name)
-            if not syn:
-                return [f"<'{node.name}'>"]
-            try:
-                compiled = compile_value_syntax(syn)
-            except StixisError:
-                return [f"<'{node.name}'>"]
-            return find_unresolved_refs(compiled, properties, values, visited)
-        if node.name in _BUILTIN_PRIMITIVES:
-            return []
-        syn = values.get(node.name) or values.get(node.name.strip("<>"))
-        if not syn:
-            return [node.name]
-        try:
-            compiled = compile_value_syntax(syn)
-        except StixisError:
-            return [node.name]
-        return find_unresolved_refs(compiled, properties, values, visited)
-    return []
 
 
 def _expect_invalid_raises(
@@ -477,7 +413,7 @@ def analyze_upstream(
             try:
                 node = compile_value_syntax(new_syn)
                 missing = find_unresolved_refs(node, properties, values)
-                if missing or not gen_specs.is_node_resolvable(node, properties, values):
+                if missing:
                     resolvable = False
             except StixisError as exc:
                 resolvable = False
@@ -721,7 +657,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--patches",
         type=Path,
-        default=REPO_ROOT / "codegen" / "spec_patches.toml",
+        default=None,
         help="Path to spec_patches.toml.",
     )
     parser.add_argument(
@@ -778,14 +714,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.patches.is_file():
-        print(f"Missing patches file: {args.patches}", file=sys.stderr)
+    explicit_patches = args.patches is not None
+    patches_path = args.patches if explicit_patches else gen_specs.DEFAULT_PATCHES_PATH
+    if not patches_path.is_file():
+        print(f"Missing patches file: {patches_path}", file=sys.stderr)
         return 1
     if not args.baseline.is_file():
         print(f"Missing baseline file: {args.baseline}", file=sys.stderr)
         return 1
 
-    patches = tomllib.loads(args.patches.read_text(encoding="utf-8"))
+    patches = tomllib.loads(patches_path.read_text(encoding="utf-8"))
     effective_min_engines = (
         args.min_engines
         if args.min_engines is not None
@@ -794,17 +732,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.webref_dir is not None:
         webref_dir = args.webref_dir.expanduser()
     else:
-        raw_webref = Path(patches["meta"]["webref_css_dir"]).expanduser()
-        webref_dir = raw_webref if raw_webref.is_absolute() else (Path.home() / raw_webref)
+        webref_dir = gen_specs.resolve_default_webref_dir(
+            patches, explicit_patches=explicit_patches
+        )
 
-    bcd_dir: Path | None = None
     if args.bcd_dir is not None:
         bcd_dir = args.bcd_dir.expanduser()
-    elif "bcd_css_dir" in patches.get("meta", {}):
-        raw_bcd = Path(patches["meta"]["bcd_css_dir"]).expanduser()
-        candidate_bcd = raw_bcd if raw_bcd.is_absolute() else (Path.home() / raw_bcd)
-        if candidate_bcd.is_dir():
-            bcd_dir = candidate_bcd
+    else:
+        bcd_dir = gen_specs.resolve_default_bcd_dir(
+            patches, explicit_patches=explicit_patches
+        )
 
     wpt_dir = args.wpt_dir.expanduser()
     if not webref_dir.is_dir():
@@ -817,7 +754,7 @@ def main(argv: list[str] | None = None) -> int:
     report = analyze_upstream(
         webref_dir,
         wpt_dir,
-        args.patches,
+        patches_path,
         args.baseline,
         min_engines=effective_min_engines,
         bcd_dir=bcd_dir,
@@ -867,14 +804,10 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(new_baseline, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
-        report = analyze_upstream(
-            webref_dir,
-            wpt_dir,
-            args.patches,
-            args.baseline,
-            min_engines=effective_min_engines,
-            bcd_dir=bcd_dir,
-        )
+        report.webref_old_commit = report.webref_new_commit
+        report.wpt_old_commit = report.wpt_new_commit
+        report.bcd_old_commit = report.bcd_new_commit
+        report.wpt_counts_old = dict(report.wpt_counts_new)
 
     if args.json_output is not None:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)

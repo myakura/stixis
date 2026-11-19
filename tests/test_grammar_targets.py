@@ -326,11 +326,11 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     assert report.has_changes
     assert any("`hanging-punctuation`: 1 -> 2 engines" in s for s in report.support_changes)
 
-    # 4. `_extract_css_fonts_property_cases` filters by `min_engines` (e.g. `min_engines=3` excludes 2-engine `font-language-override`)
-    fonts_v_3, _ = gen_wpt_tests._extract_css_fonts_property_cases(
+    # 4. `extract_css_fonts_property_suite` filters by `min_engines` (e.g. `min_engines=3` excludes 2-engine `font-language-override`)
+    fonts_suite_3 = gen_wpt_tests.extract_css_fonts_property_suite(
         gen_wpt_tests.DEFAULT_WPT_CSS_DIR, min_engines=3
     )
-    assert all(prop != "font-language-override" for prop, _, _ in fonts_v_3)
+    assert all(prop != "font-language-override" for prop, _, _ in fonts_suite_3.valid)
 
 
 def test_is_property_enabled_defaults_missing_engine_count_to_zero_and_docs_describe_bcd(

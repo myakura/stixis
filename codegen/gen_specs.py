@@ -33,6 +33,7 @@ from stixis._grammar.vds import (
     ValueNode,
     compile_value_syntax,
 )
+from stixis.errors import StixisError
 
 
 def _spec_sort_key(path: Path, priority_order: list[str]) -> tuple[int, str, int, str]:
@@ -214,7 +215,6 @@ def load_and_merge_specs(
     value_owners: dict[str, str] = {}
     value_new_values: dict[str, list[tuple[str, str]]] = {}
     atrules: dict[str, dict[str, Any]] = {}
-    atrule_syntax_owners: dict[str, str] = {}
     descriptor_owners: dict[tuple[str, str], str] = {}
     relative_color_channels: dict[str, set[str]] = {}
     channel_owners: dict[str, str] = {}
@@ -300,14 +300,10 @@ def load_and_merge_specs(
             entry = atrules.setdefault(
                 aname,
                 {
-                    "syntax": None,
                     "prelude": None,
                     "descriptors": {},
                 },
             )
-            if a.get("value") and _can_overwrite(atrule_syntax_owners.get(aname), spec_name):
-                entry["syntax"] = a["value"]
-                atrule_syntax_owners[aname] = spec_name
             for d in a.get("descriptors", []):
                 _collect_nested_types(
                     d.get("values", []),
@@ -364,14 +360,14 @@ def load_and_merge_specs(
     for aname, prelude_syn in patches.get("atrule_preludes", {}).items():
         entry = atrules.setdefault(
             aname,
-            {"syntax": None, "prelude": None, "descriptors": {}},
+            {"prelude": None, "descriptors": {}},
         )
         entry["prelude"] = prelude_syn
 
     for aname, desc_map in patches.get("atrule_descriptors", {}).items():
         entry = atrules.setdefault(
             aname,
-            {"syntax": None, "prelude": None, "descriptors": {}},
+            {"prelude": None, "descriptors": {}},
         )
         for dname, dsyn in desc_map.items():
             entry["descriptors"][dname] = dsyn
@@ -383,6 +379,56 @@ def load_and_merge_specs(
     return units_by_type, properties, values, atrules, relative_color_channels
 
 
+def find_unresolved_refs(
+    node: ValueNode,
+    properties: dict[str, str],
+    values: dict[str, str],
+    visited: set[tuple[str, bool]] | None = None,
+) -> list[str]:
+    """Return a sorted list of unresolved `<type>` or `<'prop'>` references in `node`."""
+    if visited is None:
+        visited = set()
+    missing: set[str] = set()
+
+    if isinstance(node, (KeywordNode, DelimNode, PrimitiveNode)):
+        return []
+    if isinstance(node, FunctionNode):
+        if node.arg is not None:
+            missing.update(find_unresolved_refs(node.arg, properties, values, visited))
+        return sorted(missing)
+    if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
+        return find_unresolved_refs(node.child, properties, values, visited)
+    if isinstance(node, (JuxtaposeNode, AllOfNode, AnyOrderNode, ExclusiveOrNode)):
+        for c in node.items:
+            missing.update(find_unresolved_refs(c, properties, values, visited))
+        return sorted(missing)
+    if isinstance(node, RefNode):
+        key = (node.name, node.is_property)
+        if key in visited:
+            return []
+        visited.add(key)
+        if node.is_property:
+            syn = properties.get(node.name)
+            if not syn:
+                return [f"<'{node.name}'>"]
+            try:
+                compiled = compile_value_syntax(syn)
+            except StixisError:
+                return [f"<'{node.name}'>"]
+            return find_unresolved_refs(compiled, properties, values, visited)
+        if node.name in _BUILTIN_PRIMITIVES:
+            return []
+        syn = values.get(node.name) or values.get(node.name.strip("<>"))
+        if not syn:
+            return [node.name]
+        try:
+            compiled = compile_value_syntax(syn)
+        except StixisError:
+            return [node.name]
+        return find_unresolved_refs(compiled, properties, values, visited)
+    return [type(node).__name__]
+
+
 def is_node_resolvable(
     node: ValueNode,
     properties: dict[str, str],
@@ -390,34 +436,7 @@ def is_node_resolvable(
     visited: set[tuple[str, bool]] | None = None,
 ) -> bool:
     """Return True if all `<type>` and `<'prop'>` references in `node` can be resolved to built-in primitives."""
-    if visited is None:
-        visited = set()
-
-    if isinstance(node, (KeywordNode, DelimNode, PrimitiveNode)):
-        return True
-    if isinstance(node, FunctionNode):
-        return node.arg is None or is_node_resolvable(node.arg, properties, values, visited)
-    if isinstance(node, (MultiplierNode, NonEmptyGroupNode)):
-        return is_node_resolvable(node.child, properties, values, visited)
-    if isinstance(node, (JuxtaposeNode, AllOfNode, AnyOrderNode, ExclusiveOrNode)):
-        return all(is_node_resolvable(c, properties, values, visited) for c in node.items)
-    if isinstance(node, RefNode):
-        key = (node.name, node.is_property)
-        if key in visited:
-            return True
-        visited.add(key)
-        if node.is_property:
-            syn = properties.get(node.name)
-            if not syn:
-                return False
-            return is_node_resolvable(compile_value_syntax(syn), properties, values, visited)
-        if node.name in _BUILTIN_PRIMITIVES:
-            return True
-        syn = values.get(node.name) or values.get(node.name.strip("<>"))
-        if not syn:
-            return False
-        return is_node_resolvable(compile_value_syntax(syn), properties, values, visited)
-    return False
+    return not find_unresolved_refs(node, properties, values, visited)
 
 
 def extract_top_level_keywords(

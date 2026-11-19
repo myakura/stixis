@@ -251,13 +251,6 @@ def extract_font_face_descriptor_suite(
     return FontFaceSuiteExtraction(valid=valid, invalid=invalid, xfail_valid=xfail_valid)
 
 
-def _extract_font_face_descriptor_cases(
-    wpt_dir: Path,
-) -> tuple[list[tuple[str, str, str | None]], list[tuple[str, str]]]:
-    suite = extract_font_face_descriptor_suite(wpt_dir)
-    return suite.valid, suite.invalid
-
-
 def _classify_valid_xfail_reason(
     raw_css: str,
     *,
@@ -481,15 +474,6 @@ def extract_css_fonts_property_suite(
     return _evaluate_property_html_files(html_files, min_engines=min_engines)
 
 
-def _extract_css_fonts_property_cases(
-    wpt_dir: Path,
-    *,
-    min_engines: int = 2,
-) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
-    suite = extract_css_fonts_property_suite(wpt_dir, min_engines=min_engines)
-    return suite.valid, suite.invalid
-
-
 def extract_broad_css_property_suite(
     wpt_dir: Path,
     *,
@@ -507,15 +491,6 @@ def extract_broad_css_property_suite(
         )
     ]
     return _evaluate_property_html_files(html_files, min_engines=min_engines)
-
-
-def _extract_broad_css_property_cases(
-    wpt_dir: Path,
-    *,
-    min_engines: int = 2,
-) -> tuple[list[tuple[str, str, str]], list[tuple[str, str]]]:
-    suite = extract_broad_css_property_suite(wpt_dir, min_engines=min_engines)
-    return suite.valid, suite.invalid
 
 
 def _render_urange_test_file(
