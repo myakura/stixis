@@ -68,24 +68,12 @@ def serialize_angle_value(
     target: str = "<angle>",
     expected_syntax: str = "<angle>",
 ) -> tuple[str, float]:
-    """Validate and serialize an `<angle>` (from `int`/`float` degrees, `Dimension`, `(val, unit)`, or string)."""
+    """Validate and serialize an `<angle>` from `Dimension` or an angle string."""
     num: float
     unit: str
-    if not isinstance(value, bool) and isinstance(value, (int, float)):
-        num = value
-        unit = "deg"
-    elif isinstance(value, Dimension):
+    if isinstance(value, Dimension):
         num = value.value
         unit = value.unit
-    elif (
-        isinstance(value, tuple)
-        and len(value) == 2
-        and not isinstance(value[0], bool)
-        and isinstance(value[0], (int, float))
-        and isinstance(value[1], str)
-    ):
-        num = value[0]
-        unit = value[1]
     elif isinstance(value, str):
         m = _ANGLE_STR_RE.match(value.strip())
         if not m:
@@ -115,7 +103,7 @@ def serialize_angle_value(
         raise StixisValidationError(target, expected_syntax, value)
 
     serialized = serialize_dimension(
-        (num, unit.lower()),
+        Dimension(num, unit.lower()),
         allowed_units=ANGLE_UNITS,
         lower_to_canonical=ANGLE_UNITS_LOWER,
         target=target,
@@ -132,18 +120,7 @@ def serialize_one_or_two(
     expected_syntax: str,
 ) -> str:
     """Serialize a `{1,2}` range value from a single item or a 2-element sequence."""
-    if (
-        isinstance(value, Sequence)
-        and not isinstance(value, (str, bytes))
-        and not (
-            isinstance(value, tuple)
-            and len(value) == 2
-            and not isinstance(value[0], bool)
-            and isinstance(value[0], (int, float))
-            and isinstance(value[1], str)
-            and (value[1] == "%" or value[1].lower() in ANGLE_UNITS_LOWER)
-        )
-    ):
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         if not (1 <= len(value) <= 2):
             raise StixisValidationError(target, expected_syntax, value)
         return " ".join(item_serializer(v) for v in value)
@@ -221,10 +198,6 @@ def _serialize_width_item(
                 Percentage(num), min_val=0, target=target, expected_syntax=expected_syntax
             )
         raise StixisValidationError(target, expected_syntax, item)
-    if not isinstance(item, bool) and isinstance(item, (int, float)):
-        return serialize_percentage(
-            Percentage(item), min_val=0, target=target, expected_syntax=expected_syntax
-        )
     return serialize_percentage(item, min_val=0, target=target, expected_syntax=expected_syntax)
 
 
@@ -326,29 +299,8 @@ def serialize_font_style(
             tail = list(value[1:])
             if not tail:
                 return "oblique"
-            if (
-                len(tail) == 1
-                and isinstance(tail[0], Sequence)
-                and not isinstance(tail[0], (str, bytes))
-                and not (
-                    len(tail[0]) == 2
-                    and isinstance(tail[0][1], str)
-                    and tail[0][1].lower() in ANGLE_UNITS_LOWER
-                )
-            ):
-                tail = list(tail[0])
             return _format_oblique_angles(
                 tail,
-                is_descriptor=is_descriptor,
-                options=options,
-                target=target,
-                expected_syntax=expected_syntax,
-                raw_value=value,
-            )
-        # Or a 2-tuple of angles `(lo, hi)` directly for `@font-face` oblique range
-        if is_descriptor and 1 <= len(value) <= 2:
-            return _format_oblique_angles(
-                value,
                 is_descriptor=is_descriptor,
                 options=options,
                 target=target,
@@ -382,10 +334,6 @@ def _serialize_metric_override_item(
                 Percentage(num), min_val=min_val, target=target, expected_syntax=expected_syntax
             )
         raise StixisValidationError(target, expected_syntax, item)
-    if not isinstance(item, bool) and isinstance(item, (int, float)):
-        return serialize_percentage(
-            Percentage(item), min_val=min_val, target=target, expected_syntax=expected_syntax
-        )
     return serialize_percentage(
         item, min_val=min_val, target=target, expected_syntax=expected_syntax
     )

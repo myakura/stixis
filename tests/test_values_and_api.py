@@ -129,6 +129,15 @@ def test_serialization_options_validates_fields_in_post_init() -> None:
         SerializationOptions(quote_char="")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="font_face_stretch_alias"):
         SerializationOptions(font_face_stretch_alias="invalid")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="font_face_stretch_alias"):
+        SerializationOptions(font_face_stretch_alias="both")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        SerializationOptions(allow_vendor_prefixes=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        SerializationOptions(allow_unknown_properties=True)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        SerializationOptions(uppercase_urange_prefix=False)  # type: ignore[call-arg]
+    assert not hasattr(SerializationOptions(), "activate")
     with pytest.raises(ValueError, match="min_engines"):
         SerializationOptions(min_engines="2")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="min_engines"):
@@ -216,13 +225,9 @@ def test_snake_case_and_custom_properties_and_vendor_prefixes() -> None:
     with pytest.raises((StixisValidationError, StixisSyntaxError)):
         StyleRule(":root", {"--bad": "calc(10px + 5px"})
 
-    # Vendor-prefixed properties require `allow_vendor_prefixes=True` or `RawDeclaration`
+    # Vendor-prefixed properties require `RawDeclaration`
     with pytest.raises(StixisValidationError):
         StyleRule(".text", {"-webkit-font-smoothing": "antialiased"})
-
-    vendor_opts = SerializationOptions(allow_vendor_prefixes=True)
-    v_rule = StyleRule(".text", {"-webkit-font-smoothing": "antialiased"}, options=vendor_opts)
-    assert "-webkit-font-smoothing: antialiased;" in str(v_rule)
 
     raw_rule = StyleRule(".text", [RawDeclaration("-moz-osx-font-smoothing", "grayscale")])
     assert "-moz-osx-font-smoothing: grayscale;" in str(raw_rule)
@@ -376,3 +381,65 @@ def test_serialize_value_font_properties_css_wide_and_var() -> None:
     assert (
         serialize_value("ascent-override", "calc(80% + 10%)", at_rule="@font-face") == "calc(90%)"
     )
+
+
+def test_removed_tuple_aliases_and_implicit_conversions_rejected() -> None:
+    # Removed `(num, unit)` and `(num, "%")` positional tuple aliases
+    for target, bad_val in (
+        ("width", (10, "px")),
+        ("width", (50, "%")),
+        ("<percentage>", (50, "%")),
+        ("<dimension>", (10, "px")),
+        ("<angle>", (45, "deg")),
+        ("margin", [(10, "px"), (20, "px")]),
+    ):
+        with pytest.raises(StixisValidationError):
+            serialize_value(target, bad_val)
+
+    # Removed implicit numeric conversions and nested/omitted oblique tuples in font descriptors/properties
+    for desc, bad_val in (
+        ("font-style", ("oblique", 10)),
+        ("font-style", ("oblique", (10, "deg"))),
+        ("font-style", ("oblique", (-10, 20))),
+        ("font-style", ("oblique", (Deg(-10), Deg(20)))),
+        ("font-style", (Deg(-10), Deg(20))),
+        ("font-width", 100),
+        ("font-width", (75, 125)),
+        ("font-width", (75, "%")),
+        ("ascent-override", 90),
+        ("ascent-override", (90, 100)),
+        ("descent-override", 20),
+        ("line-gap-override", 10),
+    ):
+        with pytest.raises(StixisValidationError):
+            serialize_value(desc, bad_val, at_rule="@font-face")
+
+    with pytest.raises(StixisValidationError):
+        serialize_value("font-width", 100)
+
+    # Removed `dict` and positional tuple `<font-src>` inputs
+    with pytest.raises(StixisValidationError):
+        FontFace(src={"url": "a.woff2", "format": "woff2"})  # type: ignore[arg-type]
+    with pytest.raises(StixisValidationError):
+        FontFace(src=[{"url": "a.woff2"}])
+    with pytest.raises(StixisValidationError):
+        FontFace(src=[("a.woff2", "woff2")])
+    with pytest.raises(StixisValidationError):
+        serialize_value("<font-src>", ("a.woff2", "woff2"))
+    # A 2-tuple of strings is now treated uniformly as a sequence of URLs, not `(url, format)`
+    assert (
+        serialize_value("src", ("a.woff2", "woff2"), at_rule="@font-face")
+        == 'url("a.woff2"), url("woff2")'
+    )
+
+    # Removed single 2-tuple OpenType feature/variation settings forms
+    for bad_feat in (("liga", 0), ("liga", True), ("liga", "off")):
+        with pytest.raises(StixisValidationError):
+            serialize_value("font-feature-settings", bad_feat)
+    with pytest.raises(StixisValidationError):
+        serialize_value("font-variation-settings", ("wght", 700))
+
+    # Preserved OpenType forms: Mapping, sequence of tuples, and sequence of 4-char tag strings
+    assert serialize_value("font-feature-settings", [("liga", 0)]) == '"liga" 0'
+    assert serialize_value("font-feature-settings", ("liga", "dlig")) == '"liga", "dlig"'
+    assert serialize_value("font-variation-settings", [("wght", 700)]) == '"wght" 700'

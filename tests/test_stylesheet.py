@@ -111,7 +111,7 @@ def test_comment_node_section_spacing_and_options_context(
     assert "\n\n/* === Italic === */\n@font-face" in rendered
     assert "/*" not in dumps(sheet, minify=True)
 
-    # 2. `using_options` / `options.activate()` supplies default options to child rules without repeating `options=`
+    # 2. `using_options` supplies default options to child rules without repeating `options=`
     cleome_1eng = SerializationOptions.cleome(min_engines=1)
     with using_options(cleome_1eng):
         s_ctx = StyleSheet(
@@ -150,29 +150,6 @@ def test_comment_node_section_spacing_and_options_context(
         options=SerializationOptions.cleome(min_engines=1),
     )
     assert "hanging-punctuation: first;" in dumps(StyleSheet([child_1eng]))
-
-    # 5. Re-validating when `allow_unknown_properties=True` or `allow_vendor_prefixes=True` and a previously disabled property becomes enabled
-    raw_unknown_rule = StyleRule(
-        "p",
-        {"hanging_punctuation": 123},
-        options=SerializationOptions(min_engines=3, allow_unknown_properties=True),
-    )
-    with pytest.raises(StixisValidationError):
-        dumps(
-            raw_unknown_rule,
-            options=SerializationOptions(min_engines=0, allow_unknown_properties=True),
-        )
-
-    raw_vendor_rule = StyleRule(
-        "p",
-        {"-webkit-animation-duration": 123},
-        options=SerializationOptions(allow_vendor_prefixes=True),
-    )
-    with pytest.raises(StixisValidationError):
-        dumps(
-            raw_vendor_rule,
-            options=SerializationOptions(min_engines=0, allow_vendor_prefixes=True),
-        )
 
 
 def test_serialize_declarations_helper() -> None:
@@ -252,7 +229,7 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
 
     ff_descs: dict[str, object] = {
         "font_family": "Inter",
-        "src": [{"url": "inter.woff2", "format": "woff2", "tech": ["variations"]}],
+        "src": [FontSrc(url="inter.woff2", format="woff2", tech=["variations"])],
         "unicode_range": {0x3000, 0x3001},
     }
     ff = FontFace(ff_descs)
@@ -297,11 +274,6 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     ff_two_urls = FontFace(src=["a.woff", "woff2"])
     assert 'src: url("a.woff"), url("woff2");' in ff_two_urls.format()
     assert "src: url('a.woff'), url('woff2');" in ff_two_urls.format(
-        options=SerializationOptions.cleome()
-    )
-
-    ff_single_map = FontFace(src={"url": "inter.woff2", "format": "woff2"})
-    assert "src: url('inter.woff2') format('woff2');" in ff_single_map.format(
         options=SerializationOptions.cleome()
     )
 

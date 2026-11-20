@@ -59,7 +59,7 @@ class FontFaceDescriptors(_FontFaceDescriptorsHyphen, total=False):
     font_width: Literal['auto', 'normal', 'ultra-condensed', 'extra-condensed', 'condensed', 'semi-condensed', 'semi-expanded', 'expanded', 'extra-expanded', 'ultra-expanded'] | str | Keyword | Sequence[Any] | None
     line_gap_override: Literal['normal'] | str | Keyword | int | float | Dimension | Percentage | Sequence[Any] | None
     size_adjust: str | Keyword | int | float | Dimension | Percentage | None
-    src: str | Keyword | Sequence[Any] | FontSrc | Url | LocalFont | Mapping[str, Any] | None
+    src: str | Keyword | Sequence[Any] | FontSrc | Url | LocalFont | None
     subscript_position_override: Literal['normal', 'from-font'] | str | Keyword | int | float | Dimension | Percentage | Sequence[Any] | None
     subscript_size_override: Literal['normal', 'from-font'] | str | Keyword | int | float | Dimension | Percentage | Sequence[Any] | None
     superscript_position_override: Literal['normal', 'from-font'] | str | Keyword | int | float | Dimension | Percentage | Sequence[Any] | None

@@ -1455,14 +1455,6 @@ def _value_item_to_css_fragment(item: Any, options: SerializationOptions) -> str
         return str(item)
     if not isinstance(item, bool) and isinstance(item, (int, float)):
         return serialize_number(item)
-    if (
-        isinstance(item, tuple)
-        and len(item) == 2
-        and not isinstance(item[0], bool)
-        and isinstance(item[0], (int, float))
-        and isinstance(item[1], str)
-    ):
-        return f"{serialize_number(item[0])}{item[1]}"
     if isinstance(item, str):
         return item
     return None
@@ -1540,14 +1532,6 @@ def _serialize_primitive_python_value(
             if kind == "<angle>" and (node.min_unit or node.max_unit):
                 if isinstance(value, Dimension):
                     deg = angle_to_deg(float(value.value), value.unit)
-                elif (
-                    isinstance(value, tuple)
-                    and len(value) == 2
-                    and not isinstance(value[0], bool)
-                    and isinstance(value[0], (int, float))
-                    and isinstance(value[1], str)
-                ):
-                    deg = angle_to_deg(float(value[0]), value[1])
                 else:
                     return None
                 if eff_min is not None and deg < eff_min - 1e-9:
@@ -1576,9 +1560,7 @@ def _serialize_primitive_python_value(
             "<frequency-percentage>",
         ):
             base_kind = f"<{kind[1:].split('-')[0]}>"
-            if isinstance(value, Percentage) or (
-                isinstance(value, tuple) and len(value) == 2 and value[1] == "%"
-            ):
+            if isinstance(value, Percentage):
                 return serialize_percentage(value, min_val=eff_min, max_val=eff_max)
             return _serialize_primitive_python_value(
                 PrimitiveNode(base_kind, eff_min, eff_max, node.min_unit, node.max_unit),
@@ -1685,15 +1667,6 @@ def _serialize_primitive_python_value(
         if kind == "<dimension>":
             if isinstance(value, Dimension):
                 return f"{serialize_number(value.value, min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(value.unit)}"
-            if (
-                isinstance(value, tuple)
-                and len(value) == 2
-                and not isinstance(value[0], bool)
-                and isinstance(value[0], (int, float))
-                and isinstance(value[1], str)
-            ):
-                dim = Dimension(value[0], value[1])
-                return f"{serialize_number(dim.value, min_val=eff_min, max_val=eff_max)}{_serialize_dimension_unit(dim.unit)}"
             return None
 
         if kind == "<hex-color>":
