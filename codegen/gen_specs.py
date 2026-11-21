@@ -144,7 +144,6 @@ def load_bcd_engine_counts(
             if pname in counts:
                 counts[pname] = eng
 
-    # Propagate target engine counts to non-prefixed `legacyAliasOf` properties (`word-wrap`, `grid-gap`, `font-stretch`)
     for pname, syn in properties.items():
         if not pname.startswith("-") and syn.startswith("<'") and syn.endswith("'>"):
             target = syn[2:-2]
@@ -223,7 +222,6 @@ def load_and_merge_specs(
         spec_name = jf.name
         data = json.loads(jf.read_text(encoding="utf-8"))
 
-        # 1. Values & units
         for v in data.get("values", []):
             vname = v["name"]
             if vname in units_by_type:
@@ -272,7 +270,6 @@ def load_and_merge_specs(
                 superseded_by=superseded_by,
             )
 
-        # 2. Properties
         for p in data.get("properties", []):
             pname = p["name"]
             if p.get("value"):
@@ -294,7 +291,6 @@ def load_and_merge_specs(
                 superseded_by=superseded_by,
             )
 
-        # 3. At-rules & descriptors
         for a in data.get("atrules", []):
             aname = a["name"]
             entry = atrules.setdefault(
@@ -348,7 +344,6 @@ def load_and_merge_specs(
                 continue
             properties[pname] = _merge_new_values(properties.get(pname, ""), nv)
 
-    # Apply declarative patches from `spec_patches.toml`
     for vname, vsyn in patches.get("values", {}).items():
         values[vname] = vsyn
         if not vname.startswith("<"):
@@ -511,7 +506,6 @@ def infer_python_type_expr(
     if name in ("font-feature-settings", "font-variation-settings"):
         types.append("Mapping[str, Any]")
 
-    # Deduplicate while preserving order
     unique_types: list[str] = []
     for t in types:
         if t not in unique_types:
@@ -673,7 +667,6 @@ def format_types_py(
         "",
     ]
 
-    # Generate FontDisplayLiteral, FontStyleLiteral, FontWeightLiteral, FontWidthLiteral, FontTechLiteral, FontFormatLiteral
     font_face_descs = atrules.get("@font-face", {}).get("descriptors", {})
 
     for alias_name, target_syn in [
@@ -699,7 +692,6 @@ def format_types_py(
         ]
     )
 
-    # Support both hyphenated (`font-family`) and snake_case (`font_family`) keys in FontFaceDescriptors
     inferred: dict[str, str] = {
         dname: (
             f"{infer_python_type_expr(font_face_descs[dname], properties, values, name=dname)}"
@@ -848,7 +840,6 @@ def main(argv: list[str] | None = None) -> int:
         existing_counts = dict(getattr(existing_specs, "PROPERTY_ENGINE_COUNTS", {}))
         engine_counts = {p: existing_counts.get(p, 0) for p in properties}
 
-    # Measure resolvability coverage across all properties and descriptors
     resolvable_props = sum(
         1
         for p, syn in properties.items()

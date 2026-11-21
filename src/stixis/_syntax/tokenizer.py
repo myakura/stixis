@@ -12,12 +12,12 @@ from stixis.errors import StixisSyntaxError, StixisValidationError
 class CssToken:
     """A single token produced by the CSS Syntax Level 3 tokenizer."""
 
-    kind: str  # "ident", "function", "at-keyword", "hash", "string", "url", "number", "percentage", "dimension", "whitespace", "comma", "colon", "semicolon", "delim", "(", ")", "[", "]", "{", "}"
+    kind: str
     value: str
     num: int | float | None = None
     is_integer: bool = False
     unit: str = ""
-    hash_type: str = "unrestricted"  # "id" or "unrestricted"
+    hash_type: str = "unrestricted"
     ws_around: bool = field(default=True, compare=False)
     ws_before: bool = field(default=False, compare=False)
     start: int = field(default=0, compare=False)
@@ -202,7 +202,6 @@ def _has_ws_after(text: str, pos: int) -> bool:
 
 def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssToken]:
     """Tokenize a CSS string according to W3C CSS Syntax Module Level 3 §4."""
-    # Preprocess newlines and NULL characters per §3.3
     normalized = (
         text.replace("\r\n", "\n").replace("\r", "\n").replace("\f", "\n").replace("\x00", "\ufffd")
     )
@@ -214,7 +213,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
     while pos < n:
         ch = normalized[pos]
 
-        # Comments
         if ch == "/" and pos + 1 < n and normalized[pos + 1] == "*":
             end_comment = normalized.find("*/", pos + 2)
             if end_comment == -1:
@@ -222,7 +220,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             pos = end_comment + 2
             continue
 
-        # Stray closing comment (only when the `/` does not start a `/*` comment)
         if (
             ch == "*"
             and pos + 1 < n
@@ -231,7 +228,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
         ):
             raise StixisSyntaxError("Unexpected comment close `*/`")
 
-        # Whitespace
         if ch in (" ", "\t", "\n"):
             start = pos
             while pos < n and normalized[pos] in (" ", "\t", "\n"):
@@ -252,7 +248,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
         had_ws_before = False
         tok_start = pos
 
-        # CDO `<!--` and CDC `-->`
         if normalized.startswith("<!--", pos):
             pos += 4
             tokens.append(
@@ -266,7 +261,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             )
             continue
 
-        # Strings
         if ch in ('"', "'"):
             quote = ch
             pos += 1
@@ -304,7 +298,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
             )
             continue
 
-        # Hash `#`
         if ch == "#":
             if pos + 1 < n and (
                 _is_ident_code_point(normalized[pos + 1])
@@ -331,7 +324,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 )
             continue
 
-        # Numeric tokens
         if _starts_a_number(normalized, pos):
             repr_str, num_val, is_int, pos = _consume_number(normalized, pos)
             if _starts_an_ident_sequence(normalized, pos):
@@ -375,7 +367,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 )
             continue
 
-        # Ident-like tokens
         if _starts_an_ident_sequence(normalized, pos):
             ident, pos = _consume_ident_sequence(normalized, pos)
             if pos < n and normalized[pos] == "(":
@@ -417,7 +408,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 )
             continue
 
-        # At-keyword
         if ch == "@":
             if _starts_an_ident_sequence(normalized, pos + 1):
                 ident, pos = _consume_ident_sequence(normalized, pos + 1)
@@ -437,7 +427,6 @@ def tokenize_css(text: str, *, preserve_whitespace: bool = False) -> list[CssTok
                 )
             continue
 
-        # Single-character punctuation tokens
         if ch in ("(", ")", "[", "]", "{", "}"):
             pos += 1
             tokens.append(CssToken(ch, ch, ws_before=cur_ws_before, start=tok_start, raw=ch))

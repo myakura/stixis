@@ -32,7 +32,7 @@ class DelimNode(ValueNode):
 class PrimitiveNode(ValueNode):
     """Matches a primitive or microsyntax type (`<number>`, `<length>`, `<string>`, `<urange>`, etc.)."""
 
-    kind: str  # e.g., "<number>", "<integer>", "<length>", "<percentage>", "<angle>", "<string>", "<url>", "<custom-ident>", "<dashed-ident>", "<ident>", "<urange>", "<opentype-tag>", "<family-name>", "<generic-family>", "<font-src>", "<font-src-list>", "<font-format>", "<font-tech>", "<hex-color>", "<any-value>", "<declaration-value>"
+    kind: str
     min_val: float | None = None
     max_val: float | None = None
     min_unit: str = ""
@@ -253,7 +253,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
             pos += 1
             continue
 
-        # Multi-character combinators
         if syntax[pos : pos + 2] == "||":
             tokens.append(("||", "||"))
             pos += 2
@@ -267,7 +266,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
             pos += 1
             continue
 
-        # Quoted literal token: '+' or '<' or ','
         if ch == "'":
             end = syntax.find("'", pos + 1)
             if end != -1:
@@ -276,7 +274,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
                 pos = end + 1
                 continue
 
-        # Non-terminal `<...>` (tracking nested `<...>` and single-quoted `'<prop>'` spans)
         if ch == "<":
             scan = pos + 1
             angle_depth = 1
@@ -304,7 +301,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
                 pos = end + 1
                 continue
 
-        # Grouping brackets `[` and `]`
         if ch == "[":
             tokens.append(("[", "["))
             pos += 1
@@ -314,7 +310,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
             pos += 1
             continue
 
-        # Braces `{A,B}` range multiplier vs literal `{` / `}`
         if ch == "{":
             end = syntax.find("}", pos + 1)
             if end != -1 and re.match(
@@ -333,19 +328,16 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
             pos += 1
             continue
 
-        # Multipliers and `!`
         if ch in ("?", "*", "+", "#", "!"):
             tokens.append(("MULT_CHAR", ch))
             pos += 1
             continue
 
-        # Punctuation literals inside grammar (`,`, `/`, `:`, `;`, `(`, `)`)
         if ch in (",", "/", ":", ";", "(", ")", "="):
             tokens.append(("LITERAL", ch))
             pos += 1
             continue
 
-        # Keyword or function start `fn(`
         start = pos
         while (
             pos < n
@@ -374,7 +366,6 @@ def _tokenize_vds(syntax: str) -> list[tuple[str, str]]:
                 "'",
             )
         ):
-            # Allow `+` or `-` inside keywords like `<an+b>` or `-webkit-` or `n-`
             pos += 1
         if pos == start:
             tokens.append(("LITERAL", syntax[pos]))
@@ -461,7 +452,6 @@ class _VdsParser:
                 elif val == "+":
                     node = MultiplierNode(node, 1, None, comma_separated=False)
                 elif val == "#":
-                    # Check if followed by {A,B} or ?
                     nxt = self.peek()
                     if nxt is not None and nxt[0] == "RANGE_MULT":
                         _, r_str = self.consume()

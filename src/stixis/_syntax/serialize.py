@@ -126,7 +126,6 @@ def serialize_dashed_ident(value: str) -> str:
         raise StixisValidationError("<dashed-ident>", "<dashed-ident>", value)
     if value == "--":
         return "--"
-    # Serialize the identifier after the leading `--`
     return f"--{serialize_unrestricted_ident(value[2:])}"
 
 
@@ -231,8 +230,6 @@ def serialize_url(
     else:
         raise StixisValidationError("<url>", "<url>", value)
 
-    # Control characters inside URL strings are escaped by serialize_string,
-    # which is valid for url("...") string form.
     inner = serialize_string(raw, options=options)
     if mods:
         if not isinstance(mods, tuple):
@@ -311,7 +308,6 @@ def serialize_number(
     if value.is_integer() and abs(value) < 1e16:
         return str(int(value))
 
-    # Round to at most 6 decimal places using Decimal for exact base-10 formatting without scientific notation
     raw_dec = Decimal(str(value))
     prec = max(28, raw_dec.adjusted() + 8)
     dec = Context(prec=prec, rounding=ROUND_HALF_UP).quantize(raw_dec, Decimal("0.000001"))
@@ -447,7 +443,6 @@ def format_token_sequence(
         if tok.kind == "whitespace":
             continue
 
-        # Determine if space is needed before this token
         need_space = prev is not None and not (
             prev.kind in ("function", "(", "[")
             or tok.kind in (")", "]", "comma", "semicolon", "colon")

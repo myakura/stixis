@@ -36,8 +36,8 @@ from stixis._grammar.vds import compile_value_syntax
 @dataclass(slots=True)
 class SyntaxChange:
     target: str
-    kind: str  # "property" | "descriptor" | "value" | "prelude"
-    change_type: str  # "added" | "modified" | "removed"
+    kind: str
+    change_type: str
     old_syntax: str | None
     new_syntax: str | None
     resolvable: bool = True
@@ -257,8 +257,6 @@ def _check_wpt_cases(
         if failure is not None:
             failures.append(failure)
 
-    # Also verify that all previously committed general CSS property vectors in
-    # `tests/_generated/test_wpt_css_properties.py` still pass on current Stixis.
     new_broad_v_set = set(broad_suite.valid)
     new_broad_i_set = set(broad_suite.invalid)
     for prop, raw_css, expected in committed_broad.VALID_PROPERTY_CASES:
@@ -369,7 +367,6 @@ def analyze_upstream(
             >= min_engines
         )
 
-    # Compare units
     unit_changes: dict[str, dict[str, list[str]]] = {}
     for utype, new_set in sorted(units_by_type.items()):
         old_set = set(current_units.UNITS_BY_TYPE.get(utype, frozenset()))
@@ -440,7 +437,6 @@ def analyze_upstream(
         if not resolvable and kind in ("property", "descriptor", "prelude") and monitored:
             unresolved_targets.append(entry)
 
-    # 1. Properties
     all_props = sorted(set(current_specs.PROPERTY_SYNTAXES) | set(properties))
     for pname in all_props:
         _inspect_target(
@@ -451,7 +447,6 @@ def analyze_upstream(
             monitored=_is_prop_monitored(pname),
         )
 
-    # 2. At-rule descriptors
     old_descs = {
         f"{aname}/{dname}": dsyn
         for aname, dmap in current_specs.ATRULE_DESCRIPTORS.items()
@@ -465,13 +460,11 @@ def analyze_upstream(
     for dkey in sorted(set(old_descs) | set(new_descs)):
         _inspect_target(dkey, "descriptor", old_descs.get(dkey), new_descs.get(dkey))
 
-    # 3. Values (only canonical `<name>` keys to avoid duplicate non-bracketed entries)
     old_vals = {k: v for k, v in current_specs.VALUE_SYNTAXES.items() if k.startswith("<")}
     new_vals = {k: v for k, v in values.items() if k.startswith("<")}
     for vkey in sorted(set(old_vals) | set(new_vals)):
         _inspect_target(vkey, "value", old_vals.get(vkey), new_vals.get(vkey))
 
-    # 4. At-rule preludes
     old_preludes = getattr(current_specs, "ATRULE_PRELUDE_SYNTAXES", {})
     new_preludes = {aname: ainfo.get("prelude") for aname, ainfo in atrules.items()}
     for aname in sorted(set(old_preludes) | set(new_preludes)):

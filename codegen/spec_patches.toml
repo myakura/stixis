@@ -1,15 +1,8 @@
-# Declarative patches and merge rules for `@webref/css` (`ed/css/*.json`).
-# Consumed by `codegen/gen_specs.py` to generate `src/stixis/_generated/`.
 
 [meta]
 webref_css_dir = "resources/specs/w3c/webref/ed/css"
 bcd_css_dir = "resources/data/browser-compat-data/css"
 
-# Browser implementation threshold (`@mdn/browser-compat-data` engines: Blink, Gecko, WebKit):
-#   3 = Baseline Newly/Widely available (all 3 engines)
-#   2 = Stable multi-engine (default; avoids single-browser prototype churn)
-#   1 = Single-engine prototype included (or opt in per property via `allow_properties` / `SerializationOptions.extra_properties`)
-#   0 = All Editor's Draft specs included (including unimplemented Spec Fiction)
 [support]
 default_min_engines = 2
 allow_properties = [
@@ -23,13 +16,11 @@ exclude_specs = [
     "svg-strokes.json",
 ]
 
-# Additional container query and speech units defined in prose or pending reffy extraction
 [extra_units]
 "<length>" = ["cqw", "cqh", "cqi", "cqb", "cqmin", "cqmax"]
 "<decibel>" = ["dB"]
 "<semitones>" = ["st"]
 
-# Superseded umbrella/legacy specs merged before main specs, plus explicit owner-superseding rules
 [delta_merges]
 order = [
     "CSS.json",
@@ -48,7 +39,6 @@ order = [
 "css-position.json" = ["css-logical.json"]
 "css-sizing.json" = ["css-logical.json"]
 
-# Prose-defined or missing non-terminal value definitions (`<type>`)
 [values]
 "<font-src-list>" = "<font-src>#"
 "<family-name>" = "<string> | <custom-ident>+"
@@ -95,12 +85,10 @@ order = [
 "anchor()" = "anchor( [ <anchor-name>? && <anchor-side> ] [ , <length-percentage> ]? )"
 "anchor-size()" = "anchor-size() | anchor-size( [ <anchor-name> || <anchor-size> ] [ , <length-percentage> ]? ) | anchor-size( <length-percentage> )"
 
-# Extend `<font-features-tech>` with `avar2` from `css-fonts-5.json`
 "<font-features-tech>" = "[ features-opentype | features-aat | features-graphite | avar2 ]"
 "<baseline-position>" = "[ first | last ]? baseline"
 "<position>" = "[ [ left | center | right | top | bottom | <length-percentage> ] | [ left | center | right ] && [ top | center | bottom ] | [ left | center | right | <length-percentage> ] [ top | center | bottom | <length-percentage> ] | [ [ left | right ] <length-percentage> ] && [ [ top | bottom ] <length-percentage> ] ]"
 
-# At-rule prelude grammars (`ValueNode` validated when present; `"<condition>"` uses token safety)
 [atrule_preludes]
 "@font-face" = ""
 "@font-palette-values" = "<dashed-ident>"
@@ -114,12 +102,10 @@ order = [
 "@view-transition" = ""
 "@starting-style" = ""
 
-# Prose-defined descriptor aliases and overrides on at-rules
 [atrule_descriptors."@font-face"]
 "font-stretch" = "auto | <'font-width'>{1,2}"
 "unicode-range" = "<urange>#"
 
-# Property syntax overrides where a Level 4/5 draft broke standard longhand syntax or omitted prose keywords
 [properties]
 "font-stretch" = "<'font-width'>"
 "font-synthesis" = "none | [ weight || [ style | oblique-only ] || small-caps || position ]"
@@ -135,8 +121,6 @@ order = [
 "white-space" = "normal | pre | nowrap | pre-wrap | break-spaces | pre-line | [ collapse | preserve | preserve-breaks | break-spaces ] || <'text-wrap-mode'>"
 "vertical-align" = "baseline | sub | super | top | text-top | middle | bottom | text-bottom | <percentage> | <length>"
 
-# Relative color channel keywords not listed in `@webref/css` function `values` arrays
-# (`rgb()` and `rgba()`: CSS Color 5 §4.2.1; `hsl()` and `hsla()`: CSS Color 5 §4.2.2)
 [relative_color_channels]
 "rgb" = ["r", "g", "b", "alpha"]
 "rgba" = ["r", "g", "b", "alpha"]
