@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import pytest
 
 from stixis import (
@@ -44,13 +46,10 @@ def test_top_level_aliases_and_exports() -> None:
 
 
 def test_family_name_vs_generic_family_boundary() -> None:
-    # A plain Python `str` passed to `font-family` or `<family-name>` is ALWAYS treated as a
-    # font family name (quoted by default), even if its text matches a generic family keyword!
     assert serialize_value("font-family", "serif") == '"serif"'
     assert serialize_value("<family-name>", "serif") == '"serif"'
     assert serialize_value("font-family", "Noto Sans JP") == '"Noto Sans JP"'
 
-    # Generic families are explicitly marked via `generic(...)`, `GenericFamily(...)`, or `Keyword(...)`
     assert serialize_value("font-family", generic("serif")) == "serif"
     assert serialize_value("font-family", GenericFamily("system-ui")) == "system-ui"
     assert serialize_value("font-family", Keyword("monospace")) == "monospace"
@@ -86,21 +85,21 @@ def test_value_wrappers_eager_validation_and_dimension_unit_formatting() -> None
     with pytest.raises(StixisValidationError):
         serialize_value("<dimension>", (10, "px;color:red"))
 
-    for bad_kw in ("", 123):
+    for bad_kw in cast(tuple[Any, ...], ("", 123)):
         with pytest.raises(StixisValidationError):
-            Keyword(bad_kw)  # type: ignore[arg-type]
+            Keyword(bad_kw)
     assert str(Keyword("auto")) == "auto"
     assert str(Keyword("   ")) == r"\ \ \ "
 
-    for bad_fam in ("", 123):
+    for bad_fam in cast(tuple[Any, ...], ("", 123)):
         with pytest.raises(StixisValidationError):
-            LocalFont(bad_fam)  # type: ignore[arg-type]
+            LocalFont(bad_fam)
     assert str(LocalFont("Inter")) == 'local("Inter")'
     assert str(LocalFont("   ")) == 'local("   ")'
 
-    for bad_gen in ("", "   ", "not-a-generic", "generic(unknown)", 123):
+    for bad_gen in cast(tuple[Any, ...], ("", "   ", "not-a-generic", "generic(unknown)", 123)):
         with pytest.raises(StixisValidationError):
-            GenericFamily(bad_gen)  # type: ignore[arg-type]
+            GenericFamily(bad_gen)
     assert str(GenericFamily("serif")) == "serif"
     assert str(GenericFamily("generic(kai)")) == "generic(kai)"
 
@@ -123,23 +122,24 @@ def test_value_wrapper_subclasses_accepted() -> None:
 
 
 def test_serialization_options_validates_fields_in_post_init() -> None:
+    options_cls: Any = SerializationOptions
     with pytest.raises(ValueError, match="quote_char"):
-        SerializationOptions(quote_char="x")  # type: ignore[arg-type]
+        options_cls(quote_char="x")
     with pytest.raises(ValueError, match="quote_char"):
-        SerializationOptions(quote_char="")  # type: ignore[arg-type]
+        options_cls(quote_char="")
     with pytest.raises(ValueError, match="font_face_stretch_alias"):
-        SerializationOptions(font_face_stretch_alias="invalid")  # type: ignore[arg-type]
+        options_cls(font_face_stretch_alias="invalid")
     with pytest.raises(ValueError, match="font_face_stretch_alias"):
-        SerializationOptions(font_face_stretch_alias="both")  # type: ignore[arg-type]
+        options_cls(font_face_stretch_alias="both")
     with pytest.raises(TypeError):
-        SerializationOptions(allow_vendor_prefixes=True)  # type: ignore[call-arg]
+        options_cls(allow_vendor_prefixes=True)
     with pytest.raises(TypeError):
-        SerializationOptions(allow_unknown_properties=True)  # type: ignore[call-arg]
+        options_cls(allow_unknown_properties=True)
     with pytest.raises(TypeError):
-        SerializationOptions(uppercase_urange_prefix=False)  # type: ignore[call-arg]
+        options_cls(uppercase_urange_prefix=False)
     assert not hasattr(SerializationOptions(), "activate")
     with pytest.raises(ValueError, match="min_engines"):
-        SerializationOptions(min_engines="2")  # type: ignore[arg-type]
+        options_cls(min_engines="2")
     with pytest.raises(ValueError, match="min_engines"):
         SerializationOptions(min_engines=True)
     with pytest.raises(ValueError, match="min_engines"):
@@ -147,7 +147,7 @@ def test_serialization_options_validates_fields_in_post_init() -> None:
     with pytest.raises(ValueError, match="min_engines"):
         SerializationOptions(min_engines=4)
     with pytest.raises(ValueError, match="extra_properties"):
-        SerializationOptions(extra_properties={"width"})  # type: ignore[arg-type]
+        options_cls(extra_properties={"width"})
 
 
 def test_cleome_and_cssom_serialization_options_presets() -> None:
@@ -197,7 +197,6 @@ def test_opentype_feature_and_variation_settings() -> None:
     )
     assert var == '"wght" 700, "wdth" 87.5, "slnt" -10'
 
-    # Reject non-4-char or non-ASCII tags
     with pytest.raises(StixisValidationError):
         serialize_value("font-feature-settings", {"lig": 1})
     with pytest.raises(StixisValidationError):
@@ -214,18 +213,15 @@ def test_snake_case_and_custom_properties_and_vendor_prefixes() -> None:
         },
     )
     rendered = str(rule)
-    # Custom properties preserve `--main_color` verbatim, while regular properties become `kebab-case`
     assert "--main_color: #123456;" in rendered
     assert "--accent-gap: 12px;" in rendered
     assert "font-optical-sizing: auto;" in rendered
 
-    # Custom property rejects top-level `;` or unbalanced brackets
     with pytest.raises((StixisValidationError, StixisSyntaxError)):
         StyleRule(":root", {"--bad": "10px; color: red"})
     with pytest.raises((StixisValidationError, StixisSyntaxError)):
         StyleRule(":root", {"--bad": "calc(10px + 5px"})
 
-    # Vendor-prefixed properties require `RawDeclaration`
     with pytest.raises(StixisValidationError):
         StyleRule(".text", {"-webkit-font-smoothing": "antialiased"})
 
@@ -237,12 +233,9 @@ def test_compact_urange_cascade_shadowing() -> None:
     from stixis import format_urange, parse_urange
 
     target = [0x3041, 0x3042, 0x3045]
-    # Without forbidden codepoints, gap of 2 (0x3043..0x3044) is bridged when max_gap >= 2
     assert compact_urange(target, [], max_gap=0x10) == "U+3041-3045"
-    # With 0x3043 in forbidden_sorted, bridging across 0x3043 is prevented to avoid cascade shadowing!
     assert compact_urange(target, [0x3043], max_gap=0x10) == "U+3041-3042, U+3045"
 
-    # Reject bool and non-int values in sorted_target_cps and forbidden_sorted, and invalid max_gap
     with pytest.raises(StixisValidationError):
         compact_urange([True])
     with pytest.raises(StixisValidationError):
@@ -250,19 +243,17 @@ def test_compact_urange_cascade_shadowing() -> None:
     with pytest.raises(StixisValidationError):
         compact_urange([0x3041, 0x3042], forbidden_sorted=[False])
     with pytest.raises(StixisValidationError):
-        compact_urange([0x3041, 0x3042], forbidden_sorted=["bad"])  # type: ignore[list-item]
+        compact_urange([0x3041, 0x3042], forbidden_sorted=cast(Any, ["bad"]))
     with pytest.raises(StixisValidationError):
         compact_urange([0x3041], max_gap=-1)
     with pytest.raises(StixisValidationError):
         compact_urange([0x3041], max_gap=True)
 
-    # Pure integer sequences (`list[int]`, `tuple[int, ...]`) coalesce contiguous code points like `set[int]`
     assert format_urange({0x3041, 0x3042, 0x3043}) == "U+3041-3043"
     assert format_urange([0x3041, 0x3042, 0x3043]) == "U+3041-3043"
     assert format_urange((0x3043, 0x3041, 0x3042, 0x3045)) == "U+3041-3043, U+3045"
     assert parse_urange([0x3041, 0x3042, 0x3043]) == [(0x3041, 0x3043)]
 
-    # Mixed interval/codepoint sequences preserve explicit segments by default and merge when coalesce=True
     assert format_urange([(0x3040, 0x309F), 0x3000]) == "U+3040-309F, U+3000"
     assert format_urange([(0x3040, 0x3042), 0x3043], coalesce=True) == "U+3040-3043"
 
@@ -368,11 +359,9 @@ def test_serialize_value_font_properties_css_wide_and_var() -> None:
     assert serialize_value("font-variation-settings", "inherit") == "inherit"
     assert serialize_value("font-language-override", "inherit") == "inherit"
 
-    # Plain `str` on `font-family` stays quoted as a `<family-name>` per principle 1
     assert serialize_value("font-family", "inherit") == '"inherit"'
     assert serialize_value("font-family", Keyword("inherit")) == "inherit"
 
-    # `@font-face` descriptors reject CSS-wide keywords and still support `calc(...)` strings
     for desc in ("font-weight", "font-width", "font-style", "ascent-override"):
         with pytest.raises(StixisValidationError):
             serialize_value(desc, "inherit", at_rule="@font-face")
@@ -384,7 +373,6 @@ def test_serialize_value_font_properties_css_wide_and_var() -> None:
 
 
 def test_removed_tuple_aliases_and_implicit_conversions_rejected() -> None:
-    # Removed `(num, unit)` and `(num, "%")` positional tuple aliases
     for target, bad_val in (
         ("width", (10, "px")),
         ("width", (50, "%")),
@@ -396,7 +384,6 @@ def test_removed_tuple_aliases_and_implicit_conversions_rejected() -> None:
         with pytest.raises(StixisValidationError):
             serialize_value(target, bad_val)
 
-    # Removed implicit numeric conversions and nested/omitted oblique tuples in font descriptors/properties
     for desc, bad_val in (
         ("font-style", ("oblique", 10)),
         ("font-style", ("oblique", (10, "deg"))),
@@ -417,29 +404,25 @@ def test_removed_tuple_aliases_and_implicit_conversions_rejected() -> None:
     with pytest.raises(StixisValidationError):
         serialize_value("font-width", 100)
 
-    # Removed `dict` and positional tuple `<font-src>` inputs
     with pytest.raises(StixisValidationError):
-        FontFace(src={"url": "a.woff2", "format": "woff2"})  # type: ignore[arg-type]
+        FontFace(src=cast(Any, {"url": "a.woff2", "format": "woff2"}))
     with pytest.raises(StixisValidationError):
         FontFace(src=[{"url": "a.woff2"}])
     with pytest.raises(StixisValidationError):
         FontFace(src=[("a.woff2", "woff2")])
     with pytest.raises(StixisValidationError):
         serialize_value("<font-src>", ("a.woff2", "woff2"))
-    # A 2-tuple of strings is now treated uniformly as a sequence of URLs, not `(url, format)`
     assert (
         serialize_value("src", ("a.woff2", "woff2"), at_rule="@font-face")
         == 'url("a.woff2"), url("woff2")'
     )
 
-    # Removed single 2-tuple OpenType feature/variation settings forms
     for bad_feat in (("liga", 0), ("liga", True), ("liga", "off")):
         with pytest.raises(StixisValidationError):
             serialize_value("font-feature-settings", bad_feat)
     with pytest.raises(StixisValidationError):
         serialize_value("font-variation-settings", ("wght", 700))
 
-    # Preserved OpenType forms: Mapping, sequence of tuples, and sequence of 4-char tag strings
     assert serialize_value("font-feature-settings", [("liga", 0)]) == '"liga" 0'
     assert serialize_value("font-feature-settings", ("liga", "dlig")) == '"liga", "dlig"'
     assert serialize_value("font-variation-settings", [("wght", 700)]) == '"wght" 700'

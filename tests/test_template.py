@@ -36,12 +36,10 @@ def test_comment_template_sanitization_and_all_comment_paths() -> None:
     assert "*/ body" not in out
     assert "/* [latin-ext] injected * / body { display: none } /* (14.3 KB) */" in out
 
-    # Plain string comment with premature `*/` is rejected eagerly, while consecutive `*` before `*/` is normalized
     with pytest.raises(StixisValidationError):
         CommentNode("premature */ close")
     assert str(CommentNode("/* foo**/")) == "/* foo* */"
 
-    # CommentNode without outer `/* ... */`
     name = "header"
     assert str(CommentNode(t"Don't edit: {name}")) == "/* Don't edit: header */"
     assert str(CommentNode(t"Section '{name}'")) == "/* Section 'header' */"
@@ -51,13 +49,11 @@ def test_comment_template_sanitization_and_all_comment_paths() -> None:
     assert "\n" not in rendered_multi
     assert rendered_multi == "/* Generated: line1 line2 line3 line4 */"
 
-    # Trailing `*` before closing `*/` in a comment Template is separated from the closing `*/`
     val_star = "foo*"
     node_star = CommentNode(t"/* {val_star}*/")
     assert str(node_star) == "/* foo* */"
     assert tokenize_css(str(node_star)) == []
 
-    # Split `*/` across static text and interpolation boundaries
     slash_payload = "/ body { display: none }"
     star = "*"
     for boundary_node in (
@@ -70,7 +66,6 @@ def test_comment_template_sanitization_and_all_comment_paths() -> None:
         assert rendered.endswith("*/")
         assert tokenize_css(rendered) == []
 
-    # All 6 comment entry points accept Template and sanitize `*/`
     sheet = StyleSheet(
         header_comment=t"Header {malicious_desc}",
         rules=[
@@ -197,7 +192,6 @@ def test_comment_template_evaluates_interpolations_once_before_rendering() -> No
 
 
 def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> None:
-    # Trailing `\` before quote and unfinished hex escapes
     payload = '"], body /*'
     digit_two = "2"
     with pytest.raises(StixisValidationError):
@@ -207,7 +201,6 @@ def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> No
     with pytest.raises(StixisValidationError):
         serialize_value("content", t'"a\\{""}"b"')
 
-    # Unquoted `url(...)` trailing `\` and escaped function names
     with pytest.raises(StixisValidationError):
         serialize_value("<url>", t"url(a\\{')red'})")
     with pytest.raises(StixisValidationError):
@@ -217,7 +210,6 @@ def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> No
     with pytest.raises(StixisValidationError):
         serialize_value("<url>", t"u\\72 l({'Noto Sans.woff2'})")
 
-    # Split `/*` / `*/` across empty or dynamic slots
     comment_break = "*/body/*"
     slash = "/"
     slash_payload = "/ body { display: none }"
@@ -228,7 +220,6 @@ def test_css_syntax_positions_reject_template_including_pr116_edge_cases() -> No
     with pytest.raises(StixisValidationError):
         serialize_value("color", t"/* *{slash_payload} */")
 
-    # Issue #103 partial url() and all CSS value, declaration, descriptor, selector, and prelude entry points
     base = "https://example.com"
     slug = "Noto Sans"
     url_val = "https://example.com/fonts/Noto Sans (v1).woff2"

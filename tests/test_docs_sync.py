@@ -58,7 +58,6 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
     skill_text = skill_path.read_text(encoding="utf-8")
     readme_text = readme_path.read_text(encoding="utf-8")
 
-    # 1. Every runtime symbol in `stixis.__all__` (excluding type aliases / constants) must be documented in SKILL.md
     exempt_exports = {
         "DEFAULT_OPTIONS",
         "FontDisplayKeyword",
@@ -75,7 +74,6 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
         f"Public exports in stixis.__all__ missing from skills/stixis/SKILL.md: {missing_symbols}"
     )
 
-    # 2. Every public parameter of core entry points and AST constructors must appear in SKILL.md
     core_callables = (
         stixis.dumps,
         stixis.FontFace,
@@ -102,7 +100,6 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
         f"Public parameters missing from skills/stixis/SKILL.md: {missing_params}"
     )
 
-    # 3. Every fenced `python` code block in SKILL.md and README.md must parse and execute cleanly
     code_block_re = re.compile(r"```python\n(.*?)```", re.DOTALL)
     for doc_name, doc_content in (("SKILL.md", skill_text), ("README.md", readme_text)):
         blocks = code_block_re.findall(doc_content)
@@ -118,7 +115,6 @@ def test_consumer_skill_and_readme_stay_in_sync_with_public_api() -> None:
             )
             assert res.returncode == 0, f"{doc_name}#block-{idx} failed: {res.stderr}"
 
-    # 4. README.md and skills/stixis/SKILL.md must not present internal Stixis names as public API
     unmarked_internal: list[str] = []
     for doc_rel, doc_content in (
         ("README.md", readme_text),

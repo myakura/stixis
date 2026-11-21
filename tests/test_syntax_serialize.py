@@ -57,7 +57,6 @@ def test_large_number_serialization_and_overflow_rejection(
     assert rc == EXIT_OK
     assert captured.out.strip() == "10000000000000000000000px"
 
-    # Non-finite overflow tokens (`1e400`, 309+ digit integers) in raw CSS are rejected cleanly with StixisValidationError
     with pytest.raises(StixisValidationError):
         canonicalize("width", "1e400px")
     with pytest.raises(StixisValidationError):
@@ -72,9 +71,6 @@ def test_large_number_serialization_and_overflow_rejection(
     captured = capsys.readouterr()
     assert rc_overflow == EXIT_VALIDATION_ERROR
 
-    # Issue #87: Python `int` values too large to convert to a finite float raise StixisValidationError
-    # on `<number>`, dimension, and percentage targets (and in `Px` / `Pct` wrappers), while `<integer>`
-    # and `z-index` keep accepting arbitrary-precision integers.
     with pytest.raises(StixisValidationError):
         serialize_value("<number>", 10**400)
     with pytest.raises(StixisValidationError):

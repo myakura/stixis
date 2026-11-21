@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from stixis import (
@@ -25,7 +27,6 @@ from stixis import (
 
 
 def test_eager_validation_on_all_rule_nodes() -> None:
-    # StyleRule rejects unknown property, invalid value, or injection in selector at __post_init__
     with pytest.raises(StixisValidationError) as exc_info:
         StyleRule(".box", {"not_a_css_property": "10px"})
     assert exc_info.value.target == "not-a-css-property"
@@ -38,7 +39,6 @@ def test_eager_validation_on_all_rule_nodes() -> None:
     with pytest.raises((StixisValidationError, StixisSyntaxError)):
         StyleRule(".box { color: red } .evil", {"color": "blue"})
 
-    # AtRule validates typed preludes (`@font-palette-values` requires `<dashed-ident>`)
     valid_palette = AtRule(
         "@font-palette-values",
         "--cool-palette",
@@ -96,7 +96,6 @@ def test_comment_node_section_spacing_and_options_context(
     import stixis.stylesheet as nodes_mod
     from stixis import using_options
 
-    # 1. Leading newline on a section comment (or `leading_newline=True`) emits a blank line in non-minified output
     sheet = StyleSheet(
         rules=[
             FontFace(font_family="Inter", src=Url("inter-400.woff2"), font_weight=400),
@@ -111,7 +110,6 @@ def test_comment_node_section_spacing_and_options_context(
     assert "\n\n/* === Italic === */\n@font-face" in rendered
     assert "/*" not in dumps(sheet, minify=True)
 
-    # 2. `using_options` supplies default options to child rules without repeating `options=`
     cleome_1eng = SerializationOptions.cleome(min_engines=1)
     with using_options(cleome_1eng):
         s_ctx = StyleSheet(
@@ -129,12 +127,11 @@ def test_comment_node_section_spacing_and_options_context(
     assert "font-stretch: 100%;" in out_ctx
     assert "hanging-punctuation: first;" in out_ctx
 
-    # 3. `format` / `dumps` skips redundant child rule rebuilds when formatting profile matches and gates are not tightened
     rule = StyleRule("body", {"margin": Px(0)})
     calls = 0
     orig_validate = nodes_mod._validate_and_normalize_declarations
 
-    def _counting_validate(*args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+    def _counting_validate(*args: Any, **kwargs: Any) -> Any:
         nonlocal calls
         calls += 1
         return orig_validate(*args, **kwargs)
@@ -143,7 +140,6 @@ def test_comment_node_section_spacing_and_options_context(
     assert dumps(rule, options=SerializationOptions(min_engines=1)) == "body {\n  margin: 0px;\n}"
     assert calls == 0
 
-    # 4. Child rules constructed with explicit options keep their options when wrapped in `StyleSheet([rule])` without parent `options=`
     child_1eng = StyleRule(
         "p",
         {"hanging_punctuation": "first"},
@@ -180,10 +176,10 @@ def test_stylerule_format_minify_visits_nested_rules_once(
     calls = 0
     orig_format = StyleRule.format
 
-    def _counting_format(self: StyleRule, *args: object, **kwargs: object) -> str:
+    def _counting_format(self: StyleRule, *args: Any, **kwargs: Any) -> str:
         nonlocal calls
         calls += 1
-        return orig_format(self, *args, **kwargs)  # type: ignore[arg-type]
+        return orig_format(self, *args, **kwargs)
 
     monkeypatch.setattr(StyleRule, "format", _counting_format)
     t0 = time.perf_counter()
@@ -264,7 +260,6 @@ def test_ast_nodes_copy_mutable_containers_and_are_hashable() -> None:
     assert hash(sheet) == hash(sheet)
     assert "color: red;" in sheet.format(options=SerializationOptions.cleome())
 
-    # Regression checks for container semantics and template interpolation snapshots across option rebuilds
     ff_noncontig = FontFace(unicode_range={0x41, 0x5A})
     assert "unicode-range: U+41, U+5A;" in ff_noncontig.format()
     assert "unicode-range: U+41, U+5A;" in ff_noncontig.format(
@@ -315,8 +310,6 @@ def test_custom_property_and_raw_declaration_reject_dimension_injection() -> Non
 def test_query_features_excluded_from_block_descriptors_and_options_propagated() -> None:
     from stixis import LocalFont, RawDeclaration, canonicalize, serialize_value, using_options
 
-    # 1. `@media` and `@container` prelude query features (`type: "discrete" | "range"` in `@webref/css`)
-    #    are not block descriptors (Issue #99; CSS Media Queries 5 / CSS Conditional 5).
     with pytest.raises(StixisValidationError):
         AtRule("@media", "screen", descriptors={"hover": "hover"})
     with pytest.raises(StixisValidationError):
@@ -324,7 +317,6 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
     with pytest.raises(StixisValidationError):
         serialize_value("@container/inline-size", Px(100))
 
-    # CSS Nesting Level 1 conditional rules inside a style rule still accept standard CSS properties.
     nested_cond = StyleRule(
         ".card",
         {"color": "black"},
@@ -333,8 +325,6 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
     assert "color: red;" in str(nested_cond)
     assert "width: 100px;" in str(nested_cond)
 
-    # 2. `RawDeclaration`, custom-property `Url`, and comment `Template` propagate `SerializationOptions`
-    #    at construction, `using_options`, and `.format(options=...)` (Issue #99; `skills/stixis/SKILL.md`).
     cleome = SerializationOptions.cleome()
     raw_rule = StyleRule("p", [RawDeclaration("content", '"hi"')])
     assert raw_rule.format() == 'p {\n  content: "hi";\n}'
@@ -357,7 +347,6 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
     )
     assert str(StyleRule(":root", [raw_url_ctx])) == ":root {\n  --u: url('a.woff2');\n}"
 
-    # CSS Variables Level 1 §4.1: raw custom-property strings retain their original author representation.
     assert serialize_value("--x", r'"\41 "', options=cleome) == r'"\41 "'
     assert serialize_value("--x", "url(a)", options=cleome) == "url(a)"
     custom_raw = StyleRule(
@@ -365,7 +354,6 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
     )
     assert custom_raw.format(options=cleome) == ':root {\n  --x: "\\41 ";\n  --y: url(a);\n}'
 
-    # Structured `Url` values in custom properties and `RawDeclaration` honor `options.quote_char`.
     custom_url = StyleRule(":root", {"--u": Url("a.woff2")})
     assert custom_url.format() == ':root {\n  --u: url("a.woff2");\n}'
     assert custom_url.format(options=cleome) == ":root {\n  --u: url('a.woff2');\n}"
@@ -374,7 +362,6 @@ def test_query_features_excluded_from_block_descriptors_and_options_propagated()
         == ":root {\n  --u: url('a.woff2');\n}"
     )
 
-    # Comment `Template`s honor `options.quote_char` on `Url` / `LocalFont`, while CSS positions reject `Template`.
     comment_rule = StyleRule(
         "a", {"color": "red"}, comment=t"ref {Url('a.woff2')} {LocalFont('Inter')}"
     )

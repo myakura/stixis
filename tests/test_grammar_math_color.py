@@ -106,7 +106,6 @@ def test_context_free_math_expression_simplification(
 ) -> None:
     opts = SerializationOptions(min_engines=0)
 
-    # 1. Folding numbers and same-unit terms
     assert canonicalize("font-weight", "calc(100 + 100)") == "calc(200)"
     assert canonicalize("width", "calc(1px + 2px)") == "calc(3px)"
     assert canonicalize("width", "calc(100px + 100px)") == "calc(200px)"
@@ -115,7 +114,6 @@ def test_context_free_math_expression_simplification(
     assert canonicalize("left", "calc(20px + calc(80px))") == "calc(100px)"
     assert canonicalize("left", "calc(calc(2 * calc(calc(3)) + 4) * 10px)") == "calc(100px)"
 
-    # 2. Sorting terms of a sum (numbers, percentages, dimensions alphabetically, then other sub-expressions)
     assert canonicalize("animation-range-end", "contain calc(10px + 10%)") == (
         "contain calc(10% + 10px)"
     )
@@ -132,7 +130,6 @@ def test_context_free_math_expression_simplification(
         "calc(10% + anchor(--foo left, 1px))"
     )
 
-    # 3. Division by a number rewritten as multiplication and numeric factor placed first
     assert (
         canonicalize(
             "top",
@@ -175,7 +172,6 @@ def test_context_free_math_expression_simplification(
         "calc-size(fit-content, 30px + (0.5 * size))"
     )
 
-    # 4. Preserving `-` when already in canonical order and keeping out-of-scope units untouched
     assert canonicalize("width", "calc(10% - 0.5em)") == "calc(10% - 0.5em)"
     assert canonicalize("width", "calc(1in + 1px)") == "calc(1in + 1px)"
     assert (
@@ -192,7 +188,6 @@ def test_context_free_math_expression_simplification(
     )
     assert canonicalize("width", "calc(10000000px / 10000000)") == "calc(1px)"
 
-    # 5. CLI check
     rc = cli_main(["check", "background-position-x", "calc(10px - 0.5em)"])
     captured = capsys.readouterr()
     assert rc == EXIT_OK
@@ -319,7 +314,6 @@ def test_relative_color_bare_channel_keywords(
         == "color(from color(xyz-d65 7 -20.5 100) xyz-d65 x y z / alpha)"
     )
 
-    # Reject channel keywords in absolute color functions (without `from <color>`)
     for invalid_abs in (
         "rgb(r g b)",
         "rgb(0 0 0 / alpha)",
@@ -332,7 +326,6 @@ def test_relative_color_bare_channel_keywords(
         with pytest.raises(StixisValidationError):
             canonicalize("color", invalid_abs)
 
-    # Reject wrong color-space channel keywords in `color(from ...)` and legacy comma syntax
     for invalid_cs in (
         "rgb(from red, r)",
         "rgba(from red, r)",
@@ -348,7 +341,6 @@ def test_relative_color_bare_channel_keywords(
         with pytest.raises(StixisValidationError):
             canonicalize("color", invalid_cs)
 
-    # CLI check
     rc = cli_main(["check", "color", "rgb(from rebeccapurple r g b)"])
     captured = capsys.readouterr()
     assert rc == EXIT_OK
