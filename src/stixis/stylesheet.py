@@ -178,7 +178,6 @@ def _validate_and_render_comment(
     if isinstance(comment, Template):
         rendered = render_css_template(comment, options=options).strip()
         if rendered.startswith("/*") and rendered.endswith("*/") and len(rendered) >= 4:
-            # Ensure no premature `*/` exists inside the body
             body = rendered[2:-2]
             while "*/" in body:
                 body = body.replace("*/", "* /")
@@ -427,7 +426,6 @@ def _validate_and_normalize_declarations(
                 normalized_pairs.append((prop, val_str))
             continue
 
-        # Standard style rule property
         if prop in PROPERTY_SYNTAXES and is_property_enabled(prop, options):
             val_str = serialize_value(prop, val, options=options)
             normalized_pairs.append((prop, val_str))
@@ -563,7 +561,6 @@ def _validate_at_rule_prelude(
             options=options,
         )
 
-    # Conditional or general prelude (`@media`, `@supports`, `@container`, `@scope`, `@import`, etc.)
     raw_prelude = str(prelude).strip()
     if not raw_prelude:
         return ""
@@ -595,7 +592,6 @@ def _needs_rebuild_for_options(
         return False
     if _formatting_profile(built_opts) != _formatting_profile(target_opts):
         return True
-    # Tightening validation gates requires re-validating declarations/descriptors
     if target_opts.min_engines > built_opts.min_engines:
         return True
     return not (built_opts.extra_properties <= target_opts.extra_properties)

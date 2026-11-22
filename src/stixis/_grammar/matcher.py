@@ -247,7 +247,6 @@ class _TokenMatcher:
         eff_min = node.min_val if node.min_val is not None else min_override
         eff_max = node.max_val if node.max_val is not None else max_override
 
-        # Special microsyntax fast-paths for font properties when referenced via `<'prop'>`
         if node.is_property and node.name == "font-style":
             res = self._match_font_style_tokens(pos, is_descriptor=False)
             if res:
@@ -447,7 +446,6 @@ class _TokenMatcher:
             for idx, b in enumerate(items)
             if not (isinstance(b, MultiplierNode) and b.min_count == 0)
         }
-        # States: (cur_pos, matched_dict {branch_idx: rendered_str})
         results: list[tuple[int, dict[int, str]]] = []
         seen_states: set[tuple[int, tuple[tuple[int, str], ...]]] = set()
 
@@ -477,11 +475,9 @@ class _TokenMatcher:
 
         dfs(pos, {})
 
-        # Sort results to prefer longer token matches first
         out: list[tuple[int, str]] = []
         seen_out: set[tuple[int, str]] = set()
         for end_pos, matched in sorted(results, key=lambda x: -x[0]):
-            # Assemble in canonical grammar definition order (0 .. k-1)!
             canon_parts = [matched[i] for i in range(k) if i in matched and matched[i] != ""]
             joined = _join_serialized_parts(canon_parts)
             pair = (end_pos, joined)
@@ -497,7 +493,6 @@ class _TokenMatcher:
         min_override: float | None,
         max_override: float | None,
     ) -> list[tuple[int, str]]:
-        # Fast path for `?` (0 or 1)
         if not node.comma_separated and node.min_count == 0 and node.max_count == 1:
             child_matches = self.match_node(node.child, pos, min_override, max_override)
             out = [(p, s) for p, s in child_matches if p > pos]
@@ -508,7 +503,6 @@ class _TokenMatcher:
         if node.min_count == 0:
             results.append((pos, []))
 
-        # BFS/DFS over occurrences
         queue: list[tuple[int, list[str]]] = [(pos, [])]
         seen: set[tuple[int, tuple[str, ...]]] = set()
         seen_comma: set[tuple[int, int]] = set()
@@ -612,7 +606,6 @@ class _TokenMatcher:
 
         tok = self.tokens[pos]
 
-        # Numeric & dimension math function support (`calc(...)`, `min(...)`, `max(...)`, `clamp(...)`, etc.)
         if kind in (
             "<number>",
             "<integer>",
@@ -859,7 +852,6 @@ class _TokenMatcher:
                     )
                 ]
             if tok.kind == "ident":
-                # Consume one or more consecutive <custom-ident> tokens
                 idents: list[str] = []
                 cur = pos
                 while cur < len(self.tokens) and self.tokens[cur].kind == "ident":
@@ -868,15 +860,11 @@ class _TokenMatcher:
                     cur += 1
                 if not idents:
                     return []
-                # Single ident cannot be a CSS-wide/reserved keyword or a generic-family keyword
                 if len(idents) == 1:
                     low = idents[0].lower()
                     if low in RESERVED_CUSTOM_IDENT_KEYWORDS or low in GENERIC_FAMILY_KEYWORDS:
                         return []
                 else:
-                    # In a multi-word unquoted `<family-name>` (`<custom-ident>+`),
-                    # CSS-wide/reserved keywords are never valid `<custom-ident>`s (except inside `local(default A)`),
-                    # and `<generic-family>` keywords are not valid inside `font-family`.
                     if any(w.lower() in GENERIC_FAMILY_KEYWORDS for w in idents):
                         return []
                     if not self.allow_css_wide_in_multiword_family and any(
@@ -893,7 +881,6 @@ class _TokenMatcher:
             if tok.kind == "string":
                 try:
                     s = serialize_font_format(tok.value, is_quoted_token=True, options=self.options)
-                    # Strip outer `format(` and `)`
                     return [(pos + 1, s[7:-1])]
                 except StixisValidationError:
                     return []
@@ -929,7 +916,6 @@ class _TokenMatcher:
     def _match_font_src(self, pos: int, *, is_list: bool) -> list[tuple[int, str]]:
         if not is_list:
             return self._match_single_font_src_tokens(pos)
-        # Comma-separated list of `<font-src>`
         mult = MultiplierNode(PrimitiveNode("<font-src>"), 1, None, comma_separated=True)
         return self._match_multiplier(mult, pos, None, None)
 
@@ -966,7 +952,6 @@ class _TokenMatcher:
             cur = after_url
             parts = [url_str]
 
-            # Optional `format(<font-format>)`
             if (
                 cur < len(self.tokens)
                 and self.tokens[cur].kind == "function"
@@ -985,7 +970,6 @@ class _TokenMatcher:
                 parts.append(f"format({fmt_m[0][1]})")
                 cur = after_fmt
 
-            # Optional `tech(<font-tech>#)`
             if (
                 cur < len(self.tokens)
                 and self.tokens[cur].kind == "function"
@@ -1134,9 +1118,6 @@ def _node_matches_single_value(
         return res if res else None
 
     if isinstance(node, ExclusiveOrNode):
-        # If `value` is a plain `str` (and not `Keyword`/`GenericFamily`) and one of the branches
-        # is `<string>` or `<family-name>` / `<font-family-name>`, check whether it matches a keyword first
-        # ONLY when neither `<family-name>` nor `<font-family-name>` is a branch!
         has_family_branch = any(
             isinstance(b, PrimitiveNode)
             and b.kind in ("<family-name>", "<font-family-name>")
@@ -1181,7 +1162,6 @@ def _node_matches_single_value(
         return None
 
     if isinstance(node, MultiplierNode):
-        # A single item is valid if min_count <= 1
         if node.min_count <= 1:
             single = _node_matches_single_value(
                 node.child,
@@ -1257,7 +1237,6 @@ def _node_matches_single_value(
             return None
 
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
-            # Try matching sequence items via positional matching, nullable single-child, or token stream
             if len(value) == len(node.items):
                 parts: list[str] = []
                 ok = True
@@ -1332,7 +1311,6 @@ def _node_matches_single_value(
                 node, value, specs_lookup, options, forbidden_custom_idents
             )
         if not require_all:
-            # Single item matching one branch of `A || B`
             for branch in node.items:
                 r = _node_matches_single_value(
                     branch,
@@ -1373,7 +1351,6 @@ def _match_unordered_python_items(
     if require_all and len(values) < len(required_indices):
         return None
 
-    # Find assignment of `values` to distinct branch indices `0..k-1`
     matched: dict[int, str] = {}
 
     def backtrack(v_idx: int) -> bool:
@@ -1704,7 +1681,6 @@ def evaluate_canonicalize(
     if not css_text.strip() and not is_custom_prop:
         raise StixisValidationError(target, syntax, css_text)
 
-    # Dedicated microsyntax fast-paths for exact WPT conformance
     if target == "unicode-range":
         return format_urange(css_text, options=options)
     if target in ("<urange>", "<unicode-range-token>"):
@@ -1774,7 +1750,6 @@ def evaluate_canonicalize(
         and non_ws[0].kind == "ident"
         and non_ws[0].value.lower() in RESERVED_CUSTOM_IDENT_KEYWORDS
     ):
-        # CSS-wide and reserved keywords (`initial`, `inherit`, `unset`, `revert`, `default`) are NOT valid on @font-face descriptors
         raise StixisValidationError(target, syntax, css_text)
 
     try:
@@ -1820,7 +1795,6 @@ def evaluate_serialize_value(
         if raw_kw.strip().lower() in CSS_WIDE_KEYWORDS:
             return raw_kw.strip().lower()
 
-    # Dedicated microsyntax handlers for structured Python inputs
     if target == "unicode-range":
         return format_urange(value, options=options)
     if target in ("<urange>", "<unicode-range-token>"):
@@ -1972,7 +1946,6 @@ def evaluate_serialize_value(
     if is_font_face and target in ("superscript-position-override", "subscript-position-override"):
         return serialize_metric_override(value, allow_from_font=True, min_val=None, target=target)
 
-    # General ValueNode evaluation
     forbidden_idents = _collect_grammar_keywords(node, specs_lookup)
     try:
         direct = _node_matches_single_value(node, value, specs_lookup, options, forbidden_idents)
@@ -1983,8 +1956,6 @@ def evaluate_serialize_value(
     if direct is not None:
         return direct
 
-    # Fallback: if `value` is a CSS string expression (e.g. `"10px 20px"` or `"calc(100% - 20px)"`),
-    # canonicalize it through the token matcher!
     if isinstance(value, str):
         return evaluate_canonicalize(
             target,

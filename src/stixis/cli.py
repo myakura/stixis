@@ -136,7 +136,6 @@ def _inspect_target(raw_target: str, *, at_rule: str | None = None) -> dict[str,
         }
 
     if norm_name.startswith("<") and norm_name.endswith(">"):
-        # If bare identifier matched both a descriptor-only name and a `<type>`, check if `target` was bare
         if not target.startswith("<") and norm_name[1:-1] not in PROPERTY_SYNTAXES:
             desc_info = _lookup_bare_descriptor(norm_name[1:-1])
             if desc_info is not None:
@@ -217,7 +216,6 @@ def _run_check(args: argparse.Namespace) -> int:
     target: str = args.target
     at_rule: str | None = args.at_rule
 
-    # Resolve target existence first so unknown targets return EXIT_NOT_FOUND (4)
     stripped = target.strip()
     if not stripped:
         ctx = f" (in {at_rule})" if at_rule else ""

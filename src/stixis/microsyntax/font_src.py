@@ -93,9 +93,6 @@ def serialize_font_format(
 
     lower = raw.lower()
     if is_quoted:
-        # In CSS Fonts 4, <font-format> = [ <string> | collection | ... ]
-        # Any non-empty <string> is syntactically valid in format("..."),
-        # though standard format keywords are serialized according to options.
         return f"format({serialize_string(raw, options=options)})"
 
     if lower not in FONT_FORMAT_KEYWORDS:

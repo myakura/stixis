@@ -16,17 +16,14 @@ def test_upstream_checker_detects_unresolved_refs_and_formats_agent_issue() -> N
     from stixis._generated.specs import PROPERTY_SYNTAXES, VALUE_SYNTAXES
     from stixis._grammar.vds import compile_value_syntax
 
-    # 1. Resolved syntax produces no unresolved references
     node_ok = compile_value_syntax("normal | <length-percentage>")
     assert check_upstream.find_unresolved_refs(node_ok, PROPERTY_SYNTAXES, VALUE_SYNTAXES) == []
 
-    # 2. Newly introduced upstream non-terminal is flagged for spec_patches.toml
     node_missing = compile_value_syntax("auto | <future-css-type>")
     assert check_upstream.find_unresolved_refs(node_missing, PROPERTY_SYNTAXES, VALUE_SYNTAXES) == [
         "<future-css-type>"
     ]
 
-    # 3. Markdown Issue renderer emits structured agent instructions and unresolved references
     report = check_upstream.UpstreamReport(
         webref_old_commit="1111111111111111111111111111111111111111",
         webref_new_commit="2222222222222222222222222222222222222222",
@@ -137,7 +134,6 @@ def test_upstream_markdown_issue_truncates_large_reports_below_github_limit() ->
     assert len(full_json["wpt_failures"]) == 120
     assert full_json["syntax_changes"][0]["old_syntax"] == long_syntax
 
-    # Non-numeric run_id is ignored so arbitrary text cannot be injected into the artifact line
     md_bad_run = check_upstream.format_markdown_issue(report, run_id="123; rm -rf /")
     assert "artifact:" not in md_bad_run
 
@@ -147,9 +143,6 @@ def test_upstream_checker_captures_failing_wpt_vectors_without_crashing(tmp_path
     sys.path.insert(0, str(repo_root / "codegen"))
     import check_upstream
 
-    # Set up a minimal synthetic WPT directory with:
-    # 1. A css-fonts test with candidate array `[...]` on an unsupported/invalid value
-    # 2. A non-font WPT property test where `width` has a failing expected value `"2px"` for `"1px"`
     wpt_css = tmp_path / "css"
     (wpt_css / "css-syntax").mkdir(parents=True)
     (wpt_css / "css-syntax" / "urange-parsing.html").write_text(
@@ -294,7 +287,6 @@ def test_gen_wpt_tests_preserves_partial_files_math_var_and_tracks_xfails_and_sk
     assert suite.skipped_counts["disabled_min_engines"] == 1
     assert suite.skipped_counts["unknown_property"] == 1
 
-    # Generated property test modules expose xfail and skipped tables and include calc/var cases
     assert any(
         "calc(" in raw or "var(" in raw
         for _, raw, _ in test_wpt_css_properties.VALID_PROPERTY_CASES
@@ -347,7 +339,6 @@ def test_check_upstream_shares_wpt_extraction_and_expected_files_with_gen_wpt_te
         "extract_all_wpt_suites",
         lambda _wpt_dir, *, min_engines=2: fake_suites,
     )
-    # Matching current files on disk when build_expected_wpt_test_files returns only __init__.py
     init_path = gen_wpt_tests.OUT_DIR / "__init__.py"
     monkeypatch.setattr(
         gen_wpt_tests,
@@ -417,13 +408,11 @@ def test_gen_specs_and_gen_wpt_tests_prefer_upstream_snapshot_and_honor_explicit
     assert gen_specs.resolve_default_webref_dir(patches, explicit_patches=True) == fake_meta_webref
     assert gen_specs.resolve_default_bcd_dir(patches, explicit_patches=True) == fake_meta_bcd
 
-    # When `.upstream/` is absent, default resolution falls back to `[meta]`
     monkeypatch.setattr(gen_specs, "UPSTREAM_WEBREF_CSS_DIR", tmp_path / "no_upstream_webref")
     monkeypatch.setattr(gen_specs, "UPSTREAM_BCD_CSS_DIR", tmp_path / "no_upstream_bcd")
     assert gen_specs.resolve_default_webref_dir(patches, explicit_patches=False) == fake_meta_webref
     assert gen_specs.resolve_default_bcd_dir(patches, explicit_patches=False) == fake_meta_bcd
 
-    # Explicit `--patches` still fails with exit 4 when `[meta]` directories are missing, even if `.upstream/` exists
     monkeypatch.setattr(gen_specs, "UPSTREAM_WEBREF_CSS_DIR", fake_upstream_webref)
     monkeypatch.setattr(gen_specs, "UPSTREAM_BCD_CSS_DIR", fake_upstream_bcd)
     missing_patches = tmp_path / "missing_webref_patches.toml"
@@ -436,7 +425,6 @@ def test_gen_specs_and_gen_wpt_tests_prefer_upstream_snapshot_and_honor_explicit
     assert rc_missing_webref == 4
     assert "missing webref_css_dir" in captured.err
 
-    # `gen_wpt_tests` prefers `.upstream/wpt/css` when present and falls back when absent
     fake_upstream_wpt = tmp_path / "upstream_wpt"
     fake_upstream_wpt.mkdir()
     fake_fallback_wpt = tmp_path / "fallback_wpt"

@@ -17,7 +17,6 @@ from stixis._syntax.tokenizer import CssToken
 from stixis.errors import StixisValidationError
 from stixis.options import DEFAULT_OPTIONS, SerializationOptions
 
-# CSS-wide keywords + CSS Variables / substitution functions that are valid on any property
 GLOBAL_SUBSTITUTION_FUNCTIONS: frozenset[str] = frozenset(
     {"var", "env", "attr", "first-valid", "inherit"}
 )
@@ -124,7 +123,7 @@ def _split_top_level_comma_args(tokens: Sequence[CssToken]) -> list[list[CssToke
 @dataclass(frozen=True, slots=True)
 class _CalcNumeric:
     value: float
-    unit: str = ""  # "" for number, "%" for percentage, canonical unit for dimension
+    unit: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,7 +183,6 @@ def _is_lossless_css_number(val: float) -> bool:
 
 
 def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
-    # Step 1-2: flatten nested _CalcProduct nodes
     flat: list[_CalcNode] = []
     for f in factors:
         if isinstance(f, _CalcProduct):
@@ -192,7 +190,6 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
         else:
             flat.append(f)
 
-    # Fold pure numbers and Invert(number) when finite, non-zero, and lossless in 6-decimal CSSOM serialization.
     num_factors: list[_CalcNumeric] = []
     inv_num_factors: list[_CalcInvert] = []
     remaining: list[_CalcNode] = []
@@ -235,7 +232,6 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
             return num_factors[0]
         return inv_num_factors[0]
 
-    # Single percentage or dimension with scalar factors/divisors: try multiplying directly into the dimension
     if len(remaining) == 1 and isinstance(remaining[0], _CalcNumeric):
         dim_node = remaining[0]
         if combined_ok:
@@ -272,8 +268,6 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
     if not remaining:
         return _CalcNumeric(num_acc, "")
 
-    # If remaining contains a single percentage or dimension and has_num is True,
-    # multiply num_acc into that percentage/dimension and move it to the front!
     dim_indices = [
         idx
         for idx, item in enumerate(remaining)
@@ -310,7 +304,6 @@ def _simplify_calc_product(factors: Sequence[_CalcNode]) -> _CalcNode:
 
 
 def _simplify_calc_sum(terms: Sequence[_CalcNode]) -> _CalcNode:
-    # Flatten nested _CalcSum nodes
     flat: list[_CalcNode] = []
     for t in terms:
         if isinstance(t, _CalcSum):
@@ -318,8 +311,6 @@ def _simplify_calc_sum(terms: Sequence[_CalcNode]) -> _CalcNode:
         else:
             flat.append(t)
 
-    # Combine identical numeric units ("" for number, "%" for percentage, canonical unit for dimension)
-    # when the combined sum can be serialized without loss of precision under 6-decimal CSSOM rules.
     unit_terms: dict[str, list[_CalcNumeric]] = {}
     unit_order: list[str] = []
     other_terms: list[_CalcNode] = []
@@ -333,8 +324,6 @@ def _simplify_calc_sum(terms: Sequence[_CalcNode]) -> _CalcNode:
         else:
             other_terms.append(t)
 
-    # Sort numeric terms per CSS Values 4 §10.10: number ("") first, percentage ("%") second,
-    # dimensions ordered alphabetically by canonical ASCII-lowercase unit
     ordered_units: list[str] = []
     if "" in unit_terms:
         ordered_units.append("")

@@ -69,7 +69,6 @@ def test_shared_type_target_resolution_between_library_and_cli(
 ) -> None:
     from stixis._grammar.targets import resolve_target_syntax
 
-    # 1. Built-in evaluator-supported `<type>` targets work in both library and CLI (angled and bare)
     for type_target, raw_val, expected in (
         ("<custom-ident>", "foo", "foo"),
         ("custom-ident", "foo", "foo"),
@@ -107,8 +106,6 @@ def test_shared_type_target_resolution_between_library_and_cli(
         serialize_value("<signless-integer>", -1)
     assert serialize_value("<hex-color>", "#00ff00") == "#00ff00"
 
-    # 2. Unknown `<type>` targets, unimplemented token placeholders, and multi-term `<...>` expressions
-    #    raise StixisValidationError("Unknown CSS target: ...") at target resolution in Python and exit 4 on CLI
     for unknown_target in (
         "<not-a-type>",
         "<lenght>",
@@ -138,8 +135,6 @@ def test_shared_type_target_resolution_between_library_and_cli(
 def test_security_and_descriptor_resolution_regressions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # 1. Custom property names with injection characters (`--x: red; color`) must be rejected eagerly,
-    #    while escaped CSS identifiers (`r"--foo\+bar"`) are preserved and serialized safely.
     with pytest.raises(StixisValidationError):
         StyleRule("body", {"--x: red; color": "blue"})
     with pytest.raises(StixisValidationError):
@@ -151,8 +146,6 @@ def test_security_and_descriptor_resolution_regressions(
     assert "--MyVar: red;" in str(escaped_custom)
     assert "color: green;" in str(escaped_custom)
 
-    # 2. At-rule names with comment or non-ident characters (`media/*`) must be rejected eagerly,
-    #    while valid double-hyphen at-rule names (`--custom`) are accepted.
     with pytest.raises(StixisValidationError):
         AtRule("media/*", "screen")
     with pytest.raises(StixisValidationError):
@@ -160,7 +153,6 @@ def test_security_and_descriptor_resolution_regressions(
     custom_at = AtRule("--custom", "screen")
     assert str(custom_at) == "@--custom screen {}"
 
-    # 3. Nested rules preserve overridden SerializationOptions across `dumps` / `format`
     nested = AtRule(
         "@media", "screen", rules=[FontFace(font_family="Inter", src=Url("inter.woff2"))]
     )
@@ -177,7 +169,6 @@ def test_security_and_descriptor_resolution_regressions(
         nested_style, options=SerializationOptions.cleome()
     )
 
-    # 4. Slash-qualified targets (`@font-face/font-style`, `@font-face/font-family`) preserve `@font-face` descriptor context
     assert (
         serialize_value("@font-face/font-style", ("oblique", Deg(-10), Deg(20)))
         == "oblique -10deg 20deg"
@@ -186,7 +177,6 @@ def test_security_and_descriptor_resolution_regressions(
     with pytest.raises(StixisValidationError):
         serialize_value("@font-face/font-family", ["Inter", "Roboto"])
 
-    # 5. CLI check with slash-qualified descriptor and empty/whitespace target
     rc = cli_main(["check", "@font-face/font-weight", "100 900"])
     captured = capsys.readouterr()
     assert rc == EXIT_OK
@@ -206,13 +196,11 @@ def test_security_and_descriptor_resolution_regressions(
 def test_engine_support_threshold_toggle_and_extra_properties(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    # 1. `hanging-punctuation` (1 engine: WebKit) is rejected by default (`min_engines=2`)
     with pytest.raises(StixisValidationError, match="min_engines=2"):
         StyleRule("p", {"hanging_punctuation": "first"})
     with pytest.raises(StixisValidationError, match="min_engines=2"):
         canonicalize("hanging-punctuation", "first")
 
-    # 2. Enabling 1-engine support (`min_engines=1`) or `SerializationOptions.cleome(min_engines=1)` allows it
     rule_1eng = StyleRule(
         "p",
         {"hanging_punctuation": "first"},
@@ -228,7 +216,6 @@ def test_engine_support_threshold_toggle_and_extra_properties(
         == "first"
     )
 
-    # 3. Pinpoint opt-in via `extra_properties` keeps `min_engines=2` for everything else
     opts_pinpoint = SerializationOptions(
         min_engines=2,
         extra_properties=frozenset({"hanging-punctuation"}),
@@ -237,7 +224,6 @@ def test_engine_support_threshold_toggle_and_extra_properties(
     with pytest.raises(StixisValidationError, match="min_engines=2"):
         serialize_value("block-step-size", "none", options=opts_pinpoint)
 
-    # 4. CLI `--min-engines` flag toggles 1-engine property validation
     rc_default = cli_main(["check", "hanging-punctuation", "first"])
     captured = capsys.readouterr()
     assert rc_default == EXIT_VALIDATION_ERROR
@@ -258,7 +244,6 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     import gen_specs
     import gen_wpt_tests
 
-    # 1. `_is_shipping_unprefixed_statement` rejects preview, removed, prefixed, and flagged entries
     assert gen_specs._is_shipping_unprefixed_statement({"version_added": "120"})
     assert not gen_specs._is_shipping_unprefixed_statement({"version_added": "preview"})
     assert not gen_specs._is_shipping_unprefixed_statement(
@@ -274,7 +259,6 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
         {"version_added": "1", "flags": [{"name": "flag"}]}
     )
 
-    # 2. `_render_property_test_file` threads `min_engines=1` into `SerializationOptions.cssom(min_engines=1)`
     rendered_1 = gen_wpt_tests._render_property_test_file(
         "Docstring.",
         [("hanging-punctuation", "first", "first")],
@@ -284,7 +268,6 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     )
     assert "SerializationOptions.cssom(min_engines=1)" in rendered_1
 
-    # 3. `analyze_upstream` detects when a BCD property crosses `min_engines`
     bcd_css = tmp_path / "bcd_css"
     (bcd_css / "properties").mkdir(parents=True)
     (bcd_css / "properties" / "hanging-punctuation.json").write_text(
@@ -325,7 +308,6 @@ def test_bcd_shipping_unprefixed_filter_and_support_promotion(tmp_path: Path) ->
     assert report.has_changes
     assert any("`hanging-punctuation`: 1 -> 2 engines" in s for s in report.support_changes)
 
-    # 4. `extract_css_fonts_property_suite` filters by `min_engines` (e.g. `min_engines=3` excludes 2-engine `font-language-override`)
     fonts_suite_3 = gen_wpt_tests.extract_css_fonts_property_suite(
         gen_wpt_tests.DEFAULT_WPT_CSS_DIR, min_engines=3
     )
@@ -384,8 +366,6 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
     from stixis._grammar.targets import lookup_value_node
     from stixis._grammar.vds import compile_value_syntax
 
-    # 1. Singular `<urange>` and `<unicode-range-token>` reject comma lists and multi-item containers,
-    #    while `@font-face/unicode-range` continues to accept `<urange>#` (`css-syntax-3` §8.1).
     assert canonicalize("<urange>", "u+0041") == "U+41"
     assert canonicalize("<unicode-range-token>", "u+3040-309f") == "U+3040-309F"
     assert serialize_value("<urange>", 0x41) == "U+41"
@@ -406,7 +386,6 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
             canonicalize("<urange>", bad_singular)
         with pytest.raises(StixisValidationError):
             canonicalize("<unicode-range-token>", bad_singular)
-    # CSS Syntax Level 3 §8.1: `<urange>` matches token representations (`raw`), so backslash escapes are invalid
     for escaped_urange in (r"U+\61", r"\75+41", r"u+0\61", r"u+4\31", r"u+0041-\62"):
         with pytest.raises(StixisValidationError):
             canonicalize("unicode-range", escaped_urange, at_rule="@font-face")
@@ -414,7 +393,6 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
         with pytest.raises(StixisValidationError):
             serialize_value("<urange>", bad_py_singular)
 
-    # 2. `_TokenMatcher._match_primitive` matches `<urange>` at non-zero token offsets and inside functions.
     seq_syn = "range <urange> <integer>"
     seq_node = compile_value_syntax(seq_syn)
     assert (
@@ -450,14 +428,11 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
         == "fn(U+A0-AF, U+3040-309F)"
     )
 
-    # 3. `box-shadow` (`css-backgrounds-3`: `none | <shadow>#`) rejects `none` inside shadow lists.
     assert canonicalize("box-shadow", "none") == "none"
     assert canonicalize("box-shadow", "0 2px 4px black") == "black 0px 2px 4px"
     with pytest.raises(StixisValidationError):
         canonicalize("box-shadow", "none, 0 2px 4px black")
 
-    # 4. `<position>` uses shipped CSS Values 4 1/2/4-value syntax (`w3c/csswg-drafts#2140`; WPT
-    #    `object-position-invalid.html`), while `<bg-position>` / `background-position` accepts 3-value syntax.
     assert canonicalize("<position>", "left 10px top 20px") == "left 10px top 20px"
     for bad_pos in ("left 10px center", "block-start 10px inline-end 20px"):
         with pytest.raises(StixisValidationError):
@@ -465,7 +440,6 @@ def test_singular_urange_and_baseline_grammar_patches() -> None:
     assert canonicalize("<bg-position>", "left 10px center") == "left 10px center"
     assert canonicalize("background-position", "left 10px center") == "left 10px center"
 
-    # 5. `white-space` and `vertical-align` preserve shipped multi-engine grammars over unshipped drafts.
     assert canonicalize("white-space", "nowrap") == "nowrap"
     assert canonicalize("white-space", "preserve nowrap") == "preserve nowrap"
     for unshipped_ws in ("none", "discard-before", "discard", "preserve-spaces"):

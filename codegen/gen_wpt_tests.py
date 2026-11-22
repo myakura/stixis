@@ -185,7 +185,6 @@ def extract_font_face_descriptor_suite(
     invalid: list[tuple[str, str]] = []
     xfail_valid: list[tuple[str, str, str]] = []
 
-    # 1. font-face-metric-overrides.html
     mo_text = (parsing_dir / "font-face-metric-overrides.html").read_text(encoding="utf-8")
     for m in re.finditer(
         r'\{\s*value:\s*"([^"]+)"\s*,\s*valid:\s*(true|false)(?:\s*,\s*expected:\s*"([^"]+)")?\s*\}',
@@ -198,7 +197,6 @@ def extract_font_face_descriptor_suite(
             else:
                 invalid.append((desc, val))
 
-    # 2. font-face-size-adjust.html
     sa_text = (parsing_dir / "font-face-size-adjust.html").read_text(encoding="utf-8")
     for m in re.finditer(r"\{\s*sizeAdjust:\s*'([^']+)'\s*,\s*valid:\s*(true|false)\s*\}", sa_text):
         val, is_val = m.group(1), m.group(2) == "true"
@@ -207,7 +205,6 @@ def extract_font_face_descriptor_suite(
         else:
             invalid.append(("size-adjust", val))
 
-    # 3. font-face-width.html
     fw_text = (parsing_dir / "font-face-width.html").read_text(encoding="utf-8")
     v_block = re.search(r"const validValues = \[(.*?)\];", fw_text, re.DOTALL)
     i_block = re.search(r"const invalidValues = \[(.*?)\];", fw_text, re.DOTALL)
@@ -220,7 +217,6 @@ def extract_font_face_descriptor_suite(
             for desc in ("font-width", "font-stretch"):
                 invalid.append((desc, val))
 
-    # 4. font-face-src-local.html, font-face-src-format.html, font-face-src-tech.html
     for fname in (
         "font-face-src-local.html",
         "font-face-src-format.html",
@@ -232,8 +228,6 @@ def extract_font_face_descriptor_suite(
             src_text,
         ):
             val, is_val = m.group(1), m.group(2) == "true"
-            # Multi-item fallback recovery tests where one item is intentionally invalid
-            # (`format(xyzz)`, `dummy()`, `format()`, `format(none)`, `format(dummy)`, `tech(color)`)
             if is_val and (
                 "xyzz" in val
                 or "dummy" in val

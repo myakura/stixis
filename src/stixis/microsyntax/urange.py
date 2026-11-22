@@ -29,7 +29,6 @@ def _parse_urange_body(
         raise StixisValidationError(target, syntax, raw_item)
 
     if "-" in body:
-        # Range syntax: U+start-end (no '?' allowed)
         parts = body.split("-")
         if len(parts) != 2:
             raise StixisValidationError(target, syntax, raw_item)
@@ -326,7 +325,6 @@ def parse_urange(value: Any, *, coalesce: bool = False) -> list[tuple[int, int]]
         if all_plain_ints:
             return _coalesce_codepoint_set(int_cps)
         if coalesce:
-            # Merge overlapping/adjacent intervals when coalesce=True on mixed sequences
             return _merge_intervals(out)
         return out
 
@@ -398,7 +396,6 @@ def compact_urange(
             cur_end = cp
             continue
         if gap <= max_gap:
-            # Check via binary search whether any forbidden code point lies strictly in (cur_end, cp)
             idx = bisect.bisect_right(forbidden, cur_end)
             if idx >= len(forbidden) or forbidden[idx] >= cp:
                 cur_end = cp
